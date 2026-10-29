@@ -386,11 +386,22 @@ async function downloadRemoteMedia(remoteUrl, localDestPath) {
 
 // 统一 AI 实体视频生成器 (支持 OpenRouter、各类多模态代理网关、SiliconFlow、Runway 等任意模型 Slug)
 async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openrouter.ai/api/v1', videoModel = 'tencent/hunyuan-video' }, prompt) {
-  if (!apiKey) throw new Error('未配置 API Key，请先在右上角【AI 画面/视频模型指定】中填入您的 OpenRouter / 网关 API Key 并保存');
+  if (!apiKey) throw new Error('未配置 API Key，请先在右上角【🎬 AI 画面/视频模型指定】中填入您的 API Key 并保存');
   const base = baseUrl.trim().replace(/\/+$/, '');
   const model = videoModel.trim();
 
   console.log(`[Video Generator] 正在通过 ${base} 调用模型 ${model} 生成实体视频...`);
+
+  // 0. 明确阻断与引导：OpenRouter 官方平台不支持视频生成
+  if (base.includes('openrouter.ai')) {
+    throw new Error(
+      `OpenRouter 官方平台 (openrouter.ai) 仅提供文本与多模态对话大模型（如 DeepSeek, Claude, GPT-4o），官方未提供 Text-to-Video 实体视频生成接口与 ${model} 视频模型。\n` +
+      `💡 解决方案：\n` +
+      `1. 若您购买的是第三方中转/聚合网关 Key：请将 Base URL 修改为您中转站的专用地址（例如 https://api.your-relay.com/v1），不要填官方 openrouter.ai；\n` +
+      `2. 若需生成真实动态视频：请切换 Base URL 为支持实体视频的网关（如 SiliconFlow 硅基流动: https://api.siliconflow.cn/v1，支持混元/CogVideoX；或 MiniMax 官方: https://api.minimax.chat/v1）；\n` +
+      `3. 若继续使用 OpenRouter：请在当前行选择【📊 动效卡片】，OpenRouter 将为您深度提炼分镜文案，并由 Remotion 渲染出 1080p 纯净大字报动效！`
+    );
+  }
 
   // 1. 如果是原生 SiliconFlow 网关
   if (base.includes('siliconflow')) {
@@ -416,7 +427,42 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
     throw new Error('SiliconFlow 视频生成超时');
   }
 
-  // 2. 如果是原生 Runway 网关
+  // 2. 如果是 MiniMax 官方网关
+  if (base.includes('minimax')) {
+    const submitResp = await fetch(`${base}/video_generation`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey.trim()}` },
+      body: JSON.stringify({ model: model === 'minimax/video-01' ? 'video-01' : model, prompt: prompt })
+    });
+    if (!submitResp.ok) throw new Error(`MiniMax 视频提交失败 (${submitResp.status}): ${(await submitResp.text()).slice(0, 200)}`);
+    const { task_id } = await submitResp.json();
+    if (!task_id) throw new Error('MiniMax 未返回 task_id');
+    for (let i = 0; i < 40; i++) {
+      await new Promise((r) => setTimeout(r, 3000));
+      const qResp = await fetch(`${base}/query/video_generation?task_id=${task_id}`, {
+        headers: { 'Authorization': `Bearer ${apiKey.trim()}` }
+      });
+      if (!qResp.ok) continue;
+      const qData = await qResp.json();
+      const st = (qData.status || '').toLowerCase();
+      if (st === 'success' || st === 'succeeded' || qData.file_id) {
+        if (qData.file_id) {
+          const dlResp = await fetch(`${base}/files/retrieve?file_id=${qData.file_id}`, {
+            headers: { 'Authorization': `Bearer ${apiKey.trim()}` }
+          });
+          if (dlResp.ok) {
+            const dlData = await dlResp.json();
+            if (dlData.file?.download_url) return dlData.file.download_url;
+          }
+        }
+        if (qData.download_url) return qData.download_url;
+      }
+      if (st === 'failed' || st === 'error') throw new Error(`MiniMax 视频生成失败: ${qData.error_message || '未知错误'}`);
+    }
+    throw new Error('MiniMax 视频生成超时');
+  }
+
+  // 3. 如果是原生 Runway 网关
   if (base.includes('runwayml')) {
     const submitResp = await fetch(`${base}/tasks`, {
       method: 'POST',
@@ -436,15 +482,17 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
     throw new Error('Runway 视频生成超时');
   }
 
-  // 3. 通用 OpenRouter / OpenAI 兼容网关：依次尝试 /video/generations, /videos/generations, /tasks, /chat/completions
+  // 4. 通用 OpenAI 兼容 / 第三方中转聚合网关：依次尝试端点
   const candidateEndpoints = [
     `${base}/video/generations`,
     `${base}/videos/generations`,
+    `${base}/video_generation`,
     `${base}/video/submit`,
     `${base}/tasks`
   ];
 
   let submitResp = null;
+  let lastErrorDetail = '';
   for (const ep of candidateEndpoints) {
     try {
       const resp = await fetch(ep, {
@@ -469,10 +517,12 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
         submitResp = resp;
         break;
       }
-    } catch (e) {}
+    } catch (e) {
+      lastErrorDetail = e.message;
+    }
   }
 
-  // 若标准端点返回 404 或未响应，尝试 /chat/completions (针对通过 Chat 路由视频模型的代理)
+  // 若标准端点未命中，尝试 /chat/completions (针对通过 Chat 路由视频模型的第三方代理)
   if (!submitResp || submitResp.status === 404) {
     try {
       const chatResp = await fetch(`${base}/chat/completions`, {
@@ -495,12 +545,16 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
         if (m) return m[0];
         if (cData.url) return cData.url;
         if (cData.data?.[0]?.url) return cData.data[0].url;
+      } else {
+        lastErrorDetail = `HTTP ${chatResp.status}: ${(await chatResp.text()).slice(0, 160)}`;
       }
-    } catch (e) {}
+    } catch (e) {
+      lastErrorDetail = e.message;
+    }
   }
 
   if (!submitResp || !submitResp.ok) {
-    const errText = submitResp ? await submitResp.text() : '未能连接到视频生成端点';
+    const errText = submitResp ? await submitResp.text() : (lastErrorDetail || '未能连接到任何有效的视频生成端点 (/video/generations, /video_generation, /video/submit)');
     throw new Error(`视频模型 ${model} 生成请求未通过 (HTTP ${submitResp ? submitResp.status : 500}): ${errText.slice(0, 260)}`);
   }
 
@@ -1731,12 +1785,23 @@ function renderMainHtml() {
               <label class="text-[11px] font-bold text-gray-300">
                 🌐 API 基础网关地址 (Base URL)：
               </label>
-              <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://openrouter.ai/api/v1'" class="text-[10px] text-purple-400 hover:underline">
-                恢复默认 (openrouter.ai)
-              </button>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://openrouter.ai/api/v1'" class="text-[10px] text-purple-400 hover:underline">
+                  OpenRouter 官方
+                </button>
+                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://api.siliconflow.cn/v1'; document.getElementById('currentVideoModelInput').value = 'tencent/HunyuanVideo';" class="text-[10px] text-emerald-400 hover:underline">
+                  硅基流动 (实体视频)
+                </button>
+                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://api.minimax.chat/v1'; document.getElementById('currentVideoModelInput').value = 'video-01';" class="text-[10px] text-amber-400 hover:underline">
+                  MiniMax 官方
+                </button>
+              </div>
             </div>
-            <input type="text" id="currentBaseUrlInput" value="https://openrouter.ai/api/v1" placeholder="API 基础网关地址..."
+            <input type="text" id="currentBaseUrlInput" value="https://openrouter.ai/api/v1" placeholder="API 基础网关地址 (例如: https://openrouter.ai/api/v1 或第三方中转站)..."
               class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
+            <p class="text-[10px] text-gray-400 mt-1">
+              💡 <b>注意</b>：OpenRouter 官方仅提供文本/对话模型。生成真实 MP4 实体视频需使用提供文生视频的网关（如硅基流动、MiniMax 或支持该模型的第三方中转站）。
+            </p>
           </div>
 
           <!-- 测试连接按钮 -->
