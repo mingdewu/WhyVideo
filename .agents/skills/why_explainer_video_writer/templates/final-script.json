@@ -1,0 +1,150 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WhyExplainerFinalScript",
+  "description": "全文编辑统稿与事实风险审核后的最终视频脚本结构",
+  "type": "object",
+  "required": [
+    "project_id",
+    "title",
+    "total_word_count",
+    "estimated_duration_minutes",
+    "revision_count",
+    "editorial_changes_log",
+    "script_segments",
+    "fact_risk_report"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "total_word_count": {
+      "type": "integer"
+    },
+    "estimated_duration_minutes": {
+      "type": "number"
+    },
+    "revision_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2,
+      "description": "全文编辑修订次数（最多2次，超出则需输出需要人工决策）"
+    },
+    "editorial_changes_log": {
+      "type": "object",
+      "required": [
+        "removed_duplicate_arguments",
+        "removed_duplicate_examples",
+        "unified_terms_and_names",
+        "removed_false_endings_count"
+      ],
+      "properties": {
+        "removed_duplicate_arguments": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "已删除的跨章节重复论点记录"
+        },
+        "removed_duplicate_examples": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "已删除或合并的重复例子/对比记录"
+        },
+        "unified_terms_and_names": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "已统一的术语、人名、地名与年代写法说明"
+        },
+        "removed_false_endings_count": {
+          "type": "integer",
+          "description": "识别并删除的章节末尾伪结尾数量"
+        }
+      }
+    },
+    "script_segments": {
+      "type": "object",
+      "required": ["opening", "chapters", "single_final_ending"],
+      "properties": {
+        "opening": {
+          "type": "string",
+          "description": "开篇提问与简短核心答案旁白"
+        },
+        "chapters": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 7,
+          "items": {
+            "type": "object",
+            "required": ["chapter_number", "chapter_title", "narration_text", "evidence_ids"],
+            "properties": {
+              "chapter_number": { "type": "integer" },
+              "chapter_title": { "type": "string" },
+              "narration_text": { "type": "string" },
+              "evidence_ids": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "single_final_ending": {
+          "type": "string",
+          "description": "全片唯一的正式结尾（回扣标题，不包含任何新事实）"
+        }
+      }
+    },
+    "fact_risk_report": {
+      "type": "object",
+      "required": [
+        "unverified_claims_needing_human_check",
+        "absolute_expressions_flagged",
+        "legend_vs_fact_boundary_issues",
+        "origin_terminology_distinction_checks",
+        "requires_human_decision"
+      ],
+      "properties": {
+        "unverified_claims_needing_human_check": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["location", "sentence", "reason"],
+            "properties": {
+              "location": { "type": "string" },
+              "sentence": { "type": "string" },
+              "reason": { "type": "string" }
+            }
+          },
+          "description": "缺乏 evidence_id 支撑、需要人工核查的具体句子列表"
+        },
+        "absolute_expressions_flagged": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["location", "original_phrase", "suggested_safe_replacement"],
+            "properties": {
+              "location": { "type": "string" },
+              "original_phrase": { "type": "string" },
+              "suggested_safe_replacement": { "type": "string" }
+            }
+          },
+          "description": "检测到的绝对化或夸张表达及替换建议"
+        },
+        "legend_vs_fact_boundary_issues": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "传说/轶事与已证实历史边界是否清晰的检查结果"
+        },
+        "origin_terminology_distinction_checks": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "最早出现/最早有记录/最早规模化生产/最为流行 四类表述的区分核查结果"
+        },
+        "requires_human_decision": {
+          "type": "boolean",
+          "description": "是否存在两次修订仍未解决的问题或重大事实争议需人工决策"
+        }
+      }
+    }
+  }
+}

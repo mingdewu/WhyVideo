@@ -1,0 +1,125 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WhyExplainerOutline",
+  "description": "5至7章结构化长视频大纲（写正文前必须经用户审核确认）",
+  "type": "object",
+  "required": [
+    "project_id",
+    "title",
+    "approval_status",
+    "opening_hook",
+    "chapters",
+    "single_ending_plan"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "approval_status": {
+      "type": "string",
+      "enum": ["pending_user_review", "approved", "revision_requested"],
+      "description": "人工审核状态。必须为 approved 方可进入单章写作阶段"
+    },
+    "opening_hook": {
+      "type": "object",
+      "required": ["opening_question", "immediate_short_answer", "supporting_evidence_ids", "estimated_words"],
+      "properties": {
+        "opening_question": {
+          "type": "string",
+          "description": "开头提出的具体生活反差或核心问题"
+        },
+        "immediate_short_answer": {
+          "type": "string",
+          "description": "开篇直接给出的简短核心答案（不卖关子拖延）"
+        },
+        "supporting_evidence_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "estimated_words": {
+          "type": "integer"
+        }
+      }
+    },
+    "chapters": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 7,
+      "description": "正文章节列表，严格限定 5 到 7 章，每章只回答一个子问题",
+      "items": {
+        "type": "object",
+        "required": [
+          "chapter_number",
+          "chapter_title",
+          "sub_question",
+          "mechanism_or_background_summary",
+          "planned_examples",
+          "supporting_evidence_ids",
+          "transition_to_next",
+          "estimated_words"
+        ],
+        "properties": {
+          "chapter_number": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7
+          },
+          "chapter_title": {
+            "type": "string"
+          },
+          "sub_question": {
+            "type": "string",
+            "description": "本章唯一要回答的子问题"
+          },
+          "mechanism_or_background_summary": {
+            "type": "string",
+            "description": "本章核心形成机制或历史背景概述"
+          },
+          "planned_examples": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "本章计划使用的具体例子或对比（防止跨章重复）"
+          },
+          "supporting_evidence_ids": {
+            "type": "array",
+            "items": { "type": "string" },
+            "minItems": 1,
+            "description": "支撑本章的证据卡 ID 列表"
+          },
+          "transition_to_next": {
+            "type": "string",
+            "description": "章末小结及引出下一章子问题的自然过渡逻辑"
+          },
+          "estimated_words": {
+            "type": "integer"
+          }
+        }
+      }
+    },
+    "single_ending_plan": {
+      "type": "object",
+      "required": ["callback_to_title", "core_takeaway", "no_new_facts_confirmed", "estimated_words"],
+      "properties": {
+        "callback_to_title": {
+          "type": "string",
+          "description": "如何回扣开篇标题问题"
+        },
+        "core_takeaway": {
+          "type": "string",
+          "description": "全片唯一正式结尾的核心收束观点"
+        },
+        "no_new_facts_confirmed": {
+          "type": "boolean",
+          "const": true,
+          "description": "确认不在结尾引入任何前文未出现的新事实"
+        },
+        "estimated_words": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

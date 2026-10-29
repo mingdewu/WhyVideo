@@ -1,0 +1,294 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WhyExplainerSceneManifestV2",
+  "description": "通用中文“为什么”知识型视频镜头清单 Schema (V2) — 主题无关，支持旅行文化、历史地理、饮食文化、社会议题、公共财政与大型赛事等任意主题",
+  "type": "object",
+  "required": [
+    "project_id",
+    "domain_category",
+    "title",
+    "audio_file",
+    "captions_file",
+    "total_duration_ms",
+    "total_duration_sec",
+    "total_scenes_count",
+    "needs_human_asset_count",
+    "human_review_required_count",
+    "scenes"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9_]+$",
+      "description": "项目目录标识符，对应 projects/<project_id>/"
+    },
+    "domain_category": {
+      "type": "string",
+      "enum": [
+        "travel_and_culture",
+        "history_and_geography",
+        "food_and_culinary",
+        "social_issues",
+        "public_finance_and_mega_events",
+        "science_and_technology",
+        "general_explainer"
+      ],
+      "description": "视频所属通用知识领域分类"
+    },
+    "title": {
+      "type": "string",
+      "description": "视频标题"
+    },
+    "audio_file": {
+      "type": "string",
+      "description": "相对于项目目录的音频文件路径，如 audio/narration.wav"
+    },
+    "captions_file": {
+      "type": "string",
+      "description": "相对于项目目录的字幕文件路径，如 captions/captions.srt"
+    },
+    "total_duration_ms": {
+      "type": "integer",
+      "minimum": 1000,
+      "description": "全片音频总时长（毫秒）"
+    },
+    "total_duration_sec": {
+      "type": "number",
+      "minimum": 1,
+      "description": "全片音频总时长（秒）"
+    },
+    "total_scenes_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "needs_human_asset_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "low_confidence_scene_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "human_review_required_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "scenes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "scene_id",
+          "start_ms",
+          "end_ms",
+          "narration_text",
+          "visual_purpose",
+          "visual_type",
+          "search_queries_zh",
+          "search_queries_en",
+          "must_show",
+          "must_not_show",
+          "fallback",
+          "human_review_required",
+          "status"
+        ],
+        "properties": {
+          "scene_id": {
+            "type": "string",
+            "pattern": "^SC-[0-9]{3}$"
+          },
+          "chapter_ref": {
+            "type": "string"
+          },
+          "is_final_ending": {
+            "type": "boolean"
+          },
+          "start_ms": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "end_ms": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "start_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end_sec": {
+            "type": "number",
+            "minimum": 0
+          },
+          "duration_sec": {
+            "type": "number",
+            "minimum": 4.0,
+            "maximum": 10.0,
+            "description": "单个镜头时长强制要求在 4.0 至 10.0 秒之间"
+          },
+          "narration_text": {
+            "type": "string"
+          },
+          "visual_purpose": {
+            "type": "string",
+            "description": "画面意图（严禁单纯复述旁白）"
+          },
+          "visual_intent": {
+            "type": "string"
+          },
+          "visual_type": {
+            "type": "string",
+            "enum": [
+              "broll_video",
+              "photo_motion",
+              "map",
+              "timeline",
+              "data_card",
+              "kinetic_text"
+            ]
+          },
+          "scene_type": {
+            "type": "string",
+            "enum": [
+              "broll_video",
+              "photo_motion",
+              "map",
+              "timeline",
+              "data_card",
+              "kinetic_text"
+            ]
+          },
+          "search_queries_zh": {
+            "type": "array",
+            "minItems": 2,
+            "items": { "type": "string" }
+          },
+          "search_queries_en": {
+            "type": "array",
+            "minItems": 2,
+            "items": { "type": "string" }
+          },
+          "must_show": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          },
+          "must_not_show": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          },
+          "fallback": {
+            "type": "object",
+            "required": ["fallback_scene_type", "component_spec"],
+            "properties": {
+              "fallback_scene_type": {
+                "type": "string",
+                "enum": ["map", "timeline", "data_card", "kinetic_text"]
+              },
+              "component_spec": {
+                "type": "string"
+              }
+            }
+          },
+          "procedural_props": {
+            "type": "object",
+            "description": "数据驱动的程序化图形组件参数（供 map / timeline / data_card / kinetic_text 渲染使用，严禁在通用组件中硬编码文案）",
+            "properties": {
+              "headline": { "type": "string" },
+              "subheadline": { "type": "string" },
+              "badge_label": { "type": "string" },
+              "items": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "nodes": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": ["label", "detail"],
+                  "properties": {
+                    "label": { "type": "string" },
+                    "detail": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "candidate_assets": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["asset_id", "match_score", "license_status", "notes"],
+              "properties": {
+                "asset_id": { "type": "string" },
+                "match_score": { "type": "number", "minimum": 0, "maximum": 1 },
+                "license_status": { "type": "string" },
+                "notes": { "type": "string" }
+              }
+            }
+          },
+          "final_asset_id": {
+            "type": ["string", "null"]
+          },
+          "confidence_score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "asset_status": {
+            "type": "string",
+            "enum": [
+              "MATCHED_APPROVED_ASSET",
+              "MATCHED_PLACEHOLDER_ASSET",
+              "LOW_CONFIDENCE_PLACEHOLDER",
+              "PROCEDURAL_GRAPHIC_COMPONENT",
+              "NEEDS_HUMAN_ASSET"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "READY_APPROVED",
+              "READY_PLACEHOLDER",
+              "READY_PROCEDURAL",
+              "LOW_CONFIDENCE_NEEDS_REVIEW",
+              "NEEDS_HUMAN_ASSET"
+            ]
+          },
+          "crop_and_usage": {
+            "type": "object",
+            "required": ["crop_mode", "usage_purpose"],
+            "properties": {
+              "crop_mode": { "type": "string" },
+              "usage_purpose": { "type": "string" }
+            }
+          },
+          "transition": {
+            "type": "object",
+            "required": ["in", "out", "duration_frames"],
+            "properties": {
+              "in": { "type": "string" },
+              "out": { "type": "string" },
+              "duration_frames": { "type": "integer", "minimum": 0, "maximum": 30 }
+            }
+          },
+          "human_review_required": {
+            "type": "boolean"
+          },
+          "review_status": {
+            "type": "string",
+            "enum": [
+              "pending_human_review",
+              "approved_by_human",
+              "auto_passed_non_sensitive"
+            ]
+          },
+          "review_reason": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

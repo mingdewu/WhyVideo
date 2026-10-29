@@ -1,0 +1,90 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WhyExplainerEvidenceCard",
+  "description": "单一事实主张证据卡（每张卡片只能包含一个事实主张）",
+  "type": "object",
+  "required": [
+    "evidence_id",
+    "source_url",
+    "source_type",
+    "reliability",
+    "claim_type",
+    "evidence_summary",
+    "temporal_or_spatial_qualification",
+    "can_use_as_direct_fact",
+    "usage_notes"
+  ],
+  "properties": {
+    "evidence_id": {
+      "type": "string",
+      "pattern": "^EV-[0-9]{3}$",
+      "description": "证据卡唯一编号，格式如 EV-001"
+    },
+    "source_url": {
+      "type": "string",
+      "description": "资料来源 URL 或具体文献/出版物索引标识"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "academic_paper",
+        "historical_archive",
+        "official_statistics",
+        "monograph_book",
+        "reputable_journalism",
+        "industry_report",
+        "oral_history_or_folklore"
+      ],
+      "description": "资料来源类型"
+    },
+    "reliability": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "来源可靠度评估"
+    },
+    "claim_type": {
+      "type": "string",
+      "enum": [
+        "verified_fact",
+        "disputed_claim",
+        "legend_or_anecdote",
+        "author_interpretation"
+      ],
+      "description": "事实主张分类（严格四选一）"
+    },
+    "evidence_summary": {
+      "type": "string",
+      "description": "单一事实主张摘要（严禁在一张卡片中混入多个不相关主张）"
+    },
+    "temporal_or_spatial_qualification": {
+      "type": "string",
+      "enum": [
+        "earliest_occurrence",
+        "earliest_written_record",
+        "earliest_mass_production",
+        "most_popular_or_widespread",
+        "general_context"
+      ],
+      "description": "时空与程度属性区分：最早出现 / 最早有记录 / 最早规模化生产 / 最为流行 / 一般背景"
+    },
+    "can_use_as_direct_fact": {
+      "type": "boolean",
+      "description": "是否可在旁白中直接作为既定事实陈述（仅 verified_fact 且 reliability 为 high/medium 时为 true）"
+    },
+    "usage_notes": {
+      "type": "string",
+      "description": "在文稿中使用该证据时的限定词要求或注意事项"
+    }
+  },
+  "example": {
+    "evidence_id": "EV-001",
+    "source_url": "https://example.org/history-of-public-health-1950s",
+    "source_type": "academic_paper",
+    "reliability": "high",
+    "claim_type": "verified_fact",
+    "evidence_summary": "1952年爱国卫生运动期间，全国各地通过宣传画、广播与基层动员，广泛推广“不喝生水喝开水”以预防霍乱、伤寒等水源性传染病。",
+    "temporal_or_spatial_qualification": "most_popular_or_widespread",
+    "can_use_as_direct_fact": true,
+    "usage_notes": "可用于解释全民喝开水习惯在现代城乡的全面普及，注意说明这是普及节点而非最早起源。"
+  }
+}

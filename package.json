@@ -1,0 +1,25 @@
+{
+  "name": "why-video-studio",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Topic-agnostic Why Explainer Video Studio monorepo: packages/video-template, packages/qc-tools, and projects/<project_id>/",
+  "scripts": {
+    "compile:props": "node packages/qc-tools/generate-render-props.mjs",
+    "scan:assets": "node packages/qc-tools/scan-assets.mjs",
+    "qc": "node packages/qc-tools/run-qc.mjs",
+    "studio": "remotion studio packages/video-template/src/index.ts",
+    "preview": "remotion studio packages/video-template/src/index.ts",
+    "render:preview": "remotion render packages/video-template/src/index.ts WhyExplainerMVP projects/why_ryokan_small_dishes_001/output/preview.mp4 --scale=0.5"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.242",
+    "@remotion/renderer": "4.0.242",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "remotion": "4.0.242"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.12",
+    "typescript": "5.6.3"
+  }
+}

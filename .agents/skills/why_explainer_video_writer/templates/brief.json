@@ -1,0 +1,129 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WhyExplainerBrief",
+  "description": "中文“为什么”知识型长视频立项与范围定义 Brief",
+  "type": "object",
+  "required": [
+    "project_id",
+    "title",
+    "core_question",
+    "short_answer",
+    "scope",
+    "target_audience",
+    "target_duration_minutes",
+    "estimated_word_count",
+    "language",
+    "planned_chapter_count",
+    "taboos_and_exclusions",
+    "provided_sources_count",
+    "missing_research_questions"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string",
+      "description": "项目唯一标识符，例如 why_ice_water_001"
+    },
+    "title": {
+      "type": "string",
+      "description": "视频标题（以“为什么……”为核心提问形式）"
+    },
+    "core_question": {
+      "type": "string",
+      "description": "全片需要回答的核心问题（一句话准确概括）"
+    },
+    "short_answer": {
+      "type": "string",
+      "description": "基于现有资料得出的暂定核心结论（供开篇简短给出答案使用，2-4句话）"
+    },
+    "scope": {
+      "type": "object",
+      "required": ["time_range", "geographic_scope", "included_dimensions", "excluded_dimensions"],
+      "properties": {
+        "time_range": {
+          "type": "string",
+          "description": "讨论的时间跨度"
+        },
+        "geographic_scope": {
+          "type": "string",
+          "description": "讨论的地理或文化区域范围"
+        },
+        "included_dimensions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "本片涵盖的分析维度（如地理气候、基础设施、商业史、社会习惯等）"
+        },
+        "excluded_dimensions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "明确排除在外的无关或无证据维度，防止跑题"
+        }
+      }
+    },
+    "target_audience": {
+      "type": "string",
+      "description": "目标受众画像与知识背景预设"
+    },
+    "target_duration_minutes": {
+      "type": "integer",
+      "minimum": 20,
+      "maximum": 30,
+      "description": "目标成片时长（分钟），通常为 20 至 30 分钟"
+    },
+    "estimated_word_count": {
+      "type": "integer",
+      "minimum": 5500,
+      "maximum": 9500,
+      "description": "目标中文字数（按正常语速约 280-300 字/分钟估算）"
+    },
+    "language": {
+      "type": "string",
+      "enum": ["zh-CN", "zh-TW"],
+      "description": "文稿语言"
+    },
+    "planned_chapter_count": {
+      "type": "integer",
+      "minimum": 5,
+      "maximum": 7,
+      "description": "规划的正文章节数量（严格限定为 5 到 7 章）"
+    },
+    "taboos_and_exclusions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "内容禁区（如禁止模仿特定博主口癖、禁止无证据阴谋论、禁止文化贬低等）"
+    },
+    "provided_sources_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "用户已提供并审核的资料/URL数量。若为0则必须中止写作并输出待研究问题"
+    },
+    "missing_research_questions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "当前资料尚无法覆盖、需要补充核查或缩小论述范围的问题列表"
+    }
+  },
+  "example": {
+    "project_id": "why_hot_water_china_001",
+    "title": "为什么中国人习惯喝热水，而许多西方国家习惯喝冰水？",
+    "core_question": "中国普遍饮用熟水/热水的日常习惯是如何通过历史、公共卫生运动与基础设施建设逐步定型的？",
+    "short_answer": "饮用热水的习惯并非单纯由体质决定，而是古代燃料与茶文化、近代抗击水源性传染病的公共卫生运动，以及20世纪中叶暖水瓶与单位锅炉房基础设施普及共同作用的结果。",
+    "scope": {
+      "time_range": "中国古代茶文化普及期至20世纪下半叶公共卫生体系建立",
+      "geographic_scope": "中国大陆主要城乡地区，适度对比19-20世纪欧美城市供水与制冰技术发展",
+      "included_dimensions": ["水源安全与微生物控制", "燃料与盛水器具演变", "20世纪公共卫生运动", "工业化基础设施（暖水瓶、开水房）"],
+      "excluded_dimensions": ["未经现代医学证实的伪科学体质优劣论", "中西医流派全面论战"]
+    },
+    "target_audience": "对日常生活现象背后的历史、社会与技术变迁感兴趣的中文大众观众",
+    "target_duration_minutes": 24,
+    "estimated_word_count": 7000,
+    "language": "zh-CN",
+    "planned_chapter_count": 6,
+    "taboos_and_exclusions": [
+      "不模仿任何现有视频博主的标志性开场白或口头禅",
+      "不贬低任何饮水习惯或饮食文化",
+      "不将民间传说直接当作信史引用"
+    ],
+    "provided_sources_count": 5,
+    "missing_research_questions": []
+  }
+}

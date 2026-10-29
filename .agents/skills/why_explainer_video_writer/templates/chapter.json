@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WhyExplainerChapter",
+  "description": "单章写作输出结构（遵循固定四段式结构）",
+  "type": "object",
+  "required": [
+    "project_id",
+    "chapter_number",
+    "chapter_title",
+    "sub_question",
+    "revision_count",
+    "sections",
+    "full_chapter_narration",
+    "used_evidence_ids",
+    "unverified_claims_flagged",
+    "word_count"
+  ],
+  "properties": {
+    "project_id": {
+      "type": "string"
+    },
+    "chapter_number": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 7
+    },
+    "chapter_title": {
+      "type": "string"
+    },
+    "sub_question": {
+      "type": "string",
+      "description": "本章回答的唯一子问题"
+    },
+    "revision_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 2,
+      "description": "当前章节已重写次数（最多允许2次，超过则输出需要人工决策）"
+    },
+    "sections": {
+      "type": "object",
+      "required": [
+        "1_question_or_contradiction",
+        "2_mechanism_or_background",
+        "3_sourced_concrete_examples",
+        "4_mini_summary_and_transition"
+      ],
+      "properties": {
+        "1_question_or_contradiction": {
+          "type": "string",
+          "description": "第一部分：章节问题或矛盾（提出本章具体反差）"
+        },
+        "2_mechanism_or_background": {
+          "type": "string",
+          "description": "第二部分：形成机制或背景（拆解因果链条）"
+        },
+        "3_sourced_concrete_examples": {
+          "type": "string",
+          "description": "第三部分：有来源的具体例子（具象化场景、器物或对比，严禁伪造心理活动）"
+        },
+        "4_mini_summary_and_transition": {
+          "type": "string",
+          "description": "第四部分：小结和自然过渡（严禁写成全片大结局）"
+        }
+      }
+    },
+    "full_chapter_narration": {
+      "type": "string",
+      "description": "合并后的本章完整口语化旁白文本（短段落，适合TTS朗读）"
+    },
+    "used_evidence_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "本章实际引用的证据卡编号列表"
+    },
+    "unverified_claims_flagged": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "本章中缺乏 evidence_id 支持、已标记为 [需要人工核查] 的具体陈述（理想状态应为空数组）"
+    },
+    "word_count": {
+      "type": "integer",
+      "description": "本章旁白中文字数"
+    }
+  }
+}

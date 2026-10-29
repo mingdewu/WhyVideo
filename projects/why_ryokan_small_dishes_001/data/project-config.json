@@ -1,0 +1,28 @@
+{
+  "project_id": "why_ryokan_small_dishes_001",
+  "domain_category": "travel_and_culture",
+  "secondary_domains": ["food_and_culinary", "history_and_geography"],
+  "title": "为什么日本温泉旅馆的晚餐常常是一小碟一小碟？",
+  "language": "zh-CN",
+  "video_spec": {
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "safe_bottom_margin_px": 96,
+    "max_chars_per_line": 22,
+    "min_scene_duration_ms": 4000,
+    "max_scene_duration_ms": 10000,
+    "asset_reuse_cooldown_ms": 60000
+  },
+  "paths": {
+    "final_script": "final-script.json",
+    "sentence_timestamps": "sentence-timestamps.json",
+    "audio_file": "audio/narration.wav",
+    "captions_file": "captions/captions.srt",
+    "asset_index": "asset-index.json",
+    "scene_manifest": "scene-manifest.json",
+    "render_props": "render-props.json",
+    "qc_report": "video-qc-report.json",
+    "preview_output": "out/preview.mp4"
+  }
+}

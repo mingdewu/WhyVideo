@@ -1,0 +1,86 @@
+{
+  "project_id": "why_ryokan_small_dishes_001",
+  "title": "为什么日本温泉旅馆的晚餐常常是一小碟一小碟？",
+  "last_updated": "2026-10-27",
+  "allowed_render_license_statuses": [
+    "approved",
+    "internal_placeholder"
+  ],
+  "strict_licensing_policy": "Only assets in asset-index.json with license_status in ['approved', 'internal_placeholder'] may be referenced in render-props.json. Downloading, clipping, or pretending to own third-party film/YouTube footage is strictly prohibited.",
+  "assets": [
+    {
+      "asset_id": "AST-VID-001",
+      "path": "assets/video/placeholder_ryokan_table_broll.mp4",
+      "file_path": "projects/why_ryokan_small_dishes_001/assets/video/placeholder_ryokan_table_broll.mp4",
+      "type": "video",
+      "media_type": "video",
+      "duration_seconds": 9.0,
+      "duration_sec": 9.0,
+      "resolution": "1920x1080",
+      "license_status": "internal_placeholder",
+      "source_url": "internal://placeholder/video/ryokan_table_broll_v1",
+      "tags": [
+        "温泉旅馆",
+        "日式矮桌",
+        "内部占位视频",
+        "ryokan",
+        "broll_placeholder"
+      ]
+    },
+    {
+      "asset_id": "AST-IMG-001",
+      "path": "assets/images/placeholder_kaiseki_trays.png",
+      "file_path": "projects/why_ryokan_small_dishes_001/assets/images/placeholder_kaiseki_trays.png",
+      "type": "image",
+      "media_type": "image",
+      "duration_seconds": null,
+      "duration_sec": null,
+      "resolution": "1920x1080",
+      "license_status": "internal_placeholder",
+      "source_url": "internal://placeholder/image/kaiseki_trays_v1",
+      "tags": [
+        "小碟分装",
+        "微型器物",
+        "怀石小钵",
+        "内部占位图",
+        "small_dishes_placeholder"
+      ]
+    },
+    {
+      "asset_id": "AST-IMG-002",
+      "path": "assets/images/placeholder_honzen_archive_low_conf.png",
+      "file_path": "projects/why_ryokan_small_dishes_001/assets/images/placeholder_honzen_archive_low_conf.png",
+      "type": "image",
+      "media_type": "image",
+      "duration_seconds": null,
+      "duration_sec": null,
+      "resolution": "1920x1080",
+      "license_status": "internal_placeholder",
+      "source_url": "internal://placeholder/image/honzen_banquet_low_confidence_v1",
+      "tags": [
+        "本膳料理",
+        "会席宴席传统",
+        "低置信度历史占位图",
+        "需人工考证时代",
+        "low_confidence_placeholder"
+      ]
+    },
+    {
+      "asset_id": "AST-IMG-099",
+      "path": "assets/images/unverified_external_sample.png",
+      "file_path": "projects/why_ryokan_small_dishes_001/assets/images/unverified_external_sample.png",
+      "type": "image",
+      "media_type": "image",
+      "duration_seconds": null,
+      "duration_sec": null,
+      "resolution": "1920x1080",
+      "license_status": "pending_verification",
+      "source_url": "https://commons.wikimedia.org/wiki/File:Unverified_Historical_Banquet_Sample.png",
+      "tags": [
+        "未完成版权核验样本",
+        "禁止进入render-props",
+        "pending_license_test"
+      ]
+    }
+  ]
+}
