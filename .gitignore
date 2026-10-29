@@ -8,10 +8,13 @@ coverage/
 
 # Production & Build outputs
 .remotion/
-projects/*/output/
 *.mp4
 *.mkv
 *.mov
+
+# Real-world project data (projects are kept local only)
+projects/*
+!projects/.gitkeep
 
 # Video template content (keep directory empty on git)
 packages/video-template/*

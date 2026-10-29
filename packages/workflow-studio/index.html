@@ -1,0 +1,888 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WhyVideo 工作流数据表操作台 (Database Studio)</title>
+  <style>
+    :root {
+      --bg-dark: #0b0f17;
+      --bg-panel: #111827;
+      --bg-row: #161f30;
+      --bg-row-hover: #1e293b;
+      --border: #2e3b52;
+      --text-main: #f3f4f6;
+      --text-muted: #9ca3af;
+      --accent-amber: #f59e0b;
+      --accent-blue: #38bdf8;
+      --accent-green: #10b981;
+      --accent-red: #ef4444;
+      --accent-purple: #a855f7;
+    }
+    * {
+      box-sizing: border-box;
+    }
+    body {
+      margin: 0;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      font-size: 14px;
+    }
+    /* Top Header */
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      background: rgba(17, 24, 39, 0.96);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .brand-badge {
+      background: linear-gradient(135deg, #f59e0b, #ea580c);
+      color: #0b0f17;
+      font-weight: 900;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 13px;
+    }
+    .brand-title {
+      font-size: 18px;
+      font-weight: 800;
+    }
+    .project-select {
+      background: #1f2937;
+      color: var(--text-main);
+      border: 1px solid var(--border);
+      padding: 7px 12px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .btn {
+      border: 1px solid var(--border);
+      background: #1f2937;
+      color: var(--text-main);
+      padding: 8px 14px;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+      text-decoration: none;
+    }
+    .btn:hover {
+      background: #374151;
+    }
+    .btn-primary {
+      background: var(--accent-amber);
+      color: #0b0f17;
+      border-color: var(--accent-amber);
+    }
+    .btn-primary:hover {
+      background: #fbbf24;
+    }
+    .btn-purple {
+      background: rgba(168, 85, 247, 0.2);
+      border-color: var(--accent-purple);
+      color: #e9d5ff;
+    }
+    .btn-purple:hover {
+      background: rgba(168, 85, 247, 0.35);
+    }
+    .btn-blue {
+      background: rgba(56, 189, 248, 0.16);
+      border-color: var(--accent-blue);
+      color: #bae6fd;
+    }
+    .btn-sm {
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+
+    /* Prompt & Summary Bar */
+    .subbar {
+      padding: 16px 24px;
+      background: #0f1623;
+      border-bottom: 1px solid var(--border);
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      gap: 20px;
+      align-items: stretch;
+    }
+    .prompt-box {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .prompt-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 700;
+      color: #e9d5ff;
+    }
+    .prompt-textarea {
+      width: 100%;
+      min-height: 54px;
+      background: #0b0f17;
+      border: 1px solid #374151;
+      border-radius: 6px;
+      color: var(--text-main);
+      padding: 8px 12px;
+      font-family: inherit;
+      font-size: 13px;
+      resize: vertical;
+    }
+    .stats-box {
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .stat-card {
+      background: #0b0f17;
+      border: 1px solid #1f2937;
+      border-radius: 7px;
+      padding: 8px 12px;
+    }
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .stat-val {
+      font-size: 20px;
+      font-weight: 800;
+      margin-top: 2px;
+    }
+
+    /* Database Table */
+    .table-container {
+      padding: 18px 24px 60px 24px;
+      overflow-x: auto;
+    }
+    table.db-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--bg-panel);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    table.db-table th {
+      background: #1e293b;
+      color: #cbd5e1;
+      font-weight: 700;
+      text-align: left;
+      padding: 12px 14px;
+      border-bottom: 2px solid var(--border);
+      border-right: 1px solid var(--border);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+    table.db-table td {
+      padding: 14px;
+      border-bottom: 1px solid var(--border);
+      border-right: 1px solid var(--border);
+      vertical-align: top;
+      background: var(--bg-row);
+    }
+    table.db-table tr:hover td {
+      background: var(--bg-row-hover);
+    }
+
+    .scene-badge {
+      display: inline-block;
+      background: rgba(245, 158, 11, 0.16);
+      border: 1px solid var(--accent-amber);
+      color: #fbbf24;
+      font-weight: 800;
+      padding: 3px 8px;
+      border-radius: 5px;
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+    .time-range {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-family: monospace;
+    }
+
+    .cell-textarea {
+      width: 100%;
+      background: #0b0f17;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: var(--text-main);
+      padding: 8px 10px;
+      font-size: 13px;
+      line-height: 1.45;
+      font-family: inherit;
+      resize: vertical;
+    }
+    .cell-input {
+      width: 100%;
+      background: #0b0f17;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      color: var(--text-main);
+      padding: 7px 10px;
+      font-size: 13px;
+      font-family: inherit;
+    }
+
+    /* Keywords Tag Chips */
+    .kw-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .kw-chip {
+      background: rgba(56, 189, 248, 0.16);
+      border: 1px solid rgba(56, 189, 248, 0.45);
+      color: #7dd3fc;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    /* Mode Selector Toggle */
+    .mode-switch {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .mode-option {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 10px;
+      border-radius: 7px;
+      border: 1px solid #334155;
+      background: #0b0f17;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 13px;
+    }
+    .mode-option.active-ppt {
+      background: rgba(168, 85, 247, 0.2);
+      border-color: var(--accent-purple);
+      color: #f3e8ff;
+    }
+    .mode-option.active-upload {
+      background: rgba(56, 189, 248, 0.2);
+      border-color: var(--accent-blue);
+      color: #e0f2fe;
+    }
+
+    /* Mini PPT Slide Preview Card */
+    .ppt-preview-card {
+      margin-top: 10px;
+      aspect-ratio: 16 / 9;
+      width: 290px;
+      background: linear-gradient(145deg, #0f172a, #1e1b4b);
+      border: 2px solid rgba(245, 158, 11, 0.65);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 6px;
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.45);
+    }
+    .ppt-preview-badge {
+      font-size: 10px;
+      color: var(--accent-amber);
+      font-weight: 800;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+    }
+    .ppt-preview-title {
+      font-size: 14px;
+      font-weight: 900;
+      color: #ffffff;
+      line-height: 1.3;
+    }
+    .ppt-preview-bullets {
+      font-size: 11px;
+      color: #cbd5e1;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    /* Upload Box */
+    .upload-zone {
+      border: 2px dashed #475569;
+      border-radius: 8px;
+      padding: 12px;
+      background: #0b0f17;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .upload-zone.missing {
+      border-color: var(--accent-red);
+      background: rgba(239, 68, 68, 0.08);
+    }
+    .media-thumb {
+      width: 260px;
+      aspect-ratio: 16 / 9;
+      object-fit: cover;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: #000;
+    }
+
+    .status-pill {
+      display: inline-block;
+      padding: 4px 9px;
+      border-radius: 5px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .status-ready {
+      background: rgba(16, 185, 129, 0.2);
+      color: #6ee7b7;
+      border: 1px solid #10b981;
+    }
+    .status-missing {
+      background: rgba(239, 68, 68, 0.22);
+      color: #fca5a5;
+      border: 1px solid #ef4444;
+    }
+    .status-lowconf {
+      background: rgba(245, 158, 11, 0.22);
+      color: #fde68a;
+      border: 1px solid #f59e0b;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #10b981;
+      color: #052e16;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-weight: 800;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+      display: none;
+      z-index: 200;
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">
+      <span class="brand-badge">WORKFLOW DB</span>
+      <span class="brand-title">WhyVideo 分镜数据库工作台（人工上传 + AI PPT 标题主题生成）</span>
+      <select id="projectSelect" class="project-select"></select>
+    </div>
+    <div class="toolbar-actions">
+      <button class="btn btn-purple" onclick="generateAllPptSlides()">
+        ⚡ 按关键词+Prompt 批量生成 PPT 画面
+      </button>
+      <button class="btn btn-primary" onclick="saveAndSyncAll()">
+        💾 保存表格并同步至视频引擎
+      </button>
+      <a class="btn btn-blue" href="http://localhost:3100" target="_blank">
+        🎬 打开 Remotion 视频预览 (:3100)
+      </a>
+    </div>
+  </div>
+
+  <div class="subbar">
+    <div class="prompt-box">
+      <div class="prompt-header">
+        <span>🤖 全局 AI 生成 PPT 画面 Prompt 模板（你随时可以在此填入/修改你的专属 Prompt 规则）</span>
+        <span style="font-size:12px;color:var(--text-muted);">作用于所有选为「AI 自动生成 PPT」的镜头行</span>
+      </div>
+      <textarea
+        id="globalPromptInput"
+        class="prompt-textarea"
+        placeholder="在这里输入你希望 AI 把【旁白】+【核心关键词】转化为 PPT 标题主题画面的 Prompt 规则..."
+      ></textarea>
+    </div>
+
+    <div class="stats-box">
+      <div class="stat-card">
+        <div class="stat-label">总镜头数 / 总时长</div>
+        <div class="stat-val" id="statTotal">-</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">🤖 AI PPT 画面镜头</div>
+        <div class="stat-val" id="statPpt" style="color:#d8b4fe;">-</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">📤 人工上传素材镜头</div>
+        <div class="stat-val" id="statUpload" style="color:#7dd3fc;">-</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">⚠️ 待上传/待审核镜头</div>
+        <div class="stat-val" id="statPending" style="color:#fca5a5;">-</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="table-container">
+    <table class="db-table">
+      <thead>
+        <tr>
+          <th style="width: 110px;">镜头 & 时间</th>
+          <th style="width: 240px;">旁白内容 (Narration)</th>
+          <th style="width: 220px;">想表达的内容关键词 (Keywords)</th>
+          <th style="width: 190px;">画面来源模式 (上传 / AI PPT)</th>
+          <th style="width: 520px;">PPT 标题主题设定 / 人工上传素材 & 实时预览</th>
+          <th style="width: 210px;">单行 Prompt 补充 & 审核状态</th>
+        </tr>
+      </thead>
+      <tbody id="sceneTableBody"></tbody>
+    </table>
+  </div>
+
+  <div id="toast" class="toast">已保存并同步至 Remotion！</div>
+
+  <script>
+    let currentProjectId = null;
+    let sceneManifest = null;
+    let assetIndex = null;
+    let qcReport = null;
+
+    function showToast(msg) {
+      const el = document.getElementById("toast");
+      el.textContent = msg;
+      el.style.display = "block";
+      setTimeout(() => {
+        el.style.display = "none";
+      }, 2600);
+    }
+
+    async function init() {
+      const res = await fetch("/api/projects");
+      const data = await res.json();
+      const sel = document.getElementById("projectSelect");
+      sel.innerHTML = "";
+      for (const p of data.projects) {
+        const opt = document.createElement("option");
+        opt.value = p;
+        opt.textContent = `📁 ${p}`;
+        sel.appendChild(opt);
+      }
+      sel.onchange = () => loadProject(sel.value);
+      if (data.defaultProject) {
+        await loadProject(data.defaultProject);
+      }
+    }
+
+    async function loadProject(projectId) {
+      currentProjectId = projectId;
+      const res = await fetch(`/api/projects/${projectId}`);
+      const data = await res.json();
+      sceneManifest = data.sceneManifest;
+      assetIndex = data.assetIndex;
+      qcReport = data.qcReport;
+      document.getElementById("globalPromptInput").value =
+        data.promptConfig?.global_ppt_prompt || "";
+      renderTable();
+    }
+
+    function updateStats() {
+      if (!sceneManifest) return;
+      const scenes = sceneManifest.scenes || [];
+      const pptCount = scenes.filter((s) => s.source_mode === "ai_ppt_slide").length;
+      const uploadCount = scenes.filter((s) => s.source_mode === "manual_upload").length;
+      const pendingCount = scenes.filter(
+        (s) =>
+          (s.source_mode === "manual_upload" && !s.final_asset_id) ||
+          s.human_review_required
+      ).length;
+
+      document.getElementById("statTotal").textContent = `${scenes.length} 镜 (${sceneManifest.total_duration_sec}s)`;
+      document.getElementById("statPpt").textContent = `${pptCount} 镜`;
+      document.getElementById("statUpload").textContent = `${uploadCount} 镜`;
+      document.getElementById("statPending").textContent = `${pendingCount} 镜`;
+    }
+
+    function renderTable() {
+      updateStats();
+      const tbody = document.getElementById("sceneTableBody");
+      tbody.innerHTML = "";
+
+      const assetsMap = new Map(
+        (assetIndex?.assets || []).map((a) => [a.asset_id, a])
+      );
+
+      sceneManifest.scenes.forEach((scene, idx) => {
+        const tr = document.createElement("tr");
+        const isPpt = scene.source_mode === "ai_ppt_slide";
+        const kws = Array.isArray(scene.content_keywords)
+          ? scene.content_keywords
+          : [];
+        const ppt = scene.ppt_slide_spec || {
+          theme_title: "",
+          subtitle: "",
+          bullet_points: [],
+          custom_prompt: "",
+        };
+        const currentAsset = scene.final_asset_id
+          ? assetsMap.get(scene.final_asset_id)
+          : null;
+
+        // Column 1: Scene ID & Timestamp
+        const tdId = document.createElement("td");
+        tdId.innerHTML = `
+          <div class="scene-badge">${scene.scene_id}</div>
+          <div class="time-range">${(scene.start_ms / 1000).toFixed(1)}s - ${(scene.end_ms / 1000).toFixed(1)}s</div>
+          <div style="font-size:11px;color:#64748b;margin-top:4px;">时长: ${((scene.end_ms - scene.start_ms) / 1000).toFixed(1)}s</div>
+        `;
+
+        // Column 2: Narration Text
+        const tdNarration = document.createElement("td");
+        tdNarration.innerHTML = `
+          <textarea class="cell-textarea" rows="4" data-idx="${idx}" onchange="onNarrationChange(${idx}, this.value)">${scene.narration_text}</textarea>
+        `;
+
+        // Column 3: Keywords
+        const tdKeywords = document.createElement("td");
+        const chipsHtml = kws
+          .map((k) => `<span class="kw-chip"># ${k}</span>`)
+          .join("");
+        tdKeywords.innerHTML = `
+          <div class="kw-chips">${chipsHtml}</div>
+          <input
+            type="text"
+            class="cell-input"
+            value="${kws.join(", ")}"
+            placeholder="用逗号分隔关键词..."
+            onchange="onKeywordsChange(${idx}, this.value)"
+          />
+          <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">
+            输入本段想表达的关键词（逗号分隔）
+          </div>
+        `;
+
+        // Column 4: Mode Switch (Manual Upload vs AI PPT Slide)
+        const tdMode = document.createElement("td");
+        tdMode.innerHTML = `
+          <div class="mode-switch">
+            <div class="mode-option ${isPpt ? "active-ppt" : ""}" onclick="setSceneMode(${idx}, 'ai_ppt_slide')">
+              <input type="radio" name="mode_${idx}" ${isPpt ? "checked" : ""} />
+              <span>🤖 AI 生成 PPT 画面</span>
+            </div>
+            <div class="mode-option ${!isPpt ? "active-upload" : ""}" onclick="setSceneMode(${idx}, 'manual_upload')">
+              <input type="radio" name="mode_${idx}" ${!isPpt ? "checked" : ""} />
+              <span>📤 人工上传素材</span>
+            </div>
+          </div>
+        `;
+
+        // Column 5: PPT Title/Theme Editor OR Manual File Upload
+        const tdContent = document.createElement("td");
+        if (isPpt) {
+          const bulletsText = (ppt.bullet_points || []).join("\n");
+          const bulletPreviewHtml = (ppt.bullet_points || [])
+            .slice(0, 3)
+            .map((b) => `<div>• ${b}</div>`)
+            .join("");
+
+          tdContent.innerHTML = `
+            <div style="display:flex;gap:14px;align-items:flex-start;">
+              <div style="flex:1;display:flex;flex-direction:column;gap:8px;">
+                <div>
+                  <div style="font-size:12px;color:#d8b4fe;font-weight:700;margin-bottom:4px;">
+                    PPT 画面标题主题 (Slide Headline)：
+                  </div>
+                  <input
+                    type="text"
+                    class="cell-input"
+                    style="font-weight:800;border-color:#a855f7;"
+                    value="${(ppt.theme_title || "").replace(/"/g, "&quot;")}"
+                    placeholder="输入 PPT 大标题主题..."
+                    onchange="onPptTitleChange(${idx}, this.value)"
+                  />
+                </div>
+                <div>
+                  <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">
+                    PPT 副标题 / 核心要点（每行一条）：
+                  </div>
+                  <textarea
+                    class="cell-textarea"
+                    rows="3"
+                    onchange="onPptBulletsChange(${idx}, this.value)"
+                  >${bulletsText}</textarea>
+                </div>
+                <button class="btn btn-purple btn-sm" style="align-self:flex-start;" onclick="generateSinglePpt(${idx})">
+                  ✨ 按本行关键词 + Prompt 自动生成标题主题
+                </button>
+              </div>
+              <div>
+                <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;">16:9 PPT 画面实时预览：</div>
+                <div class="ppt-preview-card">
+                  <div class="ppt-preview-badge">PPT 主题页 · ${kws.slice(0, 2).join(" / ") || scene.scene_id}</div>
+                  <div class="ppt-preview-title">${ppt.theme_title || scene.narration_text}</div>
+                  <div class="ppt-preview-bullets">${bulletPreviewHtml}</div>
+                </div>
+              </div>
+            </div>
+          `;
+        } else {
+          // Manual Upload Mode UI
+          const assetOptions = (assetIndex?.assets || [])
+            .filter((a) => ["approved", "internal_placeholder"].includes(a.license_status))
+            .map(
+              (a) =>
+                `<option value="${a.asset_id}" ${
+                  scene.final_asset_id === a.asset_id ? "selected" : ""
+                }>${a.asset_id} (${a.type} · ${a.path.split("/").pop()})</option>`
+            )
+            .join("");
+
+          let previewMediaHtml = `<div style="color:#fca5a5;font-weight:700;padding:18px 0;">⚠️ 尚未上传或绑定素材 (NEEDS_HUMAN_ASSET)</div>`;
+          if (currentAsset) {
+            const mediaUrl = `/media/${currentProjectId}/${currentAsset.path}`;
+            if (currentAsset.type === "video") {
+              previewMediaHtml = `<video class="media-thumb" src="${mediaUrl}" controls muted></video>`;
+            } else {
+              previewMediaHtml = `<img class="media-thumb" src="${mediaUrl}" alt="${currentAsset.asset_id}" />`;
+            }
+          }
+
+          tdContent.innerHTML = `
+            <div class="upload-zone ${!currentAsset ? "missing" : ""}">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label class="btn btn-primary btn-sm" style="cursor:pointer;">
+                  📤 上传本地视频/图片
+                  <input type="file" accept="image/*,video/*" style="display:none;" onchange="uploadAssetFile(${idx}, this.files[0])" />
+                </label>
+                <select class="cell-input" style="width:auto;min-width:210px;" onchange="onSelectExistingAsset(${idx}, this.value)">
+                  <option value="">-- 或从已有素材库选择 --</option>
+                  ${assetOptions}
+                </select>
+              </div>
+              <div style="display:flex;gap:12px;align-items:center;">
+                ${previewMediaHtml}
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.5;">
+                  <div><strong>画面要求：</strong>${scene.visual_purpose}</div>
+                  <div style="margin-top:4px;color:#7dd3fc;">当前绑定：${scene.final_asset_id || "无 (待上传)"}</div>
+                </div>
+              </div>
+            </div>
+          `;
+        }
+
+        // Column 6: Custom Prompt & Review Status
+        const tdPromptAndStatus = document.createElement("td");
+        const isReady =
+          (isPpt && ppt.theme_title) || (!isPpt && scene.final_asset_id);
+        const statusClass = isReady ? "status-ready" : "status-missing";
+        const statusLabel = isPpt
+          ? "PPT 主题已就绪"
+          : scene.final_asset_id
+          ? `素材已绑定 (${scene.final_asset_id})`
+          : "待人工上传素材";
+
+        tdPromptAndStatus.innerHTML = `
+          <div style="margin-bottom:8px;">
+            <span class="status-pill ${statusClass}">${statusLabel}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-bottom:4px;">单行专属 Prompt 补充：</div>
+          <textarea
+            class="cell-textarea"
+            rows="2"
+            placeholder="可选：针对本行的特殊生成指令..."
+            onchange="onCustomPromptChange(${idx}, this.value)"
+          >${ppt.custom_prompt || ""}</textarea>
+          <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;cursor:pointer;color:#fde68a;">
+            <input type="checkbox" ${!scene.human_review_required ? "checked" : ""} onchange="onToggleReviewed(${idx}, this.checked)" />
+            <span>人工已确认通过</span>
+          </label>
+        `;
+
+        tr.appendChild(tdId);
+        tr.appendChild(tdNarration);
+        tr.appendChild(tdKeywords);
+        tr.appendChild(tdMode);
+        tr.appendChild(tdContent);
+        tr.appendChild(tdPromptAndStatus);
+        tbody.appendChild(tr);
+      });
+    }
+
+    function onNarrationChange(idx, val) {
+      sceneManifest.scenes[idx].narration_text = val;
+    }
+
+    function onKeywordsChange(idx, val) {
+      const arr = val
+        .split(/[,，、]/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      sceneManifest.scenes[idx].content_keywords = arr;
+      renderTable();
+    }
+
+    function setSceneMode(idx, mode) {
+      sceneManifest.scenes[idx].source_mode = mode;
+      renderTable();
+    }
+
+    function onPptTitleChange(idx, val) {
+      sceneManifest.scenes[idx].ppt_slide_spec.theme_title = val;
+      renderTable();
+    }
+
+    function onPptBulletsChange(idx, val) {
+      sceneManifest.scenes[idx].ppt_slide_spec.bullet_points = val
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      renderTable();
+    }
+
+    function onCustomPromptChange(idx, val) {
+      sceneManifest.scenes[idx].ppt_slide_spec.custom_prompt = val;
+    }
+
+    function onSelectExistingAsset(idx, assetId) {
+      sceneManifest.scenes[idx].final_asset_id = assetId || null;
+      if (assetId) {
+        sceneManifest.scenes[idx].status = "READY_PLACEHOLDER";
+      } else {
+        sceneManifest.scenes[idx].status = "NEEDS_HUMAN_ASSET";
+      }
+      renderTable();
+    }
+
+    function onToggleReviewed(idx, isChecked) {
+      sceneManifest.scenes[idx].human_review_required = !isChecked;
+      sceneManifest.scenes[idx].review_status = isChecked
+        ? "approved_by_human"
+        : "pending_human_review";
+      updateStats();
+    }
+
+    async function generateSinglePpt(idx) {
+      const scene = sceneManifest.scenes[idx];
+      const globalPrompt = document.getElementById("globalPromptInput").value;
+      const res = await fetch(`/api/projects/${currentProjectId}/generate-ppt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sceneId: scene.scene_id,
+          globalPrompt,
+          sceneManifest,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        sceneManifest = data.sceneManifest;
+        qcReport = data.qcReport;
+        renderTable();
+        showToast(`已生成 ${scene.scene_id} 的 PPT 标题主题并同步！`);
+      }
+    }
+
+    async function generateAllPptSlides() {
+      const globalPrompt = document.getElementById("globalPromptInput").value;
+      const res = await fetch(`/api/projects/${currentProjectId}/generate-ppt`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sceneId: null,
+          globalPrompt,
+          sceneManifest,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        sceneManifest = data.sceneManifest;
+        qcReport = data.qcReport;
+        renderTable();
+        showToast("已按关键词+Prompt 批量更新所有 AI PPT 画面并同步至 Remotion！");
+      }
+    }
+
+    async function uploadAssetFile(idx, file) {
+      if (!file) return;
+      const scene = sceneManifest.scenes[idx];
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const res = await fetch(`/api/projects/${currentProjectId}/upload`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sceneId: scene.scene_id,
+            fileName: file.name,
+            fileType: file.type,
+            dataUrl: reader.result,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          sceneManifest = data.sceneManifest;
+          assetIndex = data.assetIndex;
+          qcReport = data.qcReport;
+          renderTable();
+          showToast(`已上传素材 ${data.uploadedAsset.asset_id} 并绑定至 ${scene.scene_id}！`);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+
+    async function saveAndSyncAll() {
+      const globalPrompt = document.getElementById("globalPromptInput").value;
+      const res = await fetch(`/api/projects/${currentProjectId}/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sceneManifest,
+          promptConfig: {
+            global_ppt_prompt: globalPrompt,
+            updated_at: new Date().toISOString(),
+          },
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        sceneManifest = data.sceneManifest;
+        assetIndex = data.assetIndex;
+        qcReport = data.qcReport;
+        renderTable();
+        showToast("✅ 已保存数据库表格，并自动同步至 Remotion 渲染引擎！");
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>
