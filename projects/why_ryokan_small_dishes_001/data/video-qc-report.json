@@ -1,22 +1,22 @@
 {
   "project_id": "why_ryokan_small_dishes_001",
-  "domain_category": "travel_and_culture",
+  "domain_category": "food_and_culture",
   "title": "为什么日本温泉旅馆的晚餐常常是一小碟一小碟？",
-  "generated_at": "2026-10-29T08:32:56.450Z",
+  "generated_at": "2026-10-29T09:44:28.856Z",
   "human_review_log_file": "projects/why_ryokan_small_dishes_001/human-review-log.json",
   "overall_technical_pipeline_valid": false,
   "ready_for_final_publish_without_human_review": false,
   "summary_counts": {
-    "total_scenes": 8,
+    "total_scenes": 4,
     "total_duration_ms": 64000,
     "audio_duration_ms": 64000,
     "overlaps_or_gaps_count": 0,
     "asset_reuse_violations_count": 0,
     "missing_asset_scenes_count": 0,
-    "low_confidence_scenes_count": 1,
+    "low_confidence_scenes_count": 0,
     "human_review_required_scenes_count": 0,
-    "blocked_unapproved_candidates_count": 1,
-    "failed_or_pending_human_review_items_count": 3
+    "blocked_unapproved_candidates_count": 0,
+    "failed_or_pending_human_review_items_count": 1
   },
   "checks": {
     "1_total_duration_equals_audio_duration": {
@@ -27,9 +27,30 @@
       "actual_wav_audio_seconds": 64
     },
     "2_no_overlapping_or_gap_scenes_and_reuse_cooldown": {
-      "passed": true,
+      "passed": false,
       "overlaps_or_gaps": [],
-      "duration_bound_issues": [],
+      "duration_bound_issues": [
+        {
+          "scene_id": "SC-001",
+          "duration_ms": 16500,
+          "issue": "Scene duration outside mandatory 4000ms - 10000ms range"
+        },
+        {
+          "scene_id": "SC-002",
+          "duration_ms": 16000,
+          "issue": "Scene duration outside mandatory 4000ms - 10000ms range"
+        },
+        {
+          "scene_id": "SC-003",
+          "duration_ms": 16000,
+          "issue": "Scene duration outside mandatory 4000ms - 10000ms range"
+        },
+        {
+          "scene_id": "SC-004",
+          "duration_ms": 15500,
+          "issue": "Scene duration outside mandatory 4000ms - 10000ms range"
+        }
+      ],
       "asset_reuse_60s_violations": []
     },
     "3_asset_id_existence_and_disk_scan": {
@@ -103,58 +124,22 @@
         },
         {
           "scene_id": "SC-002",
-          "asset_id": null,
-          "status": "READY_PROCEDURAL",
-          "exists_in_asset_index": null,
-          "exists_on_disk": null,
-          "passed": true,
-          "note": "Procedural graphic component (no external media file needed)"
-        },
-        {
-          "scene_id": "SC-003",
           "asset_id": "AST-IMG-001",
           "exists_in_asset_index": true,
           "exists_on_disk": true,
           "passed": true
         },
         {
+          "scene_id": "SC-003",
+          "asset_id": null,
+          "status": "READY_PROCEDURAL",
+          "exists_in_asset_index": null,
+          "exists_on_disk": null,
+          "passed": true,
+          "note": "Procedural graphic component (no external media file needed)"
+        },
+        {
           "scene_id": "SC-004",
-          "asset_id": null,
-          "status": "READY_PROCEDURAL",
-          "exists_in_asset_index": null,
-          "exists_on_disk": null,
-          "passed": true,
-          "note": "Procedural graphic component (no external media file needed)"
-        },
-        {
-          "scene_id": "SC-005",
-          "asset_id": null,
-          "status": "READY_PROCEDURAL",
-          "exists_in_asset_index": null,
-          "exists_on_disk": null,
-          "passed": true,
-          "note": "Procedural graphic component (no external media file needed)"
-        },
-        {
-          "scene_id": "SC-006",
-          "asset_id": null,
-          "status": "READY_PROCEDURAL",
-          "exists_in_asset_index": null,
-          "exists_on_disk": null,
-          "passed": true,
-          "note": "Procedural graphic component (no external media file needed)"
-        },
-        {
-          "scene_id": "SC-007",
-          "asset_id": null,
-          "status": "READY_PROCEDURAL",
-          "exists_in_asset_index": null,
-          "exists_on_disk": null,
-          "passed": true,
-          "note": "Procedural graphic component (no external media file needed)"
-        },
-        {
-          "scene_id": "SC-008",
           "asset_id": null,
           "status": "READY_PROCEDURAL",
           "exists_in_asset_index": null,
@@ -178,20 +163,13 @@
           "allowed_in_render_props": true
         },
         {
-          "scene_id": "SC-003",
+          "scene_id": "SC-002",
           "asset_id": "AST-IMG-001",
           "license_status": "internal_placeholder",
           "allowed_in_render_props": true
         }
       ],
-      "blocked_unapproved_candidates": [
-        {
-          "scene_id": "SC-006",
-          "candidate_asset_id": "AST-IMG-099",
-          "license_status": "pending_verification",
-          "action_taken": "Blocked from final_asset_id and render-props.json; preserved for human license verification"
-        }
-      ]
+      "blocked_unapproved_candidates": []
     },
     "5_text_and_caption_safe_margins": {
       "passed": false,
@@ -215,32 +193,11 @@
       "passed_all_human_gates": false,
       "note": "Per instructions, semantic and historical accuracy issues are NOT auto-fixed; they are explicitly preserved below for human review.",
       "missing_asset_scenes": [],
-      "low_confidence_scenes": [
-        {
-          "scene_id": "SC-006",
-          "final_asset_id": null,
-          "confidence_score": 0.52,
-          "narration_text": "它同时来自宴席传统、料理节奏和旅馆的服务方式。",
-          "visual_purpose": "展示日本古代『本膳料理（Honzen-ryori）』多案分食图卷或历史档案图像（photo_motion），并在画面右侧叠加『1. 宴席传统 2. 料理节奏 3. 旅馆服务方式』三要素高亮角标。",
-          "semantic_concern_preserved_for_human": "【低置信度素材 + 历史文化考证 + 候选素材待审】1. AST-IMG-002 匹配度仅 0.52（低置信度占位图）；2. 涉及日本历史宴席传统（本膳料理 vs 会席料理），需人工审核历史时期准确性；3. 候选素材 AST-IMG-099 版权处于 pending_verification 状态，已被拦截。"
-        }
-      ],
+      "low_confidence_scenes": [],
       "human_review_required_scenes": []
     }
   },
   "unpassed_or_pending_human_review_items": [
-    {
-      "check_category": "LOW_CONFIDENCE_SEMANTIC_MATCH",
-      "scene_id": "SC-006",
-      "severity": "REQUIRES_HUMAN_VERIFICATION",
-      "detail": "Asset null has confidence_score=0.52 (<0.70). 【低置信度素材 + 历史文化考证 + 候选素材待审】1. AST-IMG-002 匹配度仅 0.52（低置信度占位图）；2. 涉及日本历史宴席传统（本膳料理 vs 会席料理），需人工审核历史时期准确性；3. 候选素材 AST-IMG-099 版权处于 pending_verification 状态，已被拦截。"
-    },
-    {
-      "check_category": "UNAPPROVED_CANDIDATE_LICENSE_BLOCKED",
-      "scene_id": "SC-006",
-      "severity": "WARNING_BLOCKED_FROM_RENDER",
-      "detail": "Candidate AST-IMG-099 has license_status='pending_verification' and was excluded from render-props.json."
-    },
     {
       "check_category": "CAPTION_SINGLE_LINE_LENGTH_WARNING",
       "scene_id": "SC-006",

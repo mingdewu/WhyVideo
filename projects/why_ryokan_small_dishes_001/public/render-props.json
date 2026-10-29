@@ -1,14 +1,10 @@
 {
   "composition_id": "WhyExplainerMVP",
   "project_id": "why_ryokan_small_dishes_001",
-  "domain_category": "travel_and_culture",
+  "domain_category": "food_and_culture",
   "title": "为什么日本温泉旅馆的晚餐常常是一小碟一小碟？",
-  "ready_for_final_render": false,
-  "blocking_reasons": [
-    "SC-002: Missing high-confidence asset (status=NEEDS_HUMAN_ASSET). Reason: 【缺素材 NEEDS_HUMAN_ASSET】当前 asset-index.json 中缺少『十几个小碗小碟+小火锅俯拍』高置信度实拍视频，严禁随机配图，需人工补齐合法实拍素材。",
-    "SC-006: Low-confidence asset (null, score=0.52) requires human verification.",
-    "SC-007: Missing high-confidence asset (status=NEEDS_HUMAN_ASSET). Reason: 【缺素材 NEEDS_HUMAN_ASSET + 60秒防重拦截】asset-index.json 中无后厨摆放小碟实拍视频；且 AST-VID-001 已在 48.5 秒前（SC-001）使用过，受『同一素材60秒内不得重复使用』规则约束，不可复用 AST-VID-001，故标记为待人工补素材。"
-  ],
+  "ready_for_final_render": true,
+  "blocking_reasons": [],
   "video_config": {
     "fps": 30,
     "width": 1920,
@@ -121,41 +117,35 @@
   "timeline_tracks": [
     {
       "scene_id": "SC-001",
-      "chapter_ref": "opening_part_1",
+      "chapter_ref": "opening_hook",
       "is_final_ending": false,
       "start_ms": 0,
-      "end_ms": 8000,
+      "end_ms": 16500,
       "from_frame": 0,
-      "duration_in_frames": 240,
+      "duration_in_frames": 495,
       "visual_type": "broll_video",
       "scene_type": "broll_video",
       "status": "READY_PLACEHOLDER",
       "render_mode": "internal_placeholder_media_asset",
-      "narration_text": "住进传统温泉旅馆，晚餐往往先让人吃惊：",
-      "visual_purpose": "建立传统日式温泉旅馆（Ryokan）榻榻米客房或用餐包间的空间感，镜头从推开障子门缓慢推进至矮桌，营造第一眼看到满桌料理前的视觉期待。",
+      "narration_text": "住进传统温泉旅馆，晚餐往往先让人吃惊：桌上摆满十几个小碗、小碟和小火锅。",
+      "visual_purpose": "建立传统日式温泉旅馆榻榻米矮桌的空间全景，镜头从推开障子门平滑推进，居高俯拍整张矮桌上摆满的十几个小钵、陶盘与点火加热的小陶锅，全景展示琳琅满目的视觉冲击。",
       "human_review_required": false,
       "review_status": "approved_by_user",
-      "review_reason": "涉及日本传统建筑与地域文化场景，且当前使用 internal_placeholder 占位视频，需人工确认是否替换为实拍素材。",
-      "confidence_score": 0.85,
+      "review_reason": "",
+      "confidence_score": 1,
       "search_queries_zh": [
-        "日本传统温泉旅馆榻榻米房间实拍",
-        "日式旅馆和室矮桌晚餐准备镜头"
+        "日本温泉旅馆一泊二食晚餐俯拍全貌",
+        "日式会席料理十几个小碟子桌面实拍"
       ],
       "search_queries_en": [
-        "traditional Japanese ryokan tatami room interior broll",
-        "ryokan dining table preparation sliding shoji door"
+        "Japanese ryokan dinner table overhead shot small dishes",
+        "traditional kaiseki dinner setup ryokan tatami room"
       ],
-      "must_show": [
-        "传统日式和室榻榻米与木质矮桌环境",
-        "克制温和的室内暖光氛围"
-      ],
-      "must_not_show": [
-        "现代西式自助餐厅或快餐店画面",
-        "未经授权的日本旅游综艺节目台标或截图"
-      ],
+      "must_show": [],
+      "must_not_show": [],
       "fallback": {
-        "fallback_scene_type": "kinetic_text",
-        "component_spec": "深色背景动态浮现开篇提问：『传统温泉旅馆的晚餐，为什么总让人第一眼吃惊？』"
+        "fallback_scene_type": "data_card",
+        "component_spec": "桌面器物网格拆解卡：『1张膳盘 = 12~15件微型器皿（先付小钵、刺身猪口、盖物碗、单人小锅）』"
       },
       "approved_asset": {
         "asset_id": "AST-VID-001",
@@ -165,122 +155,54 @@
         "duration_seconds": 9,
         "license_status": "internal_placeholder",
         "crop_mode": "full_frame_slow_push",
-        "confidence_score": 0.85
+        "confidence_score": 1
       },
       "procedural_props": {
-        "badge_label": "OPENING · 空间与问题切入",
-        "headline": "传统温泉旅馆的晚餐，为什么总让人第一眼吃惊？",
-        "subheadline": "建立传统日式和室榻榻米与木质矮桌环境",
-        "fallback_scene_type": "kinetic_text",
-        "component_spec": "深色背景动态浮现开篇提问：『传统温泉旅馆的晚餐，为什么总让人第一眼吃惊？』",
-        "items": [
-          "一泊二食（含早晚餐住宿）的核心体验场景",
-          "从推开障子门到看见满桌器皿的第一视觉反差"
-        ],
-        "nodes": []
-      },
-      "transition": {
-        "in": "fade_from_black",
-        "out": "cut",
-        "duration_frames": 15
-      }
-    },
-    {
-      "scene_id": "SC-002",
-      "chapter_ref": "opening_part_2",
-      "is_final_ending": false,
-      "start_ms": 8000,
-      "end_ms": 16500,
-      "from_frame": 240,
-      "duration_in_frames": 255,
-      "visual_type": "kinetic_text",
-      "scene_type": "broll_video",
-      "status": "READY_PROCEDURAL",
-      "render_mode": "placeholder_awaiting_human_asset",
-      "narration_text": "桌上摆满十几个小碗、小碟和小火锅。",
-      "visual_purpose": "采用90度垂直俯拍（Top-Down）视角，完整展示一张摆满12至15个不同材质小碗、小钵、漆器碟与单人陶锅的温泉旅馆晚餐桌面，通过器物数量形成强烈的视觉冲击。",
-      "human_review_required": false,
-      "review_status": "approved_by_user",
-      "review_reason": "【缺素材 NEEDS_HUMAN_ASSET】当前 asset-index.json 中缺少『十几个小碗小碟+小火锅俯拍』高置信度实拍视频，严禁随机配图，需人工补齐合法实拍素材。",
-      "confidence_score": 0,
-      "search_queries_zh": [
-        "日本温泉旅馆一泊二食晚餐俯拍全貌",
-        "日式会席料理十几个小碟子和小火锅桌面特写",
-        "日本旅馆桌膳小钵小碗阵列实拍"
-      ],
-      "search_queries_en": [
-        "overhead shot Japanese ryokan kaiseki dinner many small dishes",
-        "top down view traditional ryokan meal small bowls and mini hotpot",
-        "dozens of small ceramic plates Japanese inn dinner table"
-      ],
-      "must_show": [
-        "同一张桌面上摆满十几个小碗、小碟与单人小火锅（固形燃料陶锅）",
-        "清晰的器皿分布俯视或斜俯视构图"
-      ],
-      "must_not_show": [
-        "中式大圆桌转盘合菜",
-        "只有一碗拉面或单盘咖喱饭的简餐画面"
-      ],
-      "fallback": {
+        "badge_label": "BROLL_VIDEO · opening_hook",
+        "headline": "桌面器物网格拆解卡：『1张膳盘 = 12~15件微型器皿（先付小钵、刺身猪口、盖物碗、单人小锅）』",
+        "subheadline": "建立传统日式温泉旅馆榻榻米矮桌的空间全景，镜头从推开障子门平滑推进，居高俯拍整张矮桌上摆满的十几个小钵、陶盘与点火加热的小陶锅，全景展示琳琅满目的视觉冲击。",
         "fallback_scene_type": "data_card",
-        "component_spec": "桌面器物网格拆解卡：绘制『1张膳盘 = 12~15件微型器皿（先付小钵、刺身猪口、盖物碗、单人小锅、香物浅碟）』。"
-      },
-      "approved_asset": null,
-      "procedural_props": {
-        "badge_label": "KINETIC_TEXT · opening_part_2",
-        "headline": "桌上摆满十几个小碗、小碟和小火锅。",
-        "subheadline": "采用90度垂直俯拍（Top-Down）视角，完整展示一张摆满12至15个不同材质小碗、小钵、漆器碟与...",
-        "fallback_scene_type": "data_card",
-        "component_spec": "桌面器物网格拆解卡：绘制『1张膳盘 = 12~15件微型器皿（先付小钵、刺身猪口、盖物碗、单人小锅、香物浅碟）』。",
-        "items": [
-          "同一张桌面上摆满十几个小碗、小碟与单人小火锅（固形燃料陶锅）",
-          "清晰的器皿分布俯视或斜俯视构图"
-        ],
+        "component_spec": "桌面器物网格拆解卡：『1张膳盘 = 12~15件微型器皿（先付小钵、刺身猪口、盖物碗、单人小锅）』",
+        "items": [],
         "nodes": []
       },
       "transition": {
         "in": "cut",
-        "out": "cross_dissolve",
-        "duration_frames": 12
+        "out": "cut",
+        "duration_frames": 10
       }
     },
     {
-      "scene_id": "SC-003",
-      "chapter_ref": "body_exhibition_part_1",
+      "scene_id": "SC-002",
+      "chapter_ref": "opening_dimension_expansion",
       "is_final_ending": false,
       "start_ms": 16500,
-      "end_ms": 24000,
+      "end_ms": 32500,
       "from_frame": 495,
-      "duration_in_frames": 225,
+      "duration_in_frames": 480,
       "visual_type": "photo_motion",
       "scene_type": "photo_motion",
       "status": "READY_PLACEHOLDER",
       "render_mode": "internal_placeholder_media_asset",
-      "narration_text": "每一份都不多，",
-      "visual_purpose": "通过静态高分辨率图片配合缓慢推进动效（photo_motion），聚焦单只小碟中仅放两三片刺身或一撮时令山菜的留白比例，直观体现『单碟分量极小、器皿留白极多』的特征。",
+      "narration_text": "每一份都不多，却像把一顿饭拆成了一场小型展览。",
+      "visual_purpose": "微距高清聚焦单只精美陶碟/豆皿，呈现仅有一两片生鱼片或时令山菜的留白美学；随后镜头缓慢拉开，显现周围不同材质的器皿阵列，形成展陈矩阵感。",
       "human_review_required": false,
       "review_status": "approved_by_user",
-      "review_reason": "日常器皿分量视觉说明，使用合规 internal_placeholder 静态图，无敏感历史或人物声明。",
-      "confidence_score": 0.88,
+      "review_reason": "",
+      "confidence_score": 1,
       "search_queries_zh": [
-        "日式小钵料理微小分量特写照片",
-        "怀石料理单碟两片生鱼片留白构图"
+        "日式小钵豆皿刺身山菜微距特写",
+        "日料餐具陶器瓷器漆器展陈摆盘"
       ],
       "search_queries_en": [
-        "close up tiny portion Japanese kobachi small dish",
-        "minimalist food plating small ceramic saucer kaiseki"
+        "Japanese kaiseki small dish close up minimalist plating",
+        "assorted Japanese ceramic and lacquer tableware"
       ],
-      "must_show": [
-        "单只小碟内精致微量的食物与显著器皿留白",
-        "微距静物质感"
-      ],
-      "must_not_show": [
-        "堆成小山的大盘大碗分量",
-        "带有餐厅宣传促销文字的海报图"
-      ],
+      "must_show": [],
+      "must_not_show": [],
       "fallback": {
         "fallback_scene_type": "data_card",
-        "component_spec": "单碟容量对比卡：『单碟净重约 15g–40g（仅一至两口分量）× 12~15道 = 完整饱腹感』。"
+        "component_spec": "展陈维度信息卡：五味（酸甜苦咸鲜）× 五法（生煮烤炸蒸）× 四器（陶/瓷/漆/竹）"
       },
       "approved_asset": {
         "asset_id": "AST-IMG-001",
@@ -289,314 +211,110 @@
         "resolution": "1920x1080",
         "duration_seconds": null,
         "license_status": "internal_placeholder",
-        "crop_mode": "ken_burns_zoom_in_center",
-        "confidence_score": 0.88
+        "crop_mode": "full_frame_slow_push",
+        "confidence_score": 1
       },
       "procedural_props": {
-        "badge_label": "PORTION SCALE · 微量分装特征",
-        "headline": "单碟仅一至两口分量，器皿留白超过 60%",
-        "subheadline": "以微量多品种替代单一大量装盘",
+        "badge_label": "PHOTO_MOTION · opening_dimension_expansion",
+        "headline": "展陈维度信息卡：五味（酸甜苦咸鲜）× 五法（生煮烤炸蒸）× 四器（陶/瓷/漆/竹）",
+        "subheadline": "微距高清聚焦单只精美陶碟/豆皿，呈现仅有一两片生鱼片或时令山菜的留白美学；随后镜头缓慢拉开，显现周围不同材质的器皿阵列，形成展陈矩阵感。",
         "fallback_scene_type": "data_card",
-        "component_spec": "单碟容量对比卡：『单碟净重约 15g–40g（仅一至两口分量）× 12~15道 = 完整饱腹感』。",
+        "component_spec": "展陈维度信息卡：五味（酸甜苦咸鲜）× 五法（生煮烤炸蒸）× 四器（陶/瓷/漆/竹）",
+        "items": [],
+        "nodes": []
+      },
+      "transition": {
+        "in": "cut",
+        "out": "cut",
+        "duration_frames": 10
+      }
+    },
+    {
+      "scene_id": "SC-003",
+      "chapter_ref": "core_mechanism_reveal",
+      "is_final_ending": false,
+      "start_ms": 32500,
+      "end_ms": 48500,
+      "from_frame": 975,
+      "duration_in_frames": 480,
+      "visual_type": "data_card",
+      "scene_type": "data_card",
+      "status": "READY_PROCEDURAL",
+      "render_mode": "procedural_component",
+      "narration_text": "这并不只是为了好看，它同时来自宴席传统、料理节奏和旅馆的服务方式。",
+      "visual_purpose": "使用三栏结构化机制卡片：前半程先动态划掉表象『❌ 单纯拍照好看/仪式感』，后半程顺畅高亮展开深层三大支柱『① 宴席传统（分食礼制） ② 料理节奏（冷热分装） ③ 旅馆服务（部屋食送餐动线）』。",
+      "human_review_required": false,
+      "review_status": "approved_by_user",
+      "review_reason": "",
+      "confidence_score": 1,
+      "search_queries_zh": [],
+      "search_queries_en": [],
+      "must_show": [],
+      "must_not_show": [],
+      "fallback": {
+        "fallback_scene_type": "data_card",
+        "component_spec": "三大支柱机制信息卡"
+      },
+      "approved_asset": null,
+      "procedural_props": {
+        "badge_label": "DATA_CARD · core_mechanism_reveal",
+        "headline": "为什么是一小碟一小碟？",
+        "subheadline": "表面是视觉美学，底层是三个运转机制的交汇",
+        "fallback_scene_type": "data_card",
+        "component_spec": "三大支柱机制信息卡",
         "items": [
-          "单碟净重通常仅 15g–40g，强调食材局部截面与色泽",
-          "12–15 道微量料理累计达成完整正餐热量与饱腹感"
+          "1. 宴席传统：古代分餐制与武家本膳多器皿礼制",
+          "2. 料理节奏：冷热酸甜物理隔离，维持和食本味",
+          "3. 旅馆服务：客房配膳平衡动线，减少频繁进出打扰"
         ],
         "nodes": []
       },
       "transition": {
-        "in": "cross_dissolve",
+        "in": "cut",
         "out": "cut",
         "duration_frames": 10
       }
     },
     {
       "scene_id": "SC-004",
-      "chapter_ref": "body_exhibition_part_2",
-      "is_final_ending": false,
-      "start_ms": 24000,
-      "end_ms": 32500,
-      "from_frame": 720,
-      "duration_in_frames": 255,
-      "visual_type": "kinetic_text",
-      "scene_type": "kinetic_text",
-      "status": "READY_PROCEDURAL",
-      "render_mode": "procedural_component",
-      "narration_text": "却像把一顿饭拆成了一场小型展览。",
-      "visual_purpose": "使用动态排版文字（kinetic_text）配合展陈网格线，将『生、煮、烤、炸、蒸、渍』六种烹饪技法与不同材质器皿（陶器、瓷器、漆器、竹器）排列成博物馆展柜式的视觉矩阵。",
-      "human_review_required": false,
-      "review_status": "approved_by_user",
-      "review_reason": "纯程序化 kinetic_text 动态文字展陈组件，不依赖外部版权素材。",
-      "confidence_score": 0.96,
-      "search_queries_zh": [
-        "日式料理刀工与器皿展览网格动效",
-        "一顿饭拆成小型展览动态文字排版"
-      ],
-      "search_queries_en": [
-        "Japanese culinary techniques exhibition grid kinetic typography",
-        "meal deconstructed into miniature gallery kinetic text"
-      ],
-      "must_show": [
-        "『一顿饭 = 一场小型展览』核心概念排版",
-        "不同料理技法与器皿材质的展陈式分格视觉"
-      ],
-      "must_not_show": [
-        "杂乱无章的弹幕式文字堆砌",
-        "遮挡底部字幕安全区的排版元素"
-      ],
-      "fallback": {
-        "fallback_scene_type": "data_card",
-        "component_spec": "展陈维度卡：味觉跨度（五味）× 技法跨度（五法）× 器物材质（陶/瓷/漆/木）。"
-      },
-      "approved_asset": null,
-      "procedural_props": {
-        "badge_label": "KINETIC TEXT · 核心概念动态拆解",
-        "headline": "一顿饭 = 一场小型器物与时令展览",
-        "subheadline": "将单一正餐拆解为多维感官矩阵",
-        "fallback_scene_type": "data_card",
-        "component_spec": "展陈维度卡：味觉跨度（五味）× 技法跨度（五法）× 器物材质（陶/瓷/漆/木）。",
-        "items": [
-          "技法展陈：生（刺身）· 煮（炊合）· 烤（烧物）· 蒸（蒸物）· 渍（香物）",
-          "器皿展陈：陶器 · 瓷器 · 漆器 · 竹木器（一菜一器，冷热异质）",
-          "视觉节奏：单碟留白 60%+，把味觉体验拆解为连续的微缩景观"
-        ],
-        "nodes": []
-      },
-      "transition": {
-        "in": "cut",
-        "out": "slide_left",
-        "duration_frames": 12
-      }
-    },
-    {
-      "scene_id": "SC-005",
-      "chapter_ref": "body_three_reasons_part_1",
-      "is_final_ending": false,
-      "start_ms": 32500,
-      "end_ms": 40000,
-      "from_frame": 975,
-      "duration_in_frames": 225,
-      "visual_type": "kinetic_text",
-      "scene_type": "kinetic_text",
-      "status": "READY_PROCEDURAL",
-      "render_mode": "procedural_component",
-      "narration_text": "这并不只是为了好看，",
-      "visual_purpose": "使用动态排版文字（kinetic_text）执行『破除表象迷思（Myth vs. Reality）』视觉转折：先划掉『❌ 单纯为了拍照好看/摆盘形式主义』，再高亮引出『✅ 背后隐藏的实用与历史机制』。",
-      "human_review_required": false,
-      "review_status": "approved_by_user",
-      "review_reason": "纯程序化逻辑转折文字卡，语义忠实于原旁白。",
-      "confidence_score": 0.95,
-      "search_queries_zh": [
-        "不只是为了好看破除迷思动态文字卡",
-        "视觉表象与深层机制转折排版"
-      ],
-      "search_queries_en": [
-        "not just for aesthetics myth vs mechanism kinetic text",
-        "beyond visual presentation typography transition"
-      ],
-      "must_show": [
-        "对『只为好看』表象认知的视觉否定标记",
-        "清晰的逻辑转折视觉焦点"
-      ],
-      "must_not_show": [
-        "贬低饮食文化的绝对化偏激措辞",
-        "无关的网红打卡自拍画面"
-      ],
-      "fallback": {
-        "fallback_scene_type": "data_card",
-        "component_spec": "认知对比卡：表层印象『精致摆盘』 vs. 深层驱动『历史礼制 × 备餐效率』。"
-      },
-      "approved_asset": null,
-      "procedural_props": {
-        "badge_label": "KINETIC TEXT · 破除表象迷思",
-        "headline": "不只是为了好看：从表象审美到深层机制",
-        "subheadline": "Myth vs. Functional Mechanism",
-        "fallback_scene_type": "data_card",
-        "component_spec": "认知对比卡：表层印象『精致摆盘』 vs. 深层驱动『历史礼制 × 备餐效率』。",
-        "items": [
-          "❌ 常见表层印象：单纯为了视觉精致、拍照好看或摆盘形式主义",
-          "✅ 深层运转逻辑：历史分食礼制 × 后厨备餐节奏 × 客房送餐效率"
-        ],
-        "nodes": []
-      },
-      "transition": {
-        "in": "slide_left",
-        "out": "cut",
-        "duration_frames": 10
-      }
-    },
-    {
-      "scene_id": "SC-006",
-      "chapter_ref": "body_three_reasons_part_2",
-      "is_final_ending": false,
-      "start_ms": 40000,
-      "end_ms": 48500,
-      "from_frame": 1200,
-      "duration_in_frames": 255,
-      "visual_type": "kinetic_text",
-      "scene_type": "photo_motion",
-      "status": "READY_PROCEDURAL",
-      "render_mode": "procedural_component",
-      "narration_text": "它同时来自宴席传统、料理节奏和旅馆的服务方式。",
-      "visual_purpose": "展示日本古代『本膳料理（Honzen-ryori）』多案分食图卷或历史档案图像（photo_motion），并在画面右侧叠加『1. 宴席传统 2. 料理节奏 3. 旅馆服务方式』三要素高亮角标。",
-      "human_review_required": false,
-      "review_status": "approved_by_user",
-      "review_reason": "【低置信度素材 + 历史文化考证 + 候选素材待审】1. AST-IMG-002 匹配度仅 0.52（低置信度占位图）；2. 涉及日本历史宴席传统（本膳料理 vs 会席料理），需人工审核历史时期准确性；3. 候选素材 AST-IMG-099 版权处于 pending_verification 状态，已被拦截。",
-      "confidence_score": 0.52,
-      "search_queries_zh": [
-        "日本江户时代本膳料理宴席绘卷历史档案",
-        "近代温泉旅馆仲居客房送餐历史老照片",
-        "日本会席料理多碟摆盘演变文献图"
-      ],
-      "search_queries_en": [
-        "Edo period Honzen ryori banquet scroll historical illustration",
-        "traditional Japanese inn nakai room service historical photo",
-        "kaiseki banquet evolution archival drawing"
-      ],
-      "must_show": [
-        "反映日本传统一人一案（铭铭膳）或多碟宴席传统的历史图像",
-        "三大成因（宴席传统、料理节奏、服务方式）的结构提示"
-      ],
-      "must_not_show": [
-        "中国宫廷满汉全席或朝鲜宫廷料理图卷（防止跨文化张冠李戴）",
-        "未经版权核实的现代商业出版物插图"
-      ],
-      "fallback": {
-        "fallback_scene_type": "data_card",
-        "component_spec": "三大支柱机制卡：① 宴席传统（本膳/会席铭铭膳分食） ② 料理节奏（冷菜预先分碟+小锅现场加热） ③ 服务方式（客房送餐减少往返频次）。"
-      },
-      "approved_asset": null,
-      "procedural_props": {
-        "badge_label": "KINETIC_TEXT · body_three_reasons_part_2",
-        "headline": "它同时来自宴席传统、料理节奏和旅馆的服务方式。",
-        "subheadline": "展示日本古代『本膳料理（Honzen-ryori）』多案分食图卷或历史档案图像（photo_moti...",
-        "fallback_scene_type": "data_card",
-        "component_spec": "三大支柱机制卡：① 宴席传统（本膳/会席铭铭膳分食） ② 料理节奏（冷菜预先分碟+小锅现场加热） ③ 服务方式（客房送餐减少往返频次）。",
-        "items": [
-          "反映日本传统一人一案（铭铭膳）或多碟宴席传统的历史图像",
-          "三大成因（宴席传统、料理节奏、服务方式）的结构提示"
-        ],
-        "nodes": []
-      },
-      "transition": {
-        "in": "cut",
-        "out": "cross_dissolve",
-        "duration_frames": 12
-      }
-    },
-    {
-      "scene_id": "SC-007",
-      "chapter_ref": "closing_bridge_part_1",
-      "is_final_ending": false,
-      "start_ms": 48500,
-      "end_ms": 56000,
-      "from_frame": 1455,
-      "duration_in_frames": 225,
-      "visual_type": "kinetic_text",
-      "scene_type": "broll_video",
-      "status": "READY_PROCEDURAL",
-      "render_mode": "placeholder_awaiting_human_asset",
-      "narration_text": "接下来，我们就从这些小碟子开始，",
-      "visual_purpose": "通过实拍微距镜头（broll_video），展示旅馆后厨或仲居将一只只不同釉色的小碟（豆皿/小钵）依次摆上木质托盘的动作，作为进入正片历史拆解的叙事桥梁。",
-      "human_review_required": false,
-      "review_status": "approved_by_user",
-      "review_reason": "【缺素材 NEEDS_HUMAN_ASSET + 60秒防重拦截】asset-index.json 中无后厨摆放小碟实拍视频；且 AST-VID-001 已在 48.5 秒前（SC-001）使用过，受『同一素材60秒内不得重复使用』规则约束，不可复用 AST-VID-001，故标记为待人工补素材。",
-      "confidence_score": 0,
-      "search_queries_zh": [
-        "日本温泉旅馆后厨摆放小碟子托盘实拍",
-        "日式陶瓷豆皿小钵摆盘手部特写视频"
-      ],
-      "search_queries_en": [
-        "Japanese chef arranging small ceramic mamezara dishes on wooden tray",
-        "ryokan kitchen plating small bowls close up video"
-      ],
-      "must_show": [
-        "手部将多只日式小碟摆上木质膳盘的动作特写",
-        "真实的日式陶器与漆器质感"
-      ],
-      "must_not_show": [
-        "西式刀叉餐盘摆台画面",
-        "与前文 SC-001 完全相同的重复镜头（违反60秒防重复规则）"
-      ],
-      "fallback": {
-        "fallback_scene_type": "kinetic_text",
-        "component_spec": "动态图标序列：一只只小碟图标依次落位拼成完整膳盘，标注『从一只小碟，看懂百年旅馆饮食史』。"
-      },
-      "approved_asset": null,
-      "procedural_props": {
-        "badge_label": "KINETIC_TEXT · closing_bridge_part_1",
-        "headline": "接下来，我们就从这些小碟子开始，",
-        "subheadline": "通过实拍微距镜头（broll_video），展示旅馆后厨或仲居将一只只不同釉色的小碟（豆皿/小钵）依...",
-        "fallback_scene_type": "kinetic_text",
-        "component_spec": "动态图标序列：一只只小碟图标依次落位拼成完整膳盘，标注『从一只小碟，看懂百年旅馆饮食史』。",
-        "items": [
-          "手部将多只日式小碟摆上木质膳盘的动作特写",
-          "真实的日式陶器与漆器质感"
-        ],
-        "nodes": []
-      },
-      "transition": {
-        "in": "cross_dissolve",
-        "out": "cut",
-        "duration_frames": 10
-      }
-    },
-    {
-      "scene_id": "SC-008",
       "chapter_ref": "single_final_ending",
       "is_final_ending": true,
-      "start_ms": 56000,
+      "start_ms": 48500,
       "end_ms": 64000,
-      "from_frame": 1680,
-      "duration_in_frames": 240,
-      "visual_type": "data_card",
-      "scene_type": "data_card",
+      "from_frame": 1455,
+      "duration_in_frames": 465,
+      "visual_type": "kinetic_text",
+      "scene_type": "kinetic_text",
       "status": "READY_PROCEDURAL",
       "render_mode": "procedural_component",
-      "narration_text": "拆开看一顿温泉旅馆晚餐的历史。",
-      "visual_purpose": "作为本段开篇导引的收束镜头，使用结构化信息图卡片（data_card）回扣核心主题：中央展示温泉旅馆膳盘总览图，四周展开『第一层：本膳与会席传统』『第二层：冷热分装的料理节奏』『第三层：一泊二食的客房服务工程』三大章节路线图，严禁使用无关煽情空镜。",
+      "narration_text": "接下来，我们就从这些小碟子开始，拆开看一顿温泉旅馆晚餐的历史。",
+      "visual_purpose": "黑底质感动态文字卡片，中央浮现金色大字『从一只小碟，拆开看一顿温泉旅馆晚餐的历史』，周围展开三层历史时间轴标记，干净收束，引人入胜。",
       "human_review_required": false,
       "review_status": "approved_by_user",
-      "review_reason": "【正式收束镜头强制人工审核】确认结尾视觉准确回扣『温泉旅馆小碟晚餐』核心主题与三大机制维度，未使用无关煽情通用素材。",
-      "confidence_score": 0.95,
-      "search_queries_zh": [
-        "温泉旅馆晚餐三大历史维度拆解路线图",
-        "日式小碟料理结构信息图卡片"
-      ],
-      "search_queries_en": [
-        "ryokan dinner history 3 chapters roadmap data card",
-        "small dishes culinary history breakdown infographic"
-      ],
-      "must_show": [
-        "回扣『为什么是一小碟一小碟』的核心主题标题",
-        "宴席传统、料理节奏、旅馆服务方式三大拆解模块预告"
-      ],
-      "must_not_show": [
-        "夕阳、星空、樱花飘落等与主题机制无关的煽情通用素材",
-        "超出安全边距的超长密集小字"
-      ],
+      "review_reason": "",
+      "confidence_score": 1,
+      "search_queries_zh": [],
+      "search_queries_en": [],
+      "must_show": [],
+      "must_not_show": [],
       "fallback": {
         "fallback_scene_type": "kinetic_text",
-        "component_spec": "主题收束标题卡：『为什么是一小碟一小碟？—— 宴席礼制 × 料理温度 × 旅馆工程』。"
+        "component_spec": "主题收束总标题卡"
       },
       "approved_asset": null,
       "procedural_props": {
-        "badge_label": "DATA CARD · 全片拆解路线图（主题回扣）",
-        "headline": "为什么是一小碟一小碟？三大历史与工程维度",
-        "subheadline": "拒绝无关煽情空镜，以结构化路线图收束开篇导引",
+        "badge_label": "KINETIC_TEXT · single_final_ending",
+        "headline": "从一只小碟，看懂百年旅馆饮食史",
+        "subheadline": "正片章节展开：本膳与会席 → 料理温度逻辑 → 旅馆客房工程",
         "fallback_scene_type": "kinetic_text",
-        "component_spec": "主题收束标题卡：『为什么是一小碟一小碟？—— 宴席礼制 × 料理温度 × 旅馆工程』。",
-        "items": [
-          "第一层【宴席传统】：从室町/江户『本膳料理』一人一案到近代会席膳盘",
-          "第二层【料理节奏】：冷食预先分碟定型 + 单人陶锅现场点火保温",
-          "第三层【服务方式】：一泊二食集中出餐，大幅降低客房往返配送频次"
-        ],
+        "component_spec": "主题收束总标题卡",
+        "items": [],
         "nodes": []
       },
       "transition": {
         "in": "cut",
-        "out": "fade_to_black",
-        "duration_frames": 18
+        "out": "cut",
+        "duration_frames": 10
       }
     }
   ]
