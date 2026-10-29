@@ -4,6 +4,7 @@
   "private": true,
   "description": "Topic-agnostic Why Explainer Video Studio monorepo: packages/video-template, packages/qc-tools, and projects/<project_id>/",
   "scripts": {
+    "status": "node packages/qc-tools/project-status.mjs",
     "compile:props": "node packages/qc-tools/generate-render-props.mjs",
     "scan:assets": "node packages/qc-tools/scan-assets.mjs",
     "qc": "node packages/qc-tools/run-qc.mjs",

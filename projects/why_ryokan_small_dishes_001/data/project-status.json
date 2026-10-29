@@ -1,0 +1,74 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WhyVideoProjectStatus",
+  "description": "WhyVideo 知识型视频生产项目工程进度与验收状态看板数据",
+  "project_id": "why_ryokan_small_dishes_001",
+  "title_display": "为什么日本温泉旅馆的晚餐常常是一小碟一小碟？",
+  "last_updated": "2026-10-29T17:52:00+09:00",
+  "overall_progress_percent": 85,
+  "current_phase": "PHASE_4_VISUAL_REVIEW_AND_PREVIEW",
+  "next_action": "720p 预览片已生成并通过黑幕降级解决门禁；待确认最终正片素材替换或直接进行全高清（1080p）最终成片渲染导出。",
+  "pipeline_stages": [
+    {
+      "stage_id": "stage_1_research",
+      "stage_name": "阶段一：立项与资料考证",
+      "weight_percent": 15,
+      "status": "COMPLETED",
+      "progress_percent": 100,
+      "summary": "完成立项 Brief，提取并严格分类 8 张证据卡（涵盖铭铭膳、本膳料理、会席料理、和食防串味与一泊二食历史）。",
+      "key_artifacts": [
+        "projects/why_ryokan_small_dishes_001/data/brief.json",
+        "projects/why_ryokan_small_dishes_001/data/asset-index.json"
+      ]
+    },
+    {
+      "stage_id": "stage_2_scriptwriting",
+      "stage_name": "阶段二：大纲与文案撰写",
+      "weight_percent": 25,
+      "status": "COMPLETED",
+      "progress_percent": 100,
+      "summary": "完成 6 章大纲结构设计并通过人工审核；完成开篇及正文撰写，事实主张严格绑定证据卡，完成全文统稿与单结尾收束。",
+      "key_artifacts": [
+        "projects/why_ryokan_small_dishes_001/data/final-script.json"
+      ]
+    },
+    {
+      "stage_id": "stage_3_audio_align",
+      "stage_name": "阶段三：配音与时间戳对齐",
+      "weight_percent": 20,
+      "status": "COMPLETED",
+      "progress_percent": 100,
+      "summary": "已生成 64.0 秒真人/TTS 配音音频（narration.wav），生成逐句对齐时间戳（sentence-timestamps.json）与时间轴字幕（captions.srt）。",
+      "key_artifacts": [
+        "projects/why_ryokan_small_dishes_001/public/audio/narration.wav",
+        "projects/why_ryokan_small_dishes_001/data/sentence-timestamps.json",
+        "projects/why_ryokan_small_dishes_001/data/captions.srt"
+      ]
+    },
+    {
+      "stage_id": "stage_4_visual_producer",
+      "stage_name": "阶段四：视觉策划与预览渲染",
+      "weight_percent": 25,
+      "status": "COMPLETED",
+      "progress_percent": 100,
+      "summary": "旁白切分为 8 个 4~9 秒镜头单元，配置中英文搜索词与降级方案；缺素材镜头已按用户指令使用黑幕动态文字卡片替代；已成功编译 render-props.json 并渲染出 720p 预览片（preview.mp4）。",
+      "key_artifacts": [
+        "projects/why_ryokan_small_dishes_001/data/scene-manifest.json",
+        "projects/why_ryokan_small_dishes_001/data/render-props.json",
+        "projects/why_ryokan_small_dishes_001/data/video-qc-report.json",
+        "projects/why_ryokan_small_dishes_001/output/preview.mp4"
+      ]
+    },
+    {
+      "stage_id": "stage_5_final_delivery",
+      "stage_name": "阶段五：最终验收与高清交付",
+      "weight_percent": 15,
+      "status": "IN_PROGRESS",
+      "progress_percent": 30,
+      "summary": "720p 预览已可完整播放验证音画与字幕节奏。当前待决定：1) 保持黑幕卡片直接导出 1080p 终版；或 2) 补充实拍视频替换黑幕后渲染 1080p 终版。",
+      "key_artifacts": [
+        "projects/why_ryokan_small_dishes_001/output/preview.mp4"
+      ]
+    }
+  ]
+}
