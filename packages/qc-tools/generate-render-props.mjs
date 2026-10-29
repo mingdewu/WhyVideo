@@ -125,23 +125,31 @@ const timelineTracks = sceneManifest.scenes.map((scene) => {
   }
 
   const manifestProcedural = scene.procedural_props || {};
+  const pptSpec = scene.ppt_slide_spec || {};
   const proceduralProps = {
     badge_label:
       manifestProcedural.badge_label ||
-      `${(scene.visual_type || scene.scene_type).toUpperCase()} · ${
+      `${(scene.visual_type || scene.scene_type || "DATA_CARD").toUpperCase()} · ${
         scene.chapter_ref || scene.scene_id
       }`,
     headline:
       manifestProcedural.headline ||
+      pptSpec.theme_title ||
       scene.fallback?.component_spec ||
       scene.narration_text,
-    subheadline: manifestProcedural.subheadline || scene.visual_purpose,
+    subheadline:
+      manifestProcedural.subheadline ||
+      pptSpec.subtitle ||
+      scene.visual_purpose,
     fallback_scene_type:
       scene.fallback?.fallback_scene_type || "data_card",
     component_spec: scene.fallback?.component_spec || "",
-    items: Array.isArray(manifestProcedural.items)
-      ? manifestProcedural.items
-      : scene.must_show || [],
+    items:
+      Array.isArray(manifestProcedural.items) && manifestProcedural.items.length > 0
+        ? manifestProcedural.items
+        : Array.isArray(pptSpec.bullet_points) && pptSpec.bullet_points.length > 0
+        ? pptSpec.bullet_points
+        : scene.must_show || [],
     nodes: Array.isArray(manifestProcedural.nodes)
       ? manifestProcedural.nodes
       : [],
