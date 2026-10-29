@@ -5,9 +5,9 @@
   "project_id": "why_ryokan_small_dishes_001",
   "title_display": "为什么日本温泉旅馆的晚餐常常是一小碟一小碟？",
   "last_updated": "2026-10-29T17:52:00+09:00",
-  "overall_progress_percent": 85,
-  "current_phase": "PHASE_4_VISUAL_REVIEW_AND_PREVIEW",
-  "next_action": "720p 预览片已生成并通过黑幕降级解决门禁；待确认最终正片素材替换或直接进行全高清（1080p）最终成片渲染导出。",
+  "overall_progress_percent": 100,
+  "current_phase": "PHASE_5_COMPLETED_AND_DELIVERED",
+  "next_action": "1080p 全高清纯净正片已成功导出（final_video_1080p.mp4，42MB），全流程流水线通过最终验收。",
   "pipeline_stages": [
     {
       "stage_id": "stage_1_research",
@@ -63,9 +63,9 @@
       "stage_id": "stage_5_final_delivery",
       "stage_name": "阶段五：最终验收与高清交付",
       "weight_percent": 15,
-      "status": "IN_PROGRESS",
-      "progress_percent": 30,
-      "summary": "720p 预览已可完整播放验证音画与字幕节奏。当前待决定：1) 保持黑幕卡片直接导出 1080p 终版；或 2) 补充实拍视频替换黑幕后渲染 1080p 终版。",
+      "status": "COMPLETED",
+      "progress_percent": 100,
+      "summary": "已成功渲染出 1080p 无水印、无调试框全高清正片，通过 6 维 QC 自动化验证，全片 100% 验收交付。",
       "key_artifacts": [
         "projects/why_ryokan_small_dishes_001/output/preview.mp4"
       ]
