@@ -383,7 +383,7 @@ function normalizePromptConfig(cfg = {}) {
   };
 }
 
-async function downloadRemoteMedia(remoteUrl, localDestPath) {
+async function downloadRemoteMedia(remoteUrl, localDestPath, apiKey = '') {
   const dir = path.dirname(localDestPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   if (remoteUrl.startsWith('data:')) {
@@ -391,7 +391,13 @@ async function downloadRemoteMedia(remoteUrl, localDestPath) {
     fs.writeFileSync(localDestPath, Buffer.from(base64Data, 'base64'));
     return;
   }
-  const resp = await fetch(remoteUrl);
+  const headers = {};
+  if (apiKey && remoteUrl.includes('openrouter.ai')) {
+    headers['Authorization'] = `Bearer ${apiKey.trim()}`;
+    headers['HTTP-Referer'] = 'https://github.com/mingdewu/WhyVideo';
+    headers['X-Title'] = 'WhyVideo Studio';
+  }
+  const resp = await fetch(remoteUrl, { headers });
   if (!resp.ok) throw new Error(`下载媒体文件失败 (HTTP ${resp.status})`);
   const buf = Buffer.from(await resp.arrayBuffer());
   fs.writeFileSync(localDestPath, buf);
@@ -459,6 +465,9 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
     const jobData = await submitResp.json();
     console.log('[OpenRouter Video Job Created]', jobData);
 
+    if (Array.isArray(jobData.urls) && jobData.urls.length > 0) {
+      return jobData.urls[0];
+    }
     if (Array.isArray(jobData.unsigned_urls) && jobData.unsigned_urls.length > 0) {
       return jobData.unsigned_urls[0];
     }
@@ -484,7 +493,7 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
       console.log(`[OpenRouter Video Polling] Job ${jobId} 状态: ${status} (${(i + 1) * 4}s)`);
 
       if (status === 'completed' || status === 'succeeded' || status === 'success') {
-        const videoUrl = pollData.unsigned_urls?.[0] || pollData.url || pollData.video_url;
+        const videoUrl = pollData.urls?.[0] || pollData.unsigned_urls?.[0] || pollData.url || pollData.video_url;
         if (videoUrl) return videoUrl;
       }
 
@@ -654,6 +663,7 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
   }
 
   const sData = await submitResp.json();
+  if (sData.urls?.[0]) return sData.urls[0];
   if (sData.url) return sData.url;
   if (sData.data?.[0]?.url) return sData.data[0].url;
   if (sData.results?.videos?.[0]?.url) return sData.results.videos[0].url;
@@ -680,7 +690,7 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
         const pData = await pollResp.json();
         const st = (pData.status || '').toLowerCase();
         if (st === 'succeed' || st === 'succeeded' || st === 'success' || st === 'completed') {
-          return pData.unsigned_urls?.[0] || pData.results?.videos?.[0]?.url || pData.data?.[0]?.url || pData.output?.[0] || pData.url;
+          return pData.urls?.[0] || pData.unsigned_urls?.[0] || pData.results?.videos?.[0]?.url || pData.data?.[0]?.url || pData.output?.[0] || pData.url;
         }
         if (st === 'failed' || st === 'failure' || st === 'error') {
           throw new Error(`视频生成任务失败: ${pData.reason || pData.error?.message || pData.error || '未知原因'}`);
@@ -1350,7 +1360,7 @@ const server = http.createServer(async (req, res) => {
           const relPath = `assets/video/${fileName}`;
           const localDiskPath = path.join(curPaths.publicDir, relPath);
 
-          await downloadRemoteMedia(videoUrl, localDiskPath);
+          await downloadRemoteMedia(videoUrl, localDiskPath, normalizedCfg.apiKey);
 
           const reqSec = Number(((s.duration_ms || 5000) / 1000).toFixed(1));
           const assetId = registerGeneratedAsset(curPaths, targetProject, s.scene_id, relPath, 'video', reqSec);
@@ -1414,7 +1424,7 @@ const server = http.createServer(async (req, res) => {
           const relPath = `assets/images/${fileName}`;
           const localDiskPath = path.join(curPaths.publicDir, relPath);
 
-          await downloadRemoteMedia(remoteImgUrl, localDiskPath);
+          await downloadRemoteMedia(remoteImgUrl, localDiskPath, normalizedCfg.apiKey);
 
           const assetId = registerGeneratedAsset(curPaths, targetProject, s.scene_id, relPath, 'image', null);
 
