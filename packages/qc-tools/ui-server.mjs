@@ -384,23 +384,87 @@ async function downloadRemoteMedia(remoteUrl, localDestPath) {
   fs.writeFileSync(localDestPath, buf);
 }
 
-// 统一 AI 实体视频生成器 (支持 OpenRouter、各类多模态代理网关、SiliconFlow、Runway 等任意模型 Slug)
-async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openrouter.ai/api/v1', videoModel = 'tencent/hunyuan-video' }, prompt) {
+// 统一 AI 实体视频生成器 (支持 OpenRouter 原生视频端点、各类多模态代理网关、SiliconFlow、Runway 等任意模型 Slug)
+async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openrouter.ai/api/v1', videoModel = 'minimax/hailuo-3' }, prompt) {
   if (!apiKey) throw new Error('未配置 API Key，请先在右上角【🎬 AI 画面/视频模型指定】中填入您的 API Key 并保存');
   const base = baseUrl.trim().replace(/\/+$/, '');
-  const model = videoModel.trim();
+  let model = videoModel.trim();
 
-  console.log(`[Video Generator] 正在通过 ${base} 调用模型 ${model} 生成实体视频...`);
-
-  // 0. 明确阻断与引导：OpenRouter 官方平台不支持视频生成
+  // 0. 原生 OpenRouter 官方视频生成端点 (POST https://openrouter.ai/api/v1/videos)
   if (base.includes('openrouter.ai')) {
-    throw new Error(
-      `OpenRouter 官方平台 (openrouter.ai) 仅提供文本与多模态对话大模型（如 DeepSeek, Claude, GPT-4o），官方未提供 Text-to-Video 实体视频生成接口与 ${model} 视频模型。\n` +
-      `💡 解决方案：\n` +
-      `1. 若您购买的是第三方中转/聚合网关 Key：请将 Base URL 修改为您中转站的专用地址（例如 https://api.your-relay.com/v1），不要填官方 openrouter.ai；\n` +
-      `2. 若需生成真实动态视频：请切换 Base URL 为支持实体视频的网关（如 SiliconFlow 硅基流动: https://api.siliconflow.cn/v1，支持混元/CogVideoX；或 MiniMax 官方: https://api.minimax.chat/v1）；\n` +
-      `3. 若继续使用 OpenRouter：请在当前行选择【📊 动效卡片】，OpenRouter 将为您深度提炼分镜文案，并由 Remotion 渲染出 1080p 纯净大字报动效！`
-    );
+    // 智能映射：MiniMax 视频在 OpenRouter 上的标准模型 ID 为 minimax/hailuo-3 或 minimax/hailuo-3-max
+    if (model === 'minimax/video-01' || model === 'minimax/hailuo' || model === 'minimax-01' || model === 'video-01') {
+      console.log(`[OpenRouter Video] 自动将 ${model} 映射为 OpenRouter 标准模型: minimax/hailuo-3`);
+      model = 'minimax/hailuo-3';
+    }
+
+    console.log(`[OpenRouter Video] 正在提交任务至 ${base}/videos，模型: ${model}...`);
+    const submitResp = await fetch(`${base}/videos`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey.trim()}`,
+        'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+        'X-Title': 'WhyVideo Studio'
+      },
+      body: JSON.stringify({
+        model: model,
+        prompt: prompt,
+        aspect_ratio: '16:9',
+        duration: 5,
+        resolution: '720p'
+      })
+    });
+
+    if (!submitResp.ok) {
+      const errText = await submitResp.text();
+      let errMsg = errText;
+      try {
+        const j = JSON.parse(errText);
+        if (j.error?.message) errMsg = j.error.message;
+      } catch (e) {}
+      throw new Error(`OpenRouter 视频生成请求未通过 (HTTP ${submitResp.status}): ${errMsg}`);
+    }
+
+    const jobData = await submitResp.json();
+    console.log('[OpenRouter Video Job Created]', jobData);
+
+    if (Array.isArray(jobData.unsigned_urls) && jobData.unsigned_urls.length > 0) {
+      return jobData.unsigned_urls[0];
+    }
+
+    const jobId = jobData.id;
+    if (!jobId) throw new Error('OpenRouter 已受理但未返回任务 ID');
+
+    const pollUrl = jobData.polling_url || `${base}/videos/${jobId}`;
+
+    // 轮询生成结果 (最长约 4 分钟，每 4 秒轮询一次)
+    for (let i = 0; i < 60; i++) {
+      await new Promise((r) => setTimeout(r, 4000));
+      const pollResp = await fetch(pollUrl, {
+        headers: {
+          'Authorization': `Bearer ${apiKey.trim()}`,
+          'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+          'X-Title': 'WhyVideo Studio'
+        }
+      });
+      if (!pollResp.ok) continue;
+      const pollData = await pollResp.json();
+      const status = (pollData.status || '').toLowerCase();
+      console.log(`[OpenRouter Video Polling] Job ${jobId} 状态: ${status} (${(i + 1) * 4}s)`);
+
+      if (status === 'completed' || status === 'succeeded' || status === 'success') {
+        const videoUrl = pollData.unsigned_urls?.[0] || pollData.url || pollData.video_url;
+        if (videoUrl) return videoUrl;
+      }
+
+      if (status === 'failed' || status === 'error') {
+        const failMsg = pollData.error?.message || pollData.error || '视频生成任务失败';
+        throw new Error(`OpenRouter 视频生成失败: ${failMsg}`);
+      }
+    }
+
+    throw new Error(`OpenRouter 视频生成超时 (任务 ID: ${jobId})，请稍后检查网关或重试`);
   }
 
   // 1. 如果是原生 SiliconFlow 网关
@@ -484,6 +548,7 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
 
   // 4. 通用 OpenAI 兼容 / 第三方中转聚合网关：依次尝试端点
   const candidateEndpoints = [
+    `${base}/videos`,
     `${base}/video/generations`,
     `${base}/videos/generations`,
     `${base}/video_generation`,
@@ -554,7 +619,7 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
   }
 
   if (!submitResp || !submitResp.ok) {
-    const errText = submitResp ? await submitResp.text() : (lastErrorDetail || '未能连接到任何有效的视频生成端点 (/video/generations, /video_generation, /video/submit)');
+    const errText = submitResp ? await submitResp.text() : (lastErrorDetail || '未能连接到任何有效的视频生成端点 (/videos, /video/generations, /video_generation, /video/submit)');
     throw new Error(`视频模型 ${model} 生成请求未通过 (HTTP ${submitResp ? submitResp.status : 500}): ${errText.slice(0, 260)}`);
   }
 
@@ -563,30 +628,32 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
   if (sData.data?.[0]?.url) return sData.data[0].url;
   if (sData.results?.videos?.[0]?.url) return sData.results.videos[0].url;
   if (sData.output?.[0]) return sData.output[0];
+  if (Array.isArray(sData.unsigned_urls) && sData.unsigned_urls.length > 0) return sData.unsigned_urls[0];
 
   const taskId = sData.id || sData.taskId || sData.requestId || sData.task_id;
   if (!taskId) throw new Error('网关已响应但未返回视频 URL 或任务 ID');
 
   // 轮询任务
   const pollPaths = [
+    `${base}/videos/${taskId}`,
     `${base}/video/generations/${taskId}`,
     `${base}/video/status?requestId=${taskId}`,
     `${base}/tasks/${taskId}`
   ];
 
-  for (let i = 0; i < 35; i++) {
-    await new Promise((r) => setTimeout(r, 3000));
+  for (let i = 0; i < 45; i++) {
+    await new Promise((r) => setTimeout(r, 4000));
     for (const pUrl of pollPaths) {
       try {
         const pollResp = await fetch(pUrl, { headers: { 'Authorization': `Bearer ${apiKey.trim()}` } });
         if (!pollResp.ok) continue;
         const pData = await pollResp.json();
         const st = (pData.status || '').toLowerCase();
-        if (st === 'succeed' || st === 'succeeded' || st === 'success') {
-          return pData.results?.videos?.[0]?.url || pData.data?.[0]?.url || pData.output?.[0] || pData.url;
+        if (st === 'succeed' || st === 'succeeded' || st === 'success' || st === 'completed') {
+          return pData.unsigned_urls?.[0] || pData.results?.videos?.[0]?.url || pData.data?.[0]?.url || pData.output?.[0] || pData.url;
         }
-        if (st === 'failed' || st === 'failure') {
-          throw new Error(`视频生成任务失败: ${pData.reason || pData.error || '未知原因'}`);
+        if (st === 'failed' || st === 'failure' || st === 'error') {
+          throw new Error(`视频生成任务失败: ${pData.reason || pData.error?.message || pData.error || '未知原因'}`);
         }
       } catch (err) {
         if (err.message.includes('视频生成任务失败')) throw err;
@@ -1016,6 +1083,45 @@ const server = http.createServer(async (req, res) => {
       }));
     }
 
+    // 4.16 获取 OpenRouter 原生支持的全部 31+ 款 AI 视频生成模型列表
+    if (req.method === 'GET' && pathname === '/api/openrouter-video-models') {
+      try {
+        const resModels = await fetch('https://openrouter.ai/api/v1/videos/models', {
+          headers: {
+            'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+            'X-Title': 'WhyVideo Studio'
+          }
+        });
+        if (resModels.ok) {
+          const mJson = await resModels.json();
+          const list = (mJson.data || []).map((m) => ({
+            id: m.id,
+            name: m.name || m.id,
+            description: m.description ? m.description.slice(0, 100) : '',
+            durations: m.supported_durations,
+            aspect_ratios: m.supported_aspect_ratios
+          }));
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: true, models: list }));
+        }
+      } catch (e) {
+        console.error('Failed to fetch openrouter video models:', e.message);
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({
+        ok: true,
+        models: [
+          { id: 'minimax/hailuo-3', name: 'MiniMax: H3 (海螺视频 3)' },
+          { id: 'minimax/hailuo-3-max', name: 'MiniMax: H3 Max' },
+          { id: 'bytedance/seedance-2.0', name: 'ByteDance: Seedance 2.0' },
+          { id: 'alibaba/wan-2.6', name: 'Alibaba: Wan 2.6' },
+          { id: 'kwaivgi/kling-v3.0-std', name: 'Kling: Video v3.0 Standard' },
+          { id: 'google/veo-3.1-fast', name: 'Google: Veo 3.1 Fast' },
+          { id: 'runway/gen-4.5', name: 'Runway: Gen-4.5' }
+        ]
+      }));
+    }
+
     // 4.2 保存模型网关配置 (统一 OpenRouter / 网关多模型映射)
     if (req.method === 'POST' && (pathname === '/api/save-visual-config' || pathname === '/api/save-openrouter-config')) {
       const body = await readBody(req);
@@ -1031,7 +1137,7 @@ const server = http.createServer(async (req, res) => {
         baseUrl: body.baseUrl || existing.baseUrl || 'https://openrouter.ai/api/v1',
         apiKey: body.apiKey !== undefined ? body.apiKey : (existing.apiKey || ''),
         textModel: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
-        videoModel: body.videoModel || existing.videoModel || 'tencent/hunyuan-video',
+        videoModel: body.videoModel || existing.videoModel || 'minimax/hailuo-3',
         imageModel: body.imageModel || existing.imageModel || 'black-forest-labs/flux-1-schnell',
         model: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
         selected_visual_model: 'openrouter',
@@ -1683,7 +1789,7 @@ function renderMainHtml() {
           <div class="flex items-center gap-2 flex-wrap">
             <span class="text-xs font-bold text-purple-300">🤖 当前指定模型：</span>
             <span id="currentVideoModelBadge" class="px-2 py-0.5 rounded text-[11px] font-extrabold bg-emerald-500/25 text-emerald-300 border border-emerald-500/40">
-              🎬 视频: tencent/hunyuan-video
+              🎬 视频: minimax/hailuo-3
             </span>
             <span id="currentTextModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-purple-500/25 text-purple-200 border border-purple-500/40">
               ✍️ 分镜: deepseek-chat
@@ -1800,7 +1906,7 @@ function renderMainHtml() {
             <input type="text" id="currentBaseUrlInput" value="https://openrouter.ai/api/v1" placeholder="API 基础网关地址 (例如: https://openrouter.ai/api/v1 或第三方中转站)..."
               class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
             <p class="text-[10px] text-gray-400 mt-1">
-              💡 <b>注意</b>：OpenRouter 官方仅提供文本/对话模型。生成真实 MP4 实体视频需使用提供文生视频的网关（如硅基流动、MiniMax 或支持该模型的第三方中转站）。
+              💡 <b>注意</b>：已全面接入 OpenRouter 原生文生视频 API（POST /api/v1/videos），直接支持 MiniMax 海螺、阿里万象、字节 Seedance、快手可灵 Kling、Google Veo 等全部 31+ 款官方视频模型。
             </p>
           </div>
 
@@ -1825,16 +1931,18 @@ function renderMainHtml() {
               <span class="text-[10px] text-emerald-400/90 font-mono">负责渲染 16:9 真实 MP4 实体视频</span>
             </div>
             <div class="flex flex-wrap gap-1.5">
-              <button type="button" onclick="selectVideoModelSlug('tencent/hunyuan-video')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">腾讯混元 HunyuanVideo</button>
-              <button type="button" onclick="selectVideoModelSlug('thudm/cogvideox-5b')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">CogVideoX-5b</button>
-              <button type="button" onclick="selectVideoModelSlug('kling/v1.5')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">快手可灵 Kling</button>
-              <button type="button" onclick="selectVideoModelSlug('luma/ray')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">Luma Ray</button>
-              <button type="button" onclick="selectVideoModelSlug('runway/gen3')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">Runway Gen-3</button>
-              <button type="button" onclick="selectVideoModelSlug('minimax/video-01')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">MiniMax Video-01</button>
-              <button type="button" onclick="selectVideoModelSlug('wan-ai/wan2.1-t2v')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">阿里万象 Wan2.1</button>
+              <button type="button" onclick="selectVideoModelSlug('minimax/hailuo-3')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">MiniMax 海螺 H3</button>
+              <button type="button" onclick="selectVideoModelSlug('minimax/hailuo-3-max')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">MiniMax H3 Max</button>
+              <button type="button" onclick="selectVideoModelSlug('bytedance/seedance-2.0')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">字节 Seedance 2.0</button>
+              <button type="button" onclick="selectVideoModelSlug('alibaba/wan-2.6')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">阿里万象 Wan 2.6</button>
+              <button type="button" onclick="selectVideoModelSlug('kwaivgi/kling-v3.0-std')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">快手可灵 Kling v3</button>
+              <button type="button" onclick="selectVideoModelSlug('google/veo-3.1-fast')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">Google Veo 3.1</button>
+              <button type="button" onclick="selectVideoModelSlug('runway/gen-4.5')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">Runway Gen-4.5</button>
+              <button type="button" onclick="selectVideoModelSlug('x-ai/grok-imagine-video-1.5')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">SpaceX Grok Video</button>
             </div>
-            <input type="text" id="currentVideoModelInput" value="tencent/hunyuan-video" placeholder="在此输入您网关支持的任意视频模型 slug (如: tencent/hunyuan-video, kling/v1, luma/ray)..."
+            <input type="text" id="currentVideoModelInput" list="openrouterVideoModelsList" value="minimax/hailuo-3" placeholder="选择或输入 OpenRouter 支持的视频模型 slug (如: minimax/hailuo-3, alibaba/wan-2.6)..."
               class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-emerald-500/50 text-emerald-200 font-mono font-bold focus:outline-none focus:border-emerald-400" />
+            <datalist id="openrouterVideoModelsList"></datalist>
           </div>
 
           <!-- 2. ✍️ 文本 / 分镜导演模型 (Text / Director Model) -->
@@ -1958,12 +2066,12 @@ function renderMainHtml() {
     let manifestData = null;
     let assetIndexData = null;
     let projectsList = [];
-    let currentSelectedModel = 'tencent/hunyuan-video';
+    let currentSelectedModel = 'minimax/hailuo-3';
 
     let visualConfig = {
       apiKey: '',
       baseUrl: 'https://openrouter.ai/api/v1',
-      videoModel: 'tencent/hunyuan-video',
+      videoModel: 'minimax/hailuo-3',
       textModel: 'deepseek/deepseek-chat',
       imageModel: 'black-forest-labs/flux-1-schnell'
     };
@@ -2142,9 +2250,25 @@ function renderMainHtml() {
       }
     }
 
+    async function loadOpenRouterVideoModels() {
+      try {
+        const res = await fetch('/api/openrouter-video-models');
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.models)) {
+          const dl = document.getElementById('openrouterVideoModelsList');
+          if (dl) {
+            dl.innerHTML = data.models.map(m => '<option value="' + m.id + '">' + (m.name || m.id) + '</option>').join('');
+          }
+        }
+      } catch (e) {
+        console.warn('加载 OpenRouter 视频模型列表跳过:', e);
+      }
+    }
+
     async function loadWorkflow() {
       try {
         loadOpenRouterModels();
+        loadOpenRouterVideoModels();
         const res = await fetch('/api/workflow-data?project=' + activeProjectId);
         if (!res.ok) {
           showToast('⚠️ 当前工程数据正在初始化...');
@@ -2158,10 +2282,14 @@ function renderMainHtml() {
 
         if (data.promptConfig) {
           const cfg = data.promptConfig;
+          let rawVideoModel = cfg.videoModel || 'minimax/hailuo-3';
+          if (rawVideoModel === 'minimax/video-01' || rawVideoModel === 'minimax/hailuo' || rawVideoModel === 'video-01') {
+            rawVideoModel = 'minimax/hailuo-3';
+          }
           visualConfig = {
             apiKey: cfg.apiKey || '',
             baseUrl: cfg.baseUrl || 'https://openrouter.ai/api/v1',
-            videoModel: cfg.videoModel || 'tencent/hunyuan-video',
+            videoModel: rawVideoModel,
             textModel: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
             imageModel: cfg.imageModel || 'black-forest-labs/flux-1-schnell'
           };
