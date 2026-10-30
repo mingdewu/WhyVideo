@@ -1,0 +1,44 @@
+{
+  "composition_id": "WhyExplainerMVP",
+  "project_id": "generic_project",
+  "domain_category": "general_explainer",
+  "title": "Why Explainer Video Studio",
+  "ready_for_final_render": false,
+  "blocking_reasons": [],
+  "video_config": {
+    "fps": 30,
+    "width": 1920,
+    "height": 1080,
+    "duration_in_frames": 900,
+    "duration_ms": 30000,
+    "duration_sec": 30,
+    "safe_margin_px": {
+      "top": 72,
+      "bottom": 96,
+      "left": 96,
+      "right": 96
+    },
+    "theme_palette": {
+      "background": "#0F1419",
+      "primary_text": "#F3F4F6",
+      "accent": "#F59E0B",
+      "muted_text": "#9CA3AF",
+      "danger": "#EF4444",
+      "warning": "#F97316"
+    }
+  },
+  "audio_track": {
+    "src": "",
+    "start_from_frame": 0,
+    "end_at_frame": 900,
+    "duration_ms": 30000,
+    "volume": 1.0
+  },
+  "caption_track": {
+    "srt_src": "",
+    "safe_bottom_margin_px": 96,
+    "max_chars_per_line": 22,
+    "captions": []
+  },
+  "timeline_tracks": []
+}

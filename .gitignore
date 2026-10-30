@@ -16,10 +16,6 @@ coverage/
 projects/*
 !projects/.gitkeep
 
-# Video template content (keep directory empty on git)
-packages/video-template/*
-!packages/video-template/.gitkeep
-
 # Logs & Runtime
 npm-debug.log*
 yarn-debug.log*

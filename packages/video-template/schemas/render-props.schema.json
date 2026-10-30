@@ -1,0 +1,153 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "WhyExplainerRemotionRenderPropsV2",
+  "description": "通用 Remotion 渲染属性 Schema (V2) — 仅允许引用 asset-index.json 中 approved 或 internal_placeholder 的素材，通过数据驱动渲染6类场景",
+  "type": "object",
+  "required": [
+    "composition_id",
+    "project_id",
+    "domain_category",
+    "title",
+    "ready_for_final_render",
+    "blocking_reasons",
+    "video_config",
+    "audio_track",
+    "caption_track",
+    "timeline_tracks"
+  ],
+  "properties": {
+    "composition_id": {
+      "type": "string"
+    },
+    "project_id": {
+      "type": "string"
+    },
+    "domain_category": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "ready_for_final_render": {
+      "type": "boolean"
+    },
+    "blocking_reasons": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "video_config": {
+      "type": "object",
+      "required": [
+        "fps",
+        "width",
+        "height",
+        "duration_in_frames",
+        "duration_ms",
+        "duration_sec",
+        "safe_margin_px",
+        "theme_palette"
+      ],
+      "properties": {
+        "fps": { "type": "integer", "enum": [24, 25, 30, 60] },
+        "width": { "type": "integer" },
+        "height": { "type": "integer" },
+        "duration_in_frames": { "type": "integer", "minimum": 1 },
+        "duration_ms": { "type": "integer", "minimum": 1 },
+        "duration_sec": { "type": "number", "minimum": 0.1 },
+        "safe_margin_px": {
+          "type": "object",
+          "required": ["top", "bottom", "left", "right"],
+          "properties": {
+            "top": { "type": "integer" },
+            "bottom": { "type": "integer" },
+            "left": { "type": "integer" },
+            "right": { "type": "integer" }
+          }
+        },
+        "theme_palette": {
+          "type": "object",
+          "required": ["background", "primary_text", "accent", "muted_text"],
+          "properties": {
+            "background": { "type": "string" },
+            "primary_text": { "type": "string" },
+            "accent": { "type": "string" },
+            "muted_text": { "type": "string" },
+            "danger": { "type": "string" },
+            "warning": { "type": "string" }
+          }
+        }
+      }
+    },
+    "audio_track": {
+      "type": "object",
+      "required": [
+        "src",
+        "start_from_frame",
+        "end_at_frame",
+        "duration_ms",
+        "volume",
+        "unauthorized_bgm_present"
+      ],
+      "properties": {
+        "src": { "type": "string" },
+        "start_from_frame": { "type": "integer" },
+        "end_at_frame": { "type": "integer" },
+        "duration_ms": { "type": "integer" },
+        "volume": { "type": "number" },
+        "unauthorized_bgm_present": { "type": "boolean", "const": false }
+      }
+    },
+    "caption_track": {
+      "type": "object",
+      "required": ["srt_src", "safe_bottom_margin_px", "max_chars_per_line", "captions"],
+      "properties": {
+        "srt_src": { "type": "string" },
+        "safe_bottom_margin_px": { "type": "integer" },
+        "max_chars_per_line": { "type": "integer" },
+        "captions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "index",
+              "start_ms",
+              "end_ms",
+              "from_frame",
+              "duration_in_frames",
+              "text",
+              "char_count"
+            ],
+            "properties": {
+              "index": { "type": "integer" },
+              "start_ms": { "type": "integer" },
+              "end_ms": { "type": "integer" },
+              "from_frame": { "type": "integer" },
+              "duration_in_frames": { "type": "integer" },
+              "text": { "type": "string" },
+              "char_count": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    "timeline_tracks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "scene_id",
+          "start_ms",
+          "end_ms",
+          "from_frame",
+          "duration_in_frames",
+          "visual_type",
+          "status",
+          "render_mode",
+          "approved_asset",
+          "procedural_props",
+          "transition"
+        ]
+      }
+    }
+  }
+}
