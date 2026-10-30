@@ -362,13 +362,21 @@ function registerGeneratedAsset(curPaths, projectId, sceneId, relPath, type = 'v
 }
 
 function normalizePromptConfig(cfg = {}) {
+  let vModel = cfg.videoModel || 'minimax/hailuo-3-max';
+  if (vModel === 'minimax/video-01' || vModel === 'minimax/hailuo' || vModel === 'video-01') {
+    vModel = 'minimax/hailuo-3-max';
+  }
+  let iModel = cfg.imageModel || 'black-forest-labs/flux-3-image';
+  if (iModel === 'black-forest-labs/flux-1-schnell' || iModel.includes('flux-1')) {
+    iModel = 'black-forest-labs/flux-3-image';
+  }
   return {
     provider: 'openrouter',
     baseUrl: cfg.baseUrl || 'https://openrouter.ai/api/v1',
     apiKey: cfg.apiKey || '',
     textModel: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
-    videoModel: cfg.videoModel || 'tencent/hunyuan-video',
-    imageModel: cfg.imageModel || 'black-forest-labs/flux-1-schnell',
+    videoModel: vModel,
+    imageModel: iModel,
     model: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
     global_ai_visual_prompt: cfg.global_ai_visual_prompt || cfg.global_ppt_prompt || '作为 16:9 纪录片视觉总监，结合旁白片段与关键词提炼震撼的真实画面。',
     updated_at: cfg.updated_at || new Date().toISOString()
@@ -378,6 +386,11 @@ function normalizePromptConfig(cfg = {}) {
 async function downloadRemoteMedia(remoteUrl, localDestPath) {
   const dir = path.dirname(localDestPath);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (remoteUrl.startsWith('data:')) {
+    const base64Data = remoteUrl.split(',')[1];
+    fs.writeFileSync(localDestPath, Buffer.from(base64Data, 'base64'));
+    return;
+  }
   const resp = await fetch(remoteUrl);
   if (!resp.ok) throw new Error(`下载媒体文件失败 (HTTP ${resp.status})`);
   const buf = Buffer.from(await resp.arrayBuffer());
@@ -392,13 +405,30 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
 
   // 0. 原生 OpenRouter 官方视频生成端点 (POST https://openrouter.ai/api/v1/videos)
   if (base.includes('openrouter.ai')) {
-    // 智能映射：MiniMax 视频在 OpenRouter 上的标准模型 ID 为 minimax/hailuo-3 或 minimax/hailuo-3-max
+    // 智能映射：MiniMax 视频在 OpenRouter 上的标准模型 ID
     if (model === 'minimax/video-01' || model === 'minimax/hailuo' || model === 'minimax-01' || model === 'video-01') {
-      console.log(`[OpenRouter Video] 自动将 ${model} 映射为 OpenRouter 标准模型: minimax/hailuo-3`);
-      model = 'minimax/hailuo-3';
+      console.log(`[OpenRouter Video] 自动将 ${model} 映射为 OpenRouter 标准模型: minimax/hailuo-3-max`);
+      model = 'minimax/hailuo-3-max';
     }
 
-    console.log(`[OpenRouter Video] 正在提交任务至 ${base}/videos，模型: ${model}...`);
+    // 针对各模型官方支持的 resolution / duration 动态适配
+    let resolution = '720p';
+    let duration = 5;
+    if (model === 'minimax/hailuo-3') {
+      resolution = '2K';
+      duration = 5;
+    } else if (model === 'minimax/hailuo-3-max') {
+      resolution = '768p';
+      duration = 5;
+    } else if (model === 'minimax/hailuo-2.3') {
+      resolution = '1080p';
+      duration = 6;
+    } else if (model.includes('veo')) {
+      resolution = '720p';
+      duration = 4;
+    }
+
+    console.log(`[OpenRouter Video] 正在提交任务至 ${base}/videos，模型: ${model} (分辨率: ${resolution}, 时长: ${duration}s)...`);
     const submitResp = await fetch(`${base}/videos`, {
       method: 'POST',
       headers: {
@@ -411,8 +441,8 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
         model: model,
         prompt: prompt,
         aspect_ratio: '16:9',
-        duration: 5,
-        resolution: '720p'
+        duration: duration,
+        resolution: resolution
       })
     });
 
@@ -664,11 +694,86 @@ async function callGatewayVideoGeneration({ apiKey, baseUrl = 'https://openroute
   throw new Error(`视频生成超时 (任务 ID: ${taskId})，请稍后刷新或检查网关`);
 }
 
-// 统一 AI 超清实景生图器
-async function callGatewayImageGeneration({ apiKey, baseUrl = 'https://openrouter.ai/api/v1', imageModel = 'black-forest-labs/flux-1-schnell' }, prompt) {
+// 统一 AI 超清实景生图器 (支持 OpenRouter 原生 /api/v1/images、FLUX 3、FLUX.2、Recraft、Gemini Image 等)
+async function callGatewayImageGeneration({ apiKey, baseUrl = 'https://openrouter.ai/api/v1', imageModel = 'black-forest-labs/flux-3-image' }, prompt) {
   if (!apiKey) throw new Error('未配置 API Key');
   const base = baseUrl.trim().replace(/\/+$/, '');
-  const model = imageModel.trim();
+  let model = imageModel.trim();
+
+  // 智能映射：将用户输入的 FLUX.1 (如 black-forest-labs/flux-1-schnell) 自动映射为 OpenRouter 官方的 FLUX 3
+  if (
+    model === 'black-forest-labs/flux-1-schnell' ||
+    model === 'black-forest-labs/flux-1-dev' ||
+    model.includes('flux-1') ||
+    model === 'flux-schnell' ||
+    model === 'flux'
+  ) {
+    console.log(`[OpenRouter Image] 自动将旧版 ${model} 映射为 OpenRouter 官方标准模型: black-forest-labs/flux-3-image`);
+    model = 'black-forest-labs/flux-3-image';
+  } else if (model === 'recraft-v3') {
+    model = 'recraft/recraft-v3';
+  }
+
+  // 1. 如果是 OpenRouter 官方网关，直接调用官方统一生图 API: POST https://openrouter.ai/api/v1/images
+  if (base.includes('openrouter.ai')) {
+    console.log(`[OpenRouter Image] 正在向 ${base}/images 提交生图请求，模型: ${model}...`);
+    const resp = await fetch(`${base}/images`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey.trim()}`,
+        'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+        'X-Title': 'WhyVideo Studio'
+      },
+      body: JSON.stringify({
+        model: model,
+        prompt: prompt,
+        aspect_ratio: '16:9'
+      })
+    });
+
+    if (!resp.ok) {
+      const errText = await resp.text();
+      let errMsg = errText;
+      try {
+        const j = JSON.parse(errText);
+        if (j.error?.message) errMsg = j.error.message;
+      } catch (e) {}
+      throw new Error(`OpenRouter 生图请求未通过 (HTTP ${resp.status}): ${errMsg}`);
+    }
+
+    const data = await resp.json();
+    const firstItem = data.data?.[0];
+    if (firstItem?.b64_json) {
+      const mediaType = firstItem.media_type || 'image/png';
+      return `data:${mediaType};base64,${firstItem.b64_json}`;
+    }
+    if (firstItem?.url) return firstItem.url;
+    if (data.url) return data.url;
+    throw new Error('OpenRouter 已受理但未返回图片数据');
+  }
+
+  // 2. 其他 OpenAI 兼容代理网关：依次尝试 /images、/images/generations
+  try {
+    const resp = await fetch(`${base}/images`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey.trim()}`
+      },
+      body: JSON.stringify({
+        model: model,
+        prompt: prompt,
+        aspect_ratio: '16:9'
+      })
+    });
+    if (resp.ok) {
+      const data = await resp.json();
+      const firstItem = data.data?.[0];
+      if (firstItem?.b64_json) return `data:${firstItem.media_type || 'image/png'};base64,${firstItem.b64_json}`;
+      if (firstItem?.url) return firstItem.url;
+    }
+  } catch (e) {}
 
   try {
     const resp = await fetch(`${base}/images/generations`, {
@@ -691,7 +796,7 @@ async function callGatewayImageGeneration({ apiKey, baseUrl = 'https://openroute
     }
   } catch (e) {}
 
-  // 尝试 Chat 接口兼容生图
+  // 3. 尝试 Chat 接口兼容生图
   const chatResp = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -1111,13 +1216,48 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({
         ok: true,
         models: [
-          { id: 'minimax/hailuo-3', name: 'MiniMax: H3 (海螺视频 3)' },
           { id: 'minimax/hailuo-3-max', name: 'MiniMax: H3 Max' },
+          { id: 'minimax/hailuo-3', name: 'MiniMax: H3 (海螺视频 3)' },
           { id: 'bytedance/seedance-2.0', name: 'ByteDance: Seedance 2.0' },
           { id: 'alibaba/wan-2.6', name: 'Alibaba: Wan 2.6' },
           { id: 'kwaivgi/kling-v3.0-std', name: 'Kling: Video v3.0 Standard' },
           { id: 'google/veo-3.1-fast', name: 'Google: Veo 3.1 Fast' },
           { id: 'runway/gen-4.5', name: 'Runway: Gen-4.5' }
+        ]
+      }));
+    }
+
+    // 4.17 获取 OpenRouter 原生支持的全部 62+ 款 AI 生图模型列表
+    if (req.method === 'GET' && pathname === '/api/openrouter-image-models') {
+      try {
+        const resModels = await fetch('https://openrouter.ai/api/v1/images/models', {
+          headers: {
+            'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+            'X-Title': 'WhyVideo Studio'
+          }
+        });
+        if (resModels.ok) {
+          const mJson = await resModels.json();
+          const list = (mJson.data || []).map((m) => ({
+            id: m.id,
+            name: m.name || m.id,
+            description: m.description ? m.description.slice(0, 100) : ''
+          }));
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: true, models: list }));
+        }
+      } catch (e) {
+        console.error('Failed to fetch openrouter image models:', e.message);
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({
+        ok: true,
+        models: [
+          { id: 'black-forest-labs/flux-3-image', name: 'FLUX 3 Image' },
+          { id: 'black-forest-labs/flux.2-max', name: 'FLUX.2 Max' },
+          { id: 'recraft/recraft-v4.1', name: 'Recraft V4.1' },
+          { id: 'google/gemini-3.1-flash-image', name: 'Gemini 3.1 Flash Image' },
+          { id: 'openai/gpt-image-2', name: 'GPT Image 2' }
         ]
       }));
     }
@@ -1137,8 +1277,8 @@ const server = http.createServer(async (req, res) => {
         baseUrl: body.baseUrl || existing.baseUrl || 'https://openrouter.ai/api/v1',
         apiKey: body.apiKey !== undefined ? body.apiKey : (existing.apiKey || ''),
         textModel: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
-        videoModel: body.videoModel || existing.videoModel || 'minimax/hailuo-3',
-        imageModel: body.imageModel || existing.imageModel || 'black-forest-labs/flux-1-schnell',
+        videoModel: body.videoModel || existing.videoModel || 'minimax/hailuo-3-max',
+        imageModel: body.imageModel || existing.imageModel || 'black-forest-labs/flux-3-image',
         model: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
         selected_visual_model: 'openrouter',
         updated_at: new Date().toISOString()
@@ -1795,7 +1935,7 @@ function renderMainHtml() {
               ✍️ 分镜: deepseek-chat
             </span>
             <span id="currentImageModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-500/25 text-blue-200 border border-blue-500/40">
-              🖼️ 生图: flux-1-schnell
+              🖼️ 生图: flux-3-image
             </span>
           </div>
           <button onclick="toggleVisualModelModal()" class="text-xs text-purple-400 hover:underline">
@@ -1972,13 +2112,15 @@ function renderMainHtml() {
               <span class="text-[10px] text-blue-300/80 font-mono">负责超清摄影实景图输出</span>
             </div>
             <div class="flex flex-wrap gap-1.5">
-              <button type="button" onclick="selectImageModelSlug('black-forest-labs/flux-1-schnell')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">FLUX.1 Schnell</button>
-              <button type="button" onclick="selectImageModelSlug('black-forest-labs/flux-1-dev')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">FLUX.1 Dev</button>
-              <button type="button" onclick="selectImageModelSlug('recraft-v3')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">Recraft V3</button>
-              <button type="button" onclick="selectImageModelSlug('google/gemini-2.5-flash-image')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">Gemini Image</button>
+              <button type="button" onclick="selectImageModelSlug('black-forest-labs/flux-3-image')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">FLUX 3 Image (推荐)</button>
+              <button type="button" onclick="selectImageModelSlug('black-forest-labs/flux.2-max')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">FLUX.2 Max (极速)</button>
+              <button type="button" onclick="selectImageModelSlug('recraft/recraft-v4.1')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">Recraft V4.1</button>
+              <button type="button" onclick="selectImageModelSlug('google/gemini-3.1-flash-image')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">Gemini 3.1 Image</button>
+              <button type="button" onclick="selectImageModelSlug('openai/gpt-image-2')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">GPT Image 2</button>
             </div>
-            <input type="text" id="currentImageModelInput" value="black-forest-labs/flux-1-schnell" placeholder="输入超清生图模型 slug (如: black-forest-labs/flux-1-schnell, recraft-v3)..."
+            <input type="text" id="currentImageModelInput" list="openrouterImageModelsList" value="black-forest-labs/flux-3-image" placeholder="输入或从下拉列表选择 OpenRouter 生图模型 (如: black-forest-labs/flux-3-image, recraft/recraft-v4.1)..."
               class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-blue-400" />
+            <datalist id="openrouterImageModelsList"></datalist>
           </div>
         </div>
       </div>
@@ -2182,9 +2324,9 @@ function renderMainHtml() {
       const tBadge = document.getElementById('currentTextModelBadge');
       const iBadge = document.getElementById('currentImageModelBadge');
 
-      const vModel = (visualConfig.videoModel || 'tencent/hunyuan-video').split('/').pop();
+      const vModel = (visualConfig.videoModel || 'minimax/hailuo-3-max').split('/').pop();
       const tModel = (visualConfig.textModel || 'deepseek-chat').split('/').pop();
-      const iModel = (visualConfig.imageModel || 'flux-1-schnell').split('/').pop();
+      const iModel = (visualConfig.imageModel || 'flux-3-image').split('/').pop();
 
       if (vBadge) {
         vBadge.textContent = '🎬 视频: ' + vModel + (visualConfig.apiKey ? ' (Key就绪)' : ' (待填Key)');
@@ -2265,10 +2407,26 @@ function renderMainHtml() {
       }
     }
 
+    async function loadOpenRouterImageModels() {
+      try {
+        const res = await fetch('/api/openrouter-image-models');
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.models)) {
+          const dl = document.getElementById('openrouterImageModelsList');
+          if (dl) {
+            dl.innerHTML = data.models.map(m => '<option value="' + m.id + '">' + (m.name || m.id) + '</option>').join('');
+          }
+        }
+      } catch (e) {
+        console.warn('加载 OpenRouter 生图模型列表跳过:', e);
+      }
+    }
+
     async function loadWorkflow() {
       try {
         loadOpenRouterModels();
         loadOpenRouterVideoModels();
+        loadOpenRouterImageModels();
         const res = await fetch('/api/workflow-data?project=' + activeProjectId);
         if (!res.ok) {
           showToast('⚠️ 当前工程数据正在初始化...');
@@ -2282,16 +2440,21 @@ function renderMainHtml() {
 
         if (data.promptConfig) {
           const cfg = data.promptConfig;
-          let rawVideoModel = cfg.videoModel || 'minimax/hailuo-3';
+          let rawVideoModel = cfg.videoModel || 'minimax/hailuo-3-max';
           if (rawVideoModel === 'minimax/video-01' || rawVideoModel === 'minimax/hailuo' || rawVideoModel === 'video-01') {
-            rawVideoModel = 'minimax/hailuo-3';
+            rawVideoModel = 'minimax/hailuo-3-max';
           }
+          let rawImageModel = cfg.imageModel || 'black-forest-labs/flux-3-image';
+          if (rawImageModel === 'black-forest-labs/flux-1-schnell' || rawImageModel.includes('flux-1')) {
+            rawImageModel = 'black-forest-labs/flux-3-image';
+          }
+
           visualConfig = {
             apiKey: cfg.apiKey || '',
             baseUrl: cfg.baseUrl || 'https://openrouter.ai/api/v1',
             videoModel: rawVideoModel,
             textModel: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
-            imageModel: cfg.imageModel || 'black-forest-labs/flux-1-schnell'
+            imageModel: rawImageModel
           };
 
           const kEl = document.getElementById('currentApiKeyInput');
