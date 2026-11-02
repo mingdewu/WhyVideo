@@ -13,14 +13,22 @@ export const KineticTextScene: React.FC<{ track: TimelineTrackProp }> = ({
     config: { damping: 16, stiffness: 120 },
   });
 
+  const props = track.procedural_props || {};
+  const badge = props.badge_label || track.chapter_ref || track.scene_id;
+  const items = Array.isArray(props.items) && props.items.length > 0 ? props.items : [];
+
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: "#0F1419",
-        backgroundImage:
-          "radial-gradient(circle at 20% 20%, rgba(245, 158, 11, 0.14), transparent 55%)",
+        backgroundColor: "#070B14",
+        backgroundImage: `
+          radial-gradient(circle at 20% 20%, rgba(245, 158, 11, 0.22), transparent 55%),
+          radial-gradient(circle at 80% 80%, rgba(139, 92, 246, 0.18), transparent 55%),
+          radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px)
+        `,
+        backgroundSize: "100% 100%, 100% 100%, 36px 36px",
         fontFamily: FONT_STACK,
-        padding: "130px 120px 180px 120px",
+        padding: "100px 110px 150px 110px",
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
@@ -28,42 +36,51 @@ export const KineticTextScene: React.FC<{ track: TimelineTrackProp }> = ({
     >
       <div
         style={{
-          transform: `translateY(${(1 - entrance) * 35}px)`,
+          transform: `translateY(${(1 - entrance) * 25}px)`,
           opacity: entrance,
         }}
       >
-        <div
-          style={{
-            fontSize: 22,
-            color: "#F59E0B",
-            fontWeight: 700,
-            letterSpacing: 2,
-            marginBottom: 14,
-          }}
-        >
-          {track.procedural_props.badge_label || "KINETIC TEXT · 核心概念动态拆解"}
+        <div style={{ marginBottom: 16 }}>
+          <span
+            style={{
+              backgroundColor: "rgba(245, 158, 11, 0.15)",
+              border: "1px solid rgba(245, 158, 11, 0.4)",
+              color: "#FBBF24",
+              fontSize: 17,
+              fontWeight: 800,
+              padding: "5px 16px",
+              borderRadius: 9999,
+              letterSpacing: 1,
+            }}
+          >
+            ⚡ 核心概念聚焦 · {badge}
+          </span>
         </div>
+
         <div
           style={{
-            fontSize: 54,
+            fontSize: 56,
             fontWeight: 900,
-            color: "#F3F4F6",
+            color: "#FFFFFF",
             lineHeight: 1.25,
             marginBottom: 28,
+            letterSpacing: 1,
+            textShadow: "0 4px 16px rgba(0, 0, 0, 0.6)",
           }}
         >
-          {track.procedural_props.headline}
+          {props.headline || "核心概念"}
         </div>
+
         <div
           style={{
             display: "flex",
             flexDirection: "column",
-            gap: 18,
+            gap: 16,
           }}
         >
-          {track.procedural_props.items.map((item, idx) => {
+          {items.map((item, idx) => {
             const itemProgress = spring({
-              frame: Math.max(0, frame - (idx + 1) * 8),
+              frame: Math.max(0, frame - (idx + 1) * 6),
               fps,
               config: { damping: 18 },
             });
@@ -72,14 +89,17 @@ export const KineticTextScene: React.FC<{ track: TimelineTrackProp }> = ({
                 key={idx}
                 style={{
                   opacity: itemProgress,
-                  transform: `translateX(${(1 - itemProgress) * 40}px)`,
-                  backgroundColor: "rgba(31, 41, 55, 0.9)",
+                  transform: `translateX(${(1 - itemProgress) * 30}px)`,
+                  backgroundColor: "rgba(15, 23, 42, 0.85)",
+                  backdropFilter: "blur(20px)",
+                  border: "1px solid rgba(255, 255, 255, 0.08)",
                   borderLeft: "6px solid #F59E0B",
-                  padding: "20px 28px",
-                  borderRadius: 10,
-                  fontSize: 28,
-                  color: "#E5E7EB",
+                  padding: "18px 24px",
+                  borderRadius: "0 14px 14px 0",
+                  fontSize: 26,
+                  color: "#F1F5F9",
                   fontWeight: 600,
+                  boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.5)",
                 }}
               >
                 {item}

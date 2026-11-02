@@ -4,6 +4,8 @@ export type VisualSceneType =
   | "map"
   | "timeline"
   | "data_card"
+  | "document_highlight"
+  | "versus_dual"
   | "kinetic_text";
 
 export interface ApprovedAssetProp {

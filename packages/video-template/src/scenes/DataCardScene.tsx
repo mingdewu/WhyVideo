@@ -13,111 +13,199 @@ export const DataCardScene: React.FC<{ track: TimelineTrackProp }> = ({
     config: { damping: 18, stiffness: 100 },
   });
 
+  const props = track.procedural_props || {};
+  const items = Array.isArray(props.items) && props.items.length > 0 ? props.items : [];
+  const badge = props.badge_label || track.chapter_ref || track.scene_id;
+
   return (
     <AbsoluteFill
       style={{
-        backgroundColor: "#111827",
+        backgroundColor: "#070B14",
+        backgroundImage: `
+          radial-gradient(circle at 82% 18%, rgba(245, 158, 11, 0.20), transparent 48%),
+          radial-gradient(circle at 18% 82%, rgba(99, 102, 241, 0.18), transparent 48%),
+          radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px)
+        `,
+        backgroundSize: "100% 100%, 100% 100%, 36px 36px",
         fontFamily: FONT_STACK,
-        padding: "125px 110px 175px 110px",
+        padding: "100px 110px 150px 110px",
         display: "flex",
         flexDirection: "column",
         justifyContent: "center",
       }}
     >
+      {/* 核心卡片容器 */}
       <div
         style={{
-          backgroundColor: "rgba(17, 24, 39, 0.95)",
-          border: "2px solid rgba(245, 158, 11, 0.65)",
-          borderRadius: 18,
-          padding: "36px 44px",
-          transform: `scale(${0.96 + 0.04 * cardSpring})`,
+          position: "relative",
+          backgroundColor: "rgba(15, 23, 42, 0.85)",
+          backdropFilter: "blur(24px)",
+          border: "1.5px solid rgba(245, 158, 11, 0.35)",
+          borderRadius: 24,
+          padding: "44px 54px",
+          boxShadow:
+            "0 30px 80px -15px rgba(0, 0, 0, 0.85), 0 0 50px -10px rgba(245, 158, 11, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.15)",
+          transform: `scale(${0.96 + 0.04 * cardSpring}) translateY(${(1 - cardSpring) * 16}px)`,
           opacity: cardSpring,
+          overflow: "hidden",
         }}
       >
+        {/* 顶部彩色流光顶边线 */}
+        <div
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            height: "4px",
+            background:
+              "linear-gradient(90deg, rgba(245, 158, 11, 0.9) 0%, rgba(99, 102, 241, 0.9) 60%, rgba(245, 158, 11, 0.3) 100%)",
+          }}
+        />
+
+        {/* 头部元信息栏 */}
         <div
           style={{
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
-            marginBottom: 16,
+            marginBottom: 20,
           }}
         >
-          <span
-            style={{
-              fontSize: 22,
-              color: "#38BDF8",
-              fontWeight: 800,
-              letterSpacing: 1.5,
-            }}
-          >
-            📊 {track.procedural_props.badge_label || "DATA CARD · 结构化数据与机制卡片"}
-          </span>
-          {track.is_final_ending && (
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <span
               style={{
-                backgroundColor: "rgba(16, 185, 129, 0.2)",
-                border: "1px solid #10B981",
-                color: "#6EE7B7",
-                padding: "4px 14px",
-                borderRadius: 6,
-                fontSize: 18,
-                fontWeight: 700,
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 8,
+                backgroundColor: "rgba(245, 158, 11, 0.15)",
+                border: "1px solid rgba(245, 158, 11, 0.5)",
+                color: "#FBBF24",
+                fontSize: 17,
+                fontWeight: 800,
+                letterSpacing: 1,
+                padding: "5px 16px",
+                borderRadius: 9999,
               }}
             >
-              全片正式结尾 · 主题回扣
+              ✦ 深度解析 · {badge}
             </span>
-          )}
-        </div>
+          </div>
 
-        <div
-          style={{
-            fontSize: 44,
-            fontWeight: 900,
-            color: "#F9FAFB",
-            marginBottom: track.procedural_props.subheadline ? 12 : 24,
-          }}
-        >
-          {track.procedural_props.headline}
-        </div>
-
-        {track.procedural_props.subheadline && (
           <div
             style={{
-              fontSize: 22,
-              fontWeight: 500,
-              color: "#9CA3AF",
-              marginBottom: 24,
-              lineHeight: 1.4,
+              fontSize: 15,
+              fontWeight: 700,
+              color: "#94A3B8",
+              fontFamily: "monospace",
+              letterSpacing: 1.5,
+              backgroundColor: "rgba(255, 255, 255, 0.05)",
+              padding: "4px 12px",
+              borderRadius: 6,
+              border: "1px solid rgba(255, 255, 255, 0.08)",
             }}
           >
-            {track.procedural_props.subheadline}
+            EXPLAINER CARD · 1080P
+          </div>
+        </div>
+
+        {/* 核心大字标题 */}
+        <div
+          style={{
+            fontSize: 52,
+            fontWeight: 900,
+            color: "#FFFFFF",
+            letterSpacing: 1,
+            lineHeight: 1.25,
+            marginBottom: props.subheadline ? 14 : 28,
+            textShadow: "0 2px 10px rgba(0, 0, 0, 0.5)",
+          }}
+        >
+          {props.headline || "核心主题提炼"}
+        </div>
+
+        {/* 副级阐述文字 */}
+        {props.subheadline && (
+          <div
+            style={{
+              fontSize: 23,
+              fontWeight: 500,
+              color: "#CBD5E1",
+              marginBottom: 30,
+              lineHeight: 1.5,
+              borderLeft: "3px solid rgba(245, 158, 11, 0.6)",
+              paddingLeft: 14,
+            }}
+          >
+            {props.subheadline}
           </div>
         )}
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "1fr",
-            gap: 16,
-          }}
-        >
-          {track.procedural_props.items.map((item, idx) => (
-            <div
-              key={idx}
-              style={{
-                backgroundColor: "rgba(31, 41, 55, 0.92)",
-                border: "1px solid rgba(156, 163, 175, 0.25)",
-                borderRadius: 12,
-                padding: "18px 24px",
-                fontSize: 27,
-                color: "#F3F4F6",
-                fontWeight: 600,
-              }}
-            >
-              {item}
-            </div>
-          ))}
-        </div>
+        {/* 关键论点卡片列表 */}
+        {items.length > 0 && (
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}
+          >
+            {items.map((item, idx) => {
+              const itemSpring = spring({
+                frame: Math.max(0, frame - 4 - idx * 4),
+                fps,
+                config: { damping: 16 },
+              });
+
+              return (
+                <div
+                  key={idx}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 18,
+                    backgroundColor: "rgba(30, 41, 59, 0.72)",
+                    border: "1px solid rgba(255, 255, 255, 0.08)",
+                    borderRadius: 14,
+                    padding: "16px 22px",
+                    transform: `translateX(${(1 - itemSpring) * 20}px)`,
+                    opacity: itemSpring,
+                  }}
+                >
+                  <span
+                    style={{
+                      flexShrink: 0,
+                      width: 34,
+                      height: 34,
+                      borderRadius: 8,
+                      backgroundColor: "rgba(245, 158, 11, 0.2)",
+                      border: "1px solid rgba(245, 158, 11, 0.4)",
+                      color: "#F59E0B",
+                      fontSize: 16,
+                      fontWeight: 900,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontFamily: "monospace",
+                    }}
+                  >
+                    0{idx + 1}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: 25,
+                      color: "#F1F5F9",
+                      fontWeight: 600,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {item}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </AbsoluteFill>
   );

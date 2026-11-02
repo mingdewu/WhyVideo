@@ -43,56 +43,35 @@ export const PhotoMotionScene: React.FC<{ track: TimelineTrackProp }> = ({
           transform: `scale(${scale}) translateX(${translateX}px)`,
         }}
       />
-      <div
-        style={{
-          position: "absolute",
-          top: 195,
-          left: 140,
-          right: 140,
-          backgroundColor: "rgba(15, 20, 25, 0.88)",
-          border: `2px solid ${isLowConf ? "#EF4444" : "#38BDF8"}`,
-          borderRadius: 14,
-          padding: "28px 36px",
-          fontFamily: FONT_STACK,
-        }}
-      >
+      {isLowConf && (
         <div
           style={{
-            fontSize: 22,
-            color: isLowConf ? "#F87171" : "#7DD3FC",
-            fontWeight: 800,
+            position: "absolute",
+            top: 195,
+            left: 140,
+            right: 140,
+            backgroundColor: "rgba(15, 20, 25, 0.88)",
+            border: "2px solid #EF4444",
+            borderRadius: 14,
+            padding: "24px 32px",
+            fontFamily: FONT_STACK,
           }}
         >
-          🖼️ PHOTO_MOTION (Ken Burns) · {track.approved_asset.asset_id} ·
-          Confidence: {Math.round(track.confidence_score * 100)}%
-        </div>
-        <div
-          style={{
-            fontSize: 30,
-            color: "#F3F4F6",
-            fontWeight: 700,
-            marginTop: 10,
-            lineHeight: 1.4,
-          }}
-        >
-          {track.visual_purpose}
-        </div>
-        {isLowConf && (
           <div
             style={{
-              marginTop: 14,
-              padding: "12px 18px",
-              backgroundColor: "rgba(239, 68, 68, 0.2)",
-              borderLeft: "4px solid #EF4444",
-              fontSize: 20,
-              color: "#FECACA",
+              fontSize: 22,
+              color: "#F87171",
+              fontWeight: 800,
             }}
           >
-            <strong>人工审核提示：</strong>
-            {track.review_reason}
+            ⚠️ PHOTO_MOTION · 低置信度素材需确认
           </div>
-        )}
-      </div>
+          <div style={{ marginTop: 10, fontSize: 18, color: "#FECACA" }}>
+            <strong>提示：</strong>
+            {track.review_reason || "该镜头画面建议核验"}
+          </div>
+        </div>
+      )}
     </AbsoluteFill>
   );
 };

@@ -16,7 +16,7 @@
     "render:final": "remotion render packages/video-template/src/index.ts WhyExplainerFinal projects/why_ryokan_small_dishes_001/output/final_video_1080p.mp4 --scale=1.0"
   },
   "dependencies": {
-    "@remotion/cli": "4.0.242",
+    "@remotion/cli": "^4.0.242",
     "@remotion/renderer": "4.0.242",
     "react": "18.3.1",
     "react-dom": "18.3.1",

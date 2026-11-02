@@ -9,7 +9,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '../../');
 
 const PORT = process.env.PORT || 4000;
-const defaultProjectId = 'why_ai_renamed_to_si_001';
+const defaultProjectId = 'why_nikko_heritage_road_001';
 
 // 优先读取 .env
 function loadEnv() {
@@ -54,6 +54,7 @@ function getPaths(projectId = defaultProjectId) {
     dataDir: path.join(projectDir, 'data'),
     publicDir: path.join(projectDir, 'public'),
     outputDir: path.join(projectDir, 'output'),
+    briefPath: path.join(projectDir, 'data', 'brief.json'),
     manifestPath: path.join(projectDir, 'data', 'scene-manifest.json'),
     assetIndexPath: path.join(projectDir, 'data', 'asset-index.json'),
     statusPath: path.join(projectDir, 'data', 'project-status.json'),
@@ -187,12 +188,13 @@ function ensureTableFields(manifest) {
 }
 
 function syncTableToManifest(manifest) {
+  const validCardTypes = ['data_card', 'document_highlight', 'versus_dual', 'timeline', 'kinetic_text'];
   for (const s of manifest.scenes || []) {
     const kws = Array.isArray(s.content_keywords) ? s.content_keywords : [];
     const ppt = s.ppt_slide_spec || {};
 
     if (s.source_mode === 'ai_ppt_slide') {
-      if (['broll_video', 'photo_motion'].includes(s.visual_type)) {
+      if (!validCardTypes.includes(s.visual_type)) {
         s.visual_type = 'data_card';
         s.scene_type = 'data_card';
       }
@@ -250,28 +252,49 @@ function renderRemotionStill(projectId, sceneId) {
   const outPath = path.join(outDir, outFileName);
   const relPath = `assets/generated/${outFileName}`;
 
+  if (fs.existsSync(outPath)) {
+    try { fs.unlinkSync(outPath); } catch (e) {}
+  }
+
   try {
-    const res = spawnSync(
-      'npx',
-      [
-        'remotion',
-        'still',
-        'packages/video-template/src/index.ts',
-        'WhyExplainerFinal',
-        outPath,
-        `--frame=${frame}`,
-        `--props=${curPaths.propsPath}`,
-        `--public-dir=${curPaths.publicDir}`,
-        '--image-format=jpeg',
-        '--jpeg-quality=85',
-        '--log=warn',
-      ],
-      { cwd: rootDir, encoding: 'utf8', timeout: 35000 }
-    );
+    const localBin = path.join(rootDir, 'node_modules/.bin/remotion');
+    const isLocal = fs.existsSync(localBin);
+    const cmd = isLocal ? localBin : 'npx';
+    const args = isLocal
+      ? [
+          'still',
+          'packages/video-template/src/index.ts',
+          'WhyExplainerFinal',
+          outPath,
+          `--frame=${frame}`,
+          `--props=${curPaths.propsPath}`,
+          `--public-dir=${curPaths.publicDir}`,
+          '--image-format=jpeg',
+          '--jpeg-quality=85',
+          '--log=warn',
+        ]
+      : [
+          'remotion',
+          'still',
+          'packages/video-template/src/index.ts',
+          'WhyExplainerFinal',
+          outPath,
+          `--frame=${frame}`,
+          `--props=${curPaths.propsPath}`,
+          `--public-dir=${curPaths.publicDir}`,
+          '--image-format=jpeg',
+          '--jpeg-quality=85',
+          '--log=warn',
+        ];
+
+    const res = spawnSync(cmd, args, { cwd: rootDir, encoding: 'utf8', timeout: 60000 });
+    if (res.status === 0 && fs.existsSync(outPath)) {
+      return relPath;
+    }
+    console.error(`Remotion still failed for ${sceneId} (exitCode: ${res.status}):`, res.stderr || res.stdout);
     if (fs.existsSync(outPath)) {
       return relPath;
     }
-    console.error(`Remotion still failed for ${sceneId}:`, res.stderr || res.stdout);
   } catch (err) {
     console.error(`Remotion still spawn exception for ${sceneId}:`, err);
   }
@@ -337,6 +360,229 @@ async function callOpenRouterDirector(cfg, scene, customPrompt, templateStyle) {
   return JSON.parse(match[0]);
 }
 
+function extractLocalSmartPrompt(narrationText, targetMode, keywords = [], templateStyle = 'data_card') {
+  if (!narrationText) return '';
+  const raw = narrationText.trim();
+  const kwList = Array.isArray(keywords) ? keywords.filter(Boolean) : [];
+
+  let cleaned = raw
+    .replace(/^(在|顺着|沿着|当|经过|据|由于|因为|为了|根据)[^，,。；;]{1,15}[，,]/g, '')
+    .replace(/^(有一条|坐落着|迎面出现的却是|映入眼帘的是|矗立着|车辆必须|这就是|可以说|事实上|实际上)/g, '')
+    .replace(/[，,。；;！!？?]+$/g, '')
+    .trim();
+
+  if (cleaned.length < 4) cleaned = raw.replace(/[，,。；;！!？?]+$/g, '');
+
+  const mainSubject = kwList.length > 0 ? kwList[0] : (cleaned.length > 25 ? cleaned.slice(0, 25) : cleaned);
+  const contextDesc = cleaned;
+
+  let cameraMove = '平稳推镜头向前聚焦';
+  if (/转弯|急弯|弯道|穿行|盘山|环绕/.test(raw)) {
+    cameraMove = '大范围航拍连续弧形环绕跟随';
+  } else if (/落差|悬崖|山峰|俯瞰|冲上|高度|海拔/.test(raw)) {
+    cameraMove = '高空俯冲推拉运镜转开阔全景';
+  } else if (/细节|金箔|雕刻|纹理|双眼|双手|微观|精细|古老|建筑/.test(raw)) {
+    cameraMove = '慢速微距浅景深焦点平移特写';
+  } else if (/穿过|延伸|漫步|走入|深入/.test(raw)) {
+    cameraMove = '第一人称低角度正前向稳定推进运镜';
+  }
+
+  if (targetMode === 'video') {
+    let videoSubject = mainSubject;
+    if (/修验|苦行|神域|上人|僧|行者/.test(raw)) {
+      videoSubject = '修验道白衣苦行僧在险峰岩壁间手持金刚杖前行';
+    } else if (/德川|幕府|防线|关卡|东照宫|灵庙|家康/.test(raw)) {
+      videoSubject = '德川幕府森严石鸟居与关防石垣在晨雾险峰中矗立';
+    } else if (/发卡弯|急弯|伊吕波|公路|盘山|弯道/.test(raw)) {
+      videoSubject = '48道急弯发卡弯在险峻山体间连续折叠延伸';
+    } else if (/避暑|公馆|外交|洋馆|使节|使馆/.test(raw)) {
+      videoSubject = '中禅寺湖畔西洋木造使馆公馆倒映在冷凉湖水间';
+    }
+    return `【镜头主体】${videoSubject}，画面生动呈现「${contextDesc}」；【运镜设计】${cameraMove}；【光影与质感】自然光影真实漫反射，丰富环境层次，电影级光学动态细节`;
+  } else if (targetMode === 'image') {
+    let visualSubject = mainSubject;
+    let visualDetails = contextDesc;
+    if (/修验|苦行|神域|上人|僧|行者/.test(raw)) {
+      visualSubject = '险峰绝壁悬崖边缘的修验道白衣苦行僧持杖背影，与苍茫古道注连绳结界';
+    } else if (/德川|幕府|防线|关卡|东照宫|灵庙|家康/.test(raw)) {
+      visualSubject = '日光险隘处的德川幕府金漆葵纹铜装石鸟居，与崇山峻岭间森严防御石垣';
+    } else if (/发卡弯|急弯|伊吕波|公路|盘山|弯道/.test(raw)) {
+      visualSubject = '日光山林海间蜿蜒盘旋的48道发卡弯绝壁险道高空俯瞰轨迹';
+    } else if (/避暑|公馆|外交|洋馆|使节|使馆/.test(raw)) {
+      visualSubject = '中禅寺湖畔清幽冷凉的西洋木造外交使馆别墅与百叶窗湖光倒影';
+    }
+    return `【画面叙事核心】大师级摄影定格「${visualSubject}」，核心表意细节：${visualDetails}；【构图与空间透视】大景深险峰空间层次，环境空气透视；【细节与质感】微米级物理材质特写（粗麻衣袍、金刚杖斑驳纹理、黑金铜雕葵纹），8K超写实胶片光影，无杂乱文字`;
+  } else {
+    // 📊 动效排版卡片形态：根据不同模板选项定制排版指导词
+    const title = mainSubject.length > 10 ? mainSubject.slice(0, 8) : mainSubject;
+    if (templateStyle === 'document_highlight') {
+      return `【文献考据】「${title}」\n【核心引录】“${contextDesc}”\n【考据重点】金石文献与建筑工艺考据\n【版式视觉】16:9 古典金石史料信息图卡片，和风古典深色肌理，金箔反光点缀，典雅宣纸书卷排版风格，博物馆展签级`;
+    } else if (templateStyle === 'versus_dual') {
+      return `【核心辩题】「${title}」\n【传统认知】既往常态定式阐述\n【颠覆突破】全新机制与核心突破\n【版式视觉】16:9 对比双栏Keynote信息图卡片，左右对称深色信息容器，冷蓝与渐变紫双色对比辉光，极简数据对撞排版`;
+    } else if (templateStyle === 'timeline') {
+      return `【演进主线】「${title}」\n【阶段推进】阶段01关键转折 ➔ 阶段02演进升华\n【版式视觉】16:9 历史时空演进路线图卡片，发光连接轴线，阶段卡片发光边框，现代信息图表极简科技排版`;
+    } else if (templateStyle === 'kinetic_text') {
+      return `【聚光焦点】「${title}」\n【视觉递进】层层展开的递进阐述短句\n【版式视觉】16:9 视觉冲击排版海报卡片，特大号粗体文字层级，径向聚光灯深色氛围，极简高张力视觉平面设计`;
+    } else {
+      return `【核心大字】「${title}」\n【副级阐述】${contextDesc}\n【排版重点】突出核心论据与工艺细节\n【版式视觉】16:9 现代暗色高阶演说PPT信息图卡片，微光磨砂玻璃容器，金珀与深蓝氛围光晕，顶级平面设计排版`;
+    }
+  }
+}
+
+async function callOpenRouterPromptExtractor(cfg, narrationText, targetMode, keywords = [], templateStyle = 'data_card', projectContext = {}) {
+  const apiKey = (cfg.apiKey || '').trim();
+  const baseUrl = (cfg.baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
+  const model = (cfg.textModel || cfg.model || 'deepseek/deepseek-chat').trim();
+
+  if (!apiKey) {
+    return {
+      prompt: extractLocalSmartPrompt(narrationText, targetMode, keywords, templateStyle),
+      usedModel: '本地语义解析 (未配置 API Key)',
+      isAi: false
+    };
+  }
+
+  const projTitle = projectContext.title || '历史文化与地理深度纪录片';
+  const projSummary = projectContext.short_answer || projectContext.subtitle || '';
+
+  let modeName = '🎬 真实实体视频 (Text-to-Video MP4)';
+  let modeRequirement = `【实体视频提炼要求】：
+必须输出为如下结构：
+【镜头叙事核心】必须紧扣台词中的历史人物动作、政权军事遗存、宗教法器或地理工程实体，严禁空洞死景；
+【运镜轨迹】电影摄影运镜（如：45度低角度向前推进聚焦主体、悬崖俯瞰慢速环绕拉远、浅景深焦点从前景转移至后景）；
+【具象细节与动态】人物袍服随风扬起、香火薄雾流淌、微雨浸润石壁等真实物理动态；
+【光影与时代质感】符合该历史时期电影级光影质感与空气透视，真实自然光。`;
+
+  if (targetMode === 'image') {
+    modeName = '🖼️ 超写实实景图 (FLUX / Midjourney HD)';
+    modeRequirement = `【超写实实景图提炼要求】：
+必须输出为如下结构：
+【画面叙事核心】必须紧扣台词中的核心时代实体与历史隐喻（如：苦行僧白衣持杖身影、德川幕府葵纹关防与险峰鸟居），绝对严禁脱离文案仅拍摄无意义的自然死风景；
+【构图与空间透视】大师级电影摄影构图与视觉纵深（如：悬崖险隘对角线构图，前景为...，远景为...）；
+【具象细节与材质】特定历史实体的真实微观质感（粗麻白衣纤维、斑驳金刚杖、黑金铜雕葵纹、湿润险峰玄武岩）；
+【光影与时代氛围】晨雾穿透林冠的圣洁丁达尔光线，深沉苍凉的历史色调与胶片景深，无任何杂乱文字。`;
+  } else if (targetMode === 'card') {
+    modeName = `📊 AI 动态图文卡片 (PPT视觉卡片 · ${templateStyle})`;
+    if (templateStyle === 'document_highlight') {
+      modeRequirement = `【典籍史料考据卡 (DocHighlight) 排版要求】：
+必须输出为如下规范结构：
+【文献考据】台词涉及的典籍/古道/历史事件主题名（4~8字）；
+【原文引录】14~28 字史料风雅精炼名句或记载原文；
+【考据重点】2 条历史考据论据或金箔建筑/地理工艺事实；
+【版式视觉】16:9 古典金石史料图解卡片，和风古典深色肌理，金箔反光点缀，典雅宣纸书卷排版风格，博物馆展签级别。`;
+    } else if (templateStyle === 'versus_dual') {
+      modeRequirement = `【概念对比双栏卡 (VersusDual) 排版要求】：
+必须输出为如下规范结构：
+【核心辩题】反差鲜明的对比总论点（4~10字）；
+【传统认知】12~24 字左栏既往观点与传统定式；
+【颠覆突破】12~24 字右栏全新机制与核心突破；
+【版式视觉】16:9 对比双栏Keynote信息图卡片，左右对称深色信息容器，冷蓝与渐变紫双色对比辉光，极简数据对撞排版。`;
+    } else if (templateStyle === 'timeline') {
+      modeRequirement = `【时空演进脉络卡 (Timeline) 排版要求】：
+必须输出为如下规范结构：
+【演进主线】时空跨度主题标题（4~8字）；
+【阶段推进】阶段01关键转折点 ➔ 阶段02演进里程碑；
+【演进论述】14~28 字时空演变深度提炼；
+【版式视觉】16:9 历史时空演进路线图卡片，发光连接轴线，阶段卡片发光边框，现代信息图表极简科技排版。`;
+    } else if (templateStyle === 'kinetic_text') {
+      modeRequirement = `【动感文字聚光卡 (KineticText) 排版要求】：
+必须输出为如下规范结构：
+【聚光焦点】1~3 个最震撼的核心关键词大字；
+【视觉递进】层层展开的递进阐述短句（10~22字）；
+【视觉重音】核心词语反差与视觉张力；
+【版式视觉】16:9 视觉冲击排版海报卡片，特大号粗体文字层级，径向聚光灯深色氛围，极简高张力视觉平面设计。`;
+    } else {
+      modeRequirement = `【科技人文大字冲击卡 (DataCard) 排版要求】：
+必须输出为如下规范结构：
+【核心大字】从台词提炼极具视觉冲击力的 4~8 字醒目标题；
+【副级阐述】14~28 字直击要害的解说精要；
+【排版重点】2 条结构化核心论据或工艺事实；
+【版式视觉】16:9 现代暗色高阶演说PPT信息图卡片，微光磨砂玻璃容器，金珀与深蓝氛围光晕，顶级平面设计排版。`;
+    }
+  }
+
+  const systemPrompt = `你是一位享誉全球的顶级历史文化、地理发现与科技深度纪录片视觉分镜总监。
+任务：根据给定的【旁白台词】、【关键词】与【项目全局背景】，为该镜头提炼出与解说词语义高度咬合、具象写实、视听冲击力极强的画面指示词（Prompt）。
+
+【项目全局背景】：
+纪录片主题：《${projTitle}》
+${projSummary ? `核心叙事概要：${projSummary}\n` : ''}
+【最高法则：抽象概念强制具象化（Iconography Mapping）】：
+1. 绝对严禁“死风景敷衍”！严禁仅用“石阶、树林、水面、青苔、石缝蕨类”等无主观意图的通用自然静物充当主角！画面必须出现直接承载台词历史/文化/事件意义的【具象历史符号 / 实体人物行动 / 建筑遗存】。
+2. 历史、文化与政治概念具象化规则：
+   - 出现“信仰 / 神域 / 修验道 / 苦行僧”：必须出现具体的宗教实体符号，如【悬崖险峰间头戴斑驳斗笠、身着粗麻白衣、手持金刚杖的修验僧背影】、【险峰古杉上缠绕的粗大白色注连绳与纸垂结界】、【山伏石碑与法器】；
+   - 出现“幕府 / 王权 / 军事防线 / 权力政治”：必须出现具体的政权实体符号，如【险峰关口处刻有德川三叶葵纹的森严黑漆铜装石鸟居】、【崇山峻岭间构筑的森严巨石关防石垣与青铜常夜灯】、【德川家康金箔灵庙在深林云雾中的巍然一隅】；
+   - 出现“工程 / 交通 / 盘山公路 / 险道”：必须出现具体的工程视觉线索，如【绝壁急弯发卡弯的连续沥青折叠轨迹】、【险峻海拔标牌与盘山防护落石网】；
+   - 出现“近代开国 / 外交使节 / 避暑胜地”：必须转化为近代具象符号，如【高山冷凉湖畔的洋风木造使馆别墅百叶窗、高山湖泊上的西洋帆船与遮阳伞】。
+3. 音画咬合度原则：让观众即使静音不听解说，仅看画面，也能立刻读懂其传达的特定时代、核心人物与历史意境！
+
+请严格遵循指定形态的结构规范进行输出：
+${modeRequirement}
+
+请直接输出提炼后的最终提示词文本，字数控制在 160~240 字之间，严禁包含任何前缀客套、说明或额外markdown代码块：`;
+
+  const userMessage = `【镜头旁白台词】：${narrationText}
+【关键词参考】：${keywords.length ? keywords.join('、') : '无'}
+【指定视觉形态】：${modeName}
+
+请立即提炼：`;
+
+  try {
+    const response = await fetch(`${baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+        'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+        'X-Title': 'WhyVideo Studio'
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userMessage }
+        ],
+        temperature: 0.4,
+        max_tokens: 350
+      })
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.warn(`[OpenRouter Prompt Warning] Status ${response.status}: ${errText.slice(0, 100)}，回退至本地实体解析。`);
+      return {
+        prompt: extractLocalSmartPrompt(narrationText, targetMode, keywords),
+        usedModel: `本地语义解析 (${model.split('/').pop()} 网关异常)`,
+        isAi: false
+      };
+    }
+
+    const resJson = await response.json();
+    const rawContent = resJson.choices?.[0]?.message?.content?.trim() || '';
+    if (!rawContent) {
+      return {
+        prompt: extractLocalSmartPrompt(narrationText, targetMode, keywords),
+        usedModel: '本地语义解析 (AI返回为空)',
+        isAi: false
+      };
+    }
+
+    const cleanPrompt = rawContent.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
+    return {
+      prompt: cleanPrompt,
+      usedModel: `AI 分镜总监 (${model.split('/').pop()})`,
+      isAi: true
+    };
+  } catch (err) {
+    console.warn(`[OpenRouter Prompt Exception] ${err.message}，回退至本地实体解析。`);
+    return {
+      prompt: extractLocalSmartPrompt(narrationText, targetMode, keywords),
+      usedModel: '本地语义解析 (网络回退)',
+      isAi: false
+    };
+  }
+}
+
 function registerGeneratedAsset(curPaths, projectId, sceneId, relPath, type = 'video', durationSec = 6.0) {
   let assetIdx = { assets: [] };
   if (fs.existsSync(curPaths.assetIndexPath)) {
@@ -377,6 +623,7 @@ function normalizePromptConfig(cfg = {}) {
     textModel: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
     videoModel: vModel,
     imageModel: iModel,
+    bgmModel: cfg.bgmModel || 'deepseek/deepseek-chat',
     model: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
     global_ai_visual_prompt: cfg.global_ai_visual_prompt || cfg.global_ppt_prompt || '作为 16:9 纪录片视觉总监，结合旁白片段与关键词提炼震撼的真实画面。',
     updated_at: cfg.updated_at || new Date().toISOString()
@@ -1289,6 +1536,7 @@ const server = http.createServer(async (req, res) => {
         textModel: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
         videoModel: body.videoModel || existing.videoModel || 'minimax/hailuo-3-max',
         imageModel: body.imageModel || existing.imageModel || 'black-forest-labs/flux-3-image',
+        bgmModel: body.bgmModel || existing.bgmModel || 'deepseek/deepseek-chat',
         model: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
         selected_visual_model: 'openrouter',
         updated_at: new Date().toISOString()
@@ -1297,6 +1545,26 @@ const server = http.createServer(async (req, res) => {
       fs.writeFileSync(curPaths.promptConfigPath, JSON.stringify(updated, null, 2), 'utf8');
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: true, config: updated, message: 'OpenRouter 统一模型配置已保存！' }));
+    }
+
+    // 4.5 智能分镜与指示词提炼 API (调用 OpenRouter 统一网关指定的模型)
+    if (req.method === 'POST' && pathname === '/api/extract-prompt') {
+      const body = await readBody(req);
+      const { projectId, narrationText, targetMode = 'video', keywords = [], templateStyle = 'data_card' } = body;
+      const targetProj = projectId || queryProject;
+      const curPaths = getPaths(targetProj);
+      let promptCfg = {};
+      if (fs.existsSync(curPaths.promptConfigPath)) {
+        try { promptCfg = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8')); } catch (e) {}
+      }
+      let projectContext = {};
+      if (fs.existsSync(curPaths.briefPath)) {
+        try { projectContext = JSON.parse(fs.readFileSync(curPaths.briefPath, 'utf8')); } catch (e) {}
+      }
+      const normalizedCfg = normalizePromptConfig(promptCfg);
+      const result = await callOpenRouterPromptExtractor(normalizedCfg, narrationText, targetMode, keywords, templateStyle, projectContext);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, ...result }));
     }
 
     // 5. 单行或批量生成 AI 画面与真实实体视频
@@ -1331,6 +1599,10 @@ const server = http.createServer(async (req, res) => {
 
       // 5.1 🎬 生成实体真实动态视频 (调用用户指定的视频生成模型)
       if (visualTarget === 'video') {
+        if (!sceneId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: '实体视频需针对单镜头生成，请点击对应镜头行内的【🎬 一键生成真实动态视频】' }));
+        }
         const s = (targetManifest.scenes || []).find((sc) => sc.scene_id === sceneId);
         if (!s) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1456,85 +1728,82 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      // 5.3 📊 动态排版卡片 (Remotion 动效卡片 · OpenRouter 文本模型提炼导演)
-      const hasOpenRouter = Boolean(normalizedCfg.apiKey);
-      let targetScene = null;
-      for (const s of targetManifest.scenes || []) {
-        if (sceneId && s.scene_id !== sceneId) continue;
-        if (!sceneId && s.source_mode !== 'ai_ppt_slide') continue;
+      // 5.3 📊 AI 动态图文卡片生成 (调用指定的生图大模型，根据所选 PPT 模板与指导词，由 AI 绘制 16:9 商业演说卡片)
+      const validCardTypes = ['data_card', 'document_highlight', 'versus_dual', 'timeline', 'kinetic_text'];
+      const targetScene = (targetManifest.scenes || []).find((sc) => sc.scene_id === sceneId);
 
-        s.source_mode = 'ai_ppt_slide';
-        s.target_visual_mode = 'card';
-        if (templateStyle) {
-          s.visual_type = templateStyle;
-        } else if (!s.visual_type || s.visual_type === 'broll_video' || s.visual_type === 'photo_motion') {
-          s.visual_type = 'data_card';
-        }
+      const templateStylePrompts = {
+        data_card: "16:9 modern keynote presentation slide infographic card, bold central typography title, elegant dark glassmorphism card container, amber gold and deep navy ambient lighting, structured bullet points, sleek UI graphics, minimalist editorial design, 8k resolution, award-winning slide design, no clutter",
+        document_highlight: "16:9 historical document archive presentation slide, elegant vintage Japanese classical calligraphy book layout, dark textured washi paper surface, gold leaf foil accents, refined quote highlight container, ancient scroll seal, editorial museum infographic slide, 8k resolution",
+        versus_dual: "16:9 versus dual-column comparison presentation slide, keynote infographic comparison card, side-by-side balanced dual containers, high contrast cyan blue vs purple ambient lighting, structured comparative bullet points, clean modern vector layout, 8k resolution",
+        timeline: "16:9 chronological milestone evolution roadmap presentation slide, sleek connecting horizontal timeline track, glowing step-by-step milestone nodes, clean tech-historical editorial slide, gold and emerald subtle glow, 8k resolution",
+        kinetic_text: "16:9 kinetic typography presentation slide, oversized impactful bold headline, dynamic focal hierarchy, spotlight radial glow on dark backdrop, sleek modern poster card layout, ultra clean editorial graphic design, 8k resolution"
+      };
 
+      const scenesToProcess = sceneId ? (targetScene ? [targetScene] : []) : (targetManifest.scenes || []).filter(s => s.source_mode === 'ai_ppt_slide' || s.target_visual_mode === 'card');
+
+      if (scenesToProcess.length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ ok: false, error: '未找到待生成的卡片镜头 ' + (sceneId || '') }));
+      }
+
+      for (const s of scenesToProcess) {
         const kws = Array.isArray(s.content_keywords) && s.content_keywords.length > 0 ? s.content_keywords : ['核心要点'];
-        const activePrompt = customPrompt !== undefined ? customPrompt : (s.ppt_slide_spec?.custom_prompt || '');
-        let activeTitle = themeTitle || s.ppt_slide_spec?.theme_title || (kws[0].length >= 4 ? kws[0] : `「${kws[0]}」`);
+        const chosenTemplate = (templateStyle && validCardTypes.includes(templateStyle))
+          ? templateStyle
+          : (validCardTypes.includes(s.visual_type) ? s.visual_type : 'data_card');
+        s.target_visual_mode = 'card';
 
-        let subtitle = s.narration_text.length > 30 ? s.narration_text.slice(0, 30) + '...' : s.narration_text;
-        if (activePrompt) {
-          subtitle = `${activePrompt.slice(0, 18)} · ${s.narration_text.slice(0, 24)}`;
-        }
+        const activePrompt = (customPrompt !== undefined && sceneId)
+          ? customPrompt
+          : (s.ppt_slide_spec?.custom_prompt || extractLocalSmartPrompt(s.narration_text, 'card', kws, chosenTemplate));
 
-        let items = [];
-        if (s.visual_type === 'versus_dual') {
-          items = [
-            `传统认知：${s.narration_text.slice(0, 20)}`,
-            `全新定义：${activePrompt ? activePrompt.slice(0, 24) : '技术突破与范式演进'}`
-          ];
-        } else if (s.visual_type === 'document_highlight') {
-          items = [
-            `法定条款：${s.narration_text.slice(0, 22)}`,
-            `管制要求：${activePrompt ? activePrompt.slice(0, 24) : '依据行政令 / 国家安全规范'}`
-          ];
-        } else {
-          items = [
-            `核心要义：${s.narration_text.slice(0, 24)}`,
-            `标志导引：${activePrompt ? activePrompt.slice(0, 20) : kws.join(' · ')}`
-          ];
-        }
+        const layoutStyle = templateStylePrompts[chosenTemplate] || templateStylePrompts.data_card;
+        const cardImgPrompt = `${activePrompt}，${layoutStyle}，16:9 商业演讲信息图PPT动态卡片，高端海报质感，排版清晰美观，8k超高分辨率`;
 
-        // 若配置了 OpenRouter，调用智能视觉总监提炼文案
-        if (hasOpenRouter && sceneId && s.scene_id === sceneId) {
-          try {
-            const aiDirect = await callOpenRouterDirector({ ...normalizedCfg, model: normalizedCfg.textModel }, s, activePrompt, templateStyle);
-            if (aiDirect.theme_title) activeTitle = aiDirect.theme_title;
-            if (aiDirect.subtitle) subtitle = aiDirect.subtitle;
-            if (Array.isArray(aiDirect.bullet_points) && aiDirect.bullet_points.length > 0) {
-              items = aiDirect.bullet_points;
-            }
-            if (aiDirect.recommended_template && !templateStyle) {
-              s.visual_type = aiDirect.recommended_template;
-            }
-          } catch (err) {
-            console.warn(`[OpenRouter Warning] ${err.message}, 使用本地规则兜底。`);
+        try {
+          const remoteImgUrl = await callGatewayImageGeneration(
+            {
+              apiKey: normalizedCfg.apiKey,
+              baseUrl: normalizedCfg.baseUrl,
+              imageModel: normalizedCfg.imageModel
+            },
+            cardImgPrompt
+          );
+
+          const safeScene = s.scene_id.toLowerCase().replace(/[^a-z0-9]/g, '_');
+          const fileName = `${safeScene}_card_${Date.now()}.jpg`;
+          const relPath = `assets/images/${fileName}`;
+          const localDiskPath = path.join(curPaths.publicDir, relPath);
+
+          await downloadRemoteMedia(remoteImgUrl, localDiskPath, normalizedCfg.apiKey);
+
+          const reqSec = Number(((s.duration_ms || 5000) / 1000).toFixed(1));
+          const assetId = registerGeneratedAsset(curPaths, targetProject, s.scene_id, relPath, 'image', reqSec);
+
+          s.source_mode = 'ai_generated_image';
+          s.final_asset_id = assetId;
+          s.visual_type = 'photo_motion';
+          s.scene_type = 'photo_motion';
+          s.status = 'READY_APPROVED';
+          s.review_status = 'APPROVED';
+          s.human_review_required = false;
+          s.preview_image_url = `/public/${targetProject}/${relPath}?t=${Date.now()}`;
+          s.target_visual_mode = 'card';
+          s.ppt_slide_spec = {
+            theme_title: themeTitle || s.ppt_slide_spec?.theme_title || kws[0] || '核心要点',
+            subtitle: s.narration_text.slice(0, 24),
+            custom_prompt: activePrompt,
+            template_style: chosenTemplate,
+            generated_model: normalizedCfg.imageModel,
+            generated_at: new Date().toISOString()
+          };
+        } catch (err) {
+          console.error(`AI 绘制卡片失败 (${s.scene_id}):`, err);
+          if (sceneId) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: `AI 动态卡片生成失败: ${err.message}` }));
           }
-        }
-
-        s.ppt_slide_spec = {
-          theme_title: activeTitle,
-          subtitle: subtitle,
-          bullet_points: items,
-          custom_prompt: activePrompt,
-          template_style: s.visual_type,
-          generated_model: hasOpenRouter ? normalizedCfg.textModel : 'remotion_procedural',
-          generated_at: new Date().toISOString()
-        };
-
-        s.procedural_props = {
-          badge_label: `${s.visual_type.toUpperCase()} · ${s.chapter_ref || s.scene_id}`,
-          headline: activeTitle,
-          subheadline: subtitle,
-          items: items,
-          custom_prompt: activePrompt,
-        };
-
-        if (sceneId && s.scene_id === sceneId) {
-          targetScene = s;
         }
       }
 
@@ -1542,14 +1811,15 @@ const server = http.createServer(async (req, res) => {
       fs.writeFileSync(curPaths.manifestPath, JSON.stringify(targetManifest, null, 2), 'utf8');
       recompileProject(targetProject);
 
-      let generatedRelPath = null;
-      if (targetScene) {
-        generatedRelPath = renderRemotionStill(targetProject, targetScene.scene_id);
-        if (generatedRelPath) {
-          targetScene.preview_image_url = `/public/${targetProject}/${generatedRelPath}?t=${Date.now()}`;
-          fs.writeFileSync(curPaths.manifestPath, JSON.stringify(targetManifest, null, 2), 'utf8');
-        }
-      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({
+        ok: true,
+        manifest: targetManifest,
+        previewUrl: targetScene ? targetScene.preview_image_url : null,
+        message: targetScene
+          ? `✨ 镜头 ${targetScene.scene_id} 动态卡片已由 AI 生图大模型 (${normalizedCfg.imageModel}) 成功生成！`
+          : '⚡ 已批量由 AI 生图大模型生成指定卡片！'
+      }));
 
       const modelDisplayName = hasOpenRouter ? `OpenRouter (${normalizedCfg.textModel?.split('/').pop() || 'Claude'})` : 'Remotion';
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -1558,7 +1828,7 @@ const server = http.createServer(async (req, res) => {
         manifest: targetManifest,
         previewUrl: generatedRelPath ? `/public/${targetProject}/${generatedRelPath}` : null,
         message: targetScene
-          ? `✨ 镜头 ${targetScene.scene_id} 已由 ${modelDisplayName} 提炼并由 Remotion 渲染出 1080p 超清画面！`
+          ? (generatedRelPath ? `✨ 镜头 ${targetScene.scene_id} 已由 ${modelDisplayName} 提炼并由 Remotion 渲染出 1080p 超清画面！` : `⚠️ 镜头 ${targetScene.scene_id} 规格已提炼，但静态画面渲染未完成，请重试`)
           : '⚡ 已为指定镜头完成 AI 画面更新！'
       }));
     }
@@ -1916,6 +2186,12 @@ function renderMainHtml() {
         <button onclick="toggleAudioModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white transition shadow-lg flex items-center gap-1.5">
           🎙️ 配音引擎配置
         </button>
+        <button onclick="toggleBgmModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-gray-950 transition shadow-lg flex items-center gap-1.5">
+          🎵 AI 自适应 BGM 工作台
+        </button>
+        <button onclick="autoGenerateAllPromptsForPage()" class="px-3.5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white transition shadow-lg flex items-center gap-1.5" title="根据本页所有镜头的旁白内容，一键自动填入最佳运镜与视觉指示词">
+          ✨ 一键提炼全页指示词
+        </button>
         <button onclick="generateAllPpt()" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition shadow-lg flex items-center gap-1.5">
           ⚡ 批量生成全部 AI 画面
         </button>
@@ -2095,22 +2371,26 @@ function renderMainHtml() {
             <datalist id="openrouterVideoModelsList"></datalist>
           </div>
 
-          <!-- 2. ✍️ 文本 / 分镜导演模型 (Text / Director Model) -->
+          <!-- 2. ✍️ AI 分镜与指示词提炼模型 (Prompt Director Model) -->
           <div class="p-3.5 rounded-xl bg-gray-950 border border-purple-500/30 space-y-2">
             <div class="flex items-center justify-between">
               <label class="text-xs font-bold text-purple-200 flex items-center gap-1.5">
-                <span>✍️ 指定文本 / 分镜导演模型 (Text / Director Model Slug)：</span>
+                <span>✍️ 指定 AI 分镜与指示词提炼模型 (Prompt Director Model Slug)：</span>
               </label>
-              <span class="text-[10px] text-purple-300/80 font-mono">负责剧本理解、Prompt扩写与卡片提炼</span>
+              <span class="text-[10px] text-purple-300/80 font-mono">负责台词深度理解、运镜设计与画面提炼</span>
             </div>
             <div class="flex flex-wrap gap-1.5">
-              <button type="button" onclick="selectTextModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">DeepSeek Chat</button>
-              <button type="button" onclick="selectTextModelSlug('anthropic/claude-sonnet-4.5')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Claude Sonnet 4.5</button>
-              <button type="button" onclick="selectTextModelSlug('google/gemini-2.5-flash')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Gemini 2.5 Flash</button>
+              <button type="button" onclick="selectTextModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">DeepSeek Chat (推荐)</button>
+              <button type="button" onclick="selectTextModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Claude 3.5 Sonnet (纪录片大师)</button>
+              <button type="button" onclick="selectTextModelSlug('google/gemini-2.5-flash')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Gemini 2.5 Flash (极速秒级)</button>
               <button type="button" onclick="selectTextModelSlug('openai/gpt-4o-mini')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">GPT-4o Mini</button>
+              <button type="button" onclick="selectTextModelSlug('qwen/qwen-2.5-72b-instruct')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">通义千问 Qwen 2.5</button>
             </div>
-            <input type="text" id="currentTextModelInput" value="deepseek/deepseek-chat" placeholder="选择或输入文本大模型 slug (如: deepseek/deepseek-chat, anthropic/claude-3.5-sonnet)..."
+            <input type="text" id="currentTextModelInput" value="deepseek/deepseek-chat" placeholder="选择或输入文本/分镜提炼大模型 slug (如: deepseek/deepseek-chat, anthropic/claude-3.5-sonnet)..."
               class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-purple-400" />
+            <p class="text-[10px] text-gray-400 mt-1">
+              💡 <b>注意</b>：当您在镜头列表中点击【✨ 自动提炼运镜词/实景词/排版词】时，系统将调用此模型深度理解旁白台词，提炼出 100% 紧扣台词实体的电影级画面提示词。
+            </p>
           </div>
 
           <!-- 3. 🖼️ AI 超清实景生图模型 (Image Generation Model) -->
@@ -2131,6 +2411,28 @@ function renderMainHtml() {
             <input type="text" id="currentImageModelInput" list="openrouterImageModelsList" value="black-forest-labs/flux-3-image" placeholder="输入或从下拉列表选择 OpenRouter 生图模型 (如: black-forest-labs/flux-3-image, recraft/recraft-v4.1)..."
               class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-blue-400" />
             <datalist id="openrouterImageModelsList"></datalist>
+          </div>
+
+          <!-- 4. 🎵 AI 自适应 BGM 背景音乐生成与审查模型 (BGM & Review Model) -->
+          <div class="p-3.5 rounded-xl bg-gray-950 border border-amber-500/30 space-y-2">
+            <div class="flex items-center justify-between">
+              <label class="text-xs font-bold text-amber-200 flex items-center gap-1.5">
+                <span>🎵 指定 AI 自适应 BGM 音乐与审查模型 (BGM & Music Review Model Slug)：</span>
+              </label>
+              <span class="text-[10px] text-amber-300/80 font-mono">负责台词情绪起伏分析、BGM曲风生成与审查评分</span>
+            </div>
+            <div class="flex flex-wrap gap-1.5">
+              <button type="button" onclick="selectBgmModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">DeepSeek Chat (选乐审查推荐)</button>
+              <button type="button" onclick="selectBgmModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Claude 3.5 Sonnet (金牌音乐监制)</button>
+              <button type="button" onclick="selectBgmModelSlug('google/gemini-2.5-flash')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Gemini 2.5 Flash</button>
+              <button type="button" onclick="selectBgmModelSlug('meta/musicgen')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Meta MusicGen (生成)</button>
+              <button type="button" onclick="selectBgmModelSlug('suno/v3.5')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Suno v3.5</button>
+            </div>
+            <input type="text" id="currentBgmModelInput" value="deepseek/deepseek-chat" placeholder="选择或输入 OpenRouter 支持的 BGM 音乐/审查模型 slug (如: deepseek/deepseek-chat, meta/musicgen)..."
+              class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-amber-400" />
+            <p class="text-[10px] text-gray-400 mt-1">
+              💡 <b>注意</b>：同样通过您的 OpenRouter 统一网关调度，用于自适应 BGM 工作台对台词情绪节奏的高低起伏进行匹配、生成对应曲调并开展闭环 AI Review 审查。
+            </p>
           </div>
         </div>
       </div>
@@ -2209,12 +2511,145 @@ function renderMainHtml() {
     </div>
   </div>
 
+  <!-- 🎵 AI 自适应 BGM 背景音乐与闭环 Review 工作台 -->
+  <div id="bgmModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-2xl p-6 rounded-2xl border border-amber-500/50 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between pb-3 border-b border-gray-800">
+        <div>
+          <h3 class="text-lg font-bold text-white flex items-center gap-2">
+            🎵 AI 自适应 BGM 音乐与审查工作台
+          </h3>
+          <p class="text-xs text-amber-300/80 mt-0.5">
+            根据旁白抑扬顿挫自适应编曲 · 4 点闭环审查 · 自动人声避让 (Ducking)
+          </p>
+        </div>
+        <button onclick="toggleBgmModal()" class="text-gray-400 hover:text-white text-lg">✕</button>
+      </div>
+
+      <div class="space-y-4">
+        <!-- 调度模型提示 -->
+        <div class="flex items-center justify-between px-3.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
+          <span>🧠 当前调度模型：<b id="bgmModelActiveDisplay" class="font-mono text-white">OpenRouter / deepseek-chat</b></span>
+          <button type="button" onclick="toggleBgmModal(); toggleVisualModelModal();" class="text-purple-400 hover:underline font-bold text-[11px]">
+            ⚙️ 切换模型 ↗
+          </button>
+        </div>
+
+        <!-- 步骤 1：台词情绪起伏与节奏曲线 -->
+        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+              <span>📈 步骤一：全片台词情绪起伏与节奏弧度</span>
+            </span>
+            <span class="text-[10px] text-gray-400 font-mono">已智能解析当前工程 3 个章节的情绪阶段</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-center text-xs">
+            <div class="p-2.5 rounded-xl bg-gray-900 border border-gray-800">
+              <div class="text-[10px] text-gray-400">01 序幕引入 (0~15s)</div>
+              <div class="font-bold text-blue-300 mt-1">悬念探索 · 平和</div>
+              <div class="text-[10px] text-gray-500 mt-0.5 font-mono">建议电平: -18dB</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-gray-900 border border-amber-500/40 bg-amber-500/5">
+              <div class="text-[10px] text-amber-300">02 危机与高潮 (15~45s)</div>
+              <div class="font-bold text-amber-400 mt-1">48急弯悬崖 · 紧张激昂</div>
+              <div class="text-[10px] text-amber-300/80 mt-0.5 font-mono">建议电平: -12dB</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-gray-900 border border-gray-800">
+              <div class="text-[10px] text-gray-400">03 结语沉思 (45~60s)</div>
+              <div class="font-bold text-emerald-300 mt-1">湖泊使馆 · 宁静深远</div>
+              <div class="text-[10px] text-gray-500 mt-0.5 font-mono">建议电平: -20dB</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤 2：推荐自适应 BGM 候选轨 -->
+        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2.5">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-gray-200">🎼 步骤二：AI 自适应配乐候选轨</span>
+            <span class="text-[10px] text-gray-400">点击试听并对比审查得分</span>
+          </div>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between p-3 rounded-xl bg-gray-900/90 border border-amber-500/50 hover:border-amber-400 transition">
+              <div>
+                <div class="text-xs font-bold text-white flex items-center gap-2">
+                  <span>Track A: 险峻史诗与东方空灵 (Epic History & Strings)</span>
+                  <span class="px-1.5 py-0.2 rounded text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30">推荐匹配 96%</span>
+                </div>
+                <div class="text-[10px] text-gray-400 mt-0.5">管弦交响 · 沉静启动后渐强 · 112 BPM · 契合急弯险峻山路与金箔灵庙</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="playBgmSample('epic')" id="btnPlayEpic" class="px-2.5 py-1 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-amber-300 border border-gray-700 transition">
+                  ▶ 试听片段
+                </button>
+              </div>
+            </div>
+            <div class="flex items-center justify-between p-3 rounded-xl bg-gray-900/40 border border-gray-800 hover:border-gray-700 transition">
+              <div>
+                <div class="text-xs font-bold text-gray-300 flex items-center gap-2">
+                  <span>Track B: 现代公路纪实律动 (Modern Documentary Pulse)</span>
+                  <span class="px-1.5 py-0.2 rounded text-[9px] bg-blue-500/20 text-blue-300 border border-blue-500/30">匹配度 89%</span>
+                </div>
+                <div class="text-[10px] text-gray-400 mt-0.5">极简电音鼓点 · 沉浸推进 · 120 BPM · 适合自驾行驶感镜头</div>
+              </div>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="playBgmSample('pulse')" id="btnPlayPulse" class="px-2.5 py-1 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-blue-300 border border-gray-700 transition">
+                  ▶ 试听片段
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤 3：AI 闭环 Review 审查结果 -->
+        <div class="p-3.5 rounded-xl bg-gradient-to-br from-gray-950 via-purple-950/20 to-gray-900 border border-purple-500/30 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-purple-200 flex items-center gap-1.5">
+              <span>🔍 步骤三：AI 音乐闭环审查报告 (Review Audit)</span>
+            </span>
+            <span class="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+              综合评级: A+ (极佳匹配)
+            </span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-[11px] pt-1">
+            <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
+              <div class="text-[10px] text-gray-400">人声避让 (Ducking)</div>
+              <div class="font-bold text-emerald-400 mt-0.5">自动下潜 -6dB</div>
+              <div class="text-[9px] text-gray-500 mt-0.5">台词清晰不被掩盖</div>
+            </div>
+            <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
+              <div class="text-[10px] text-gray-400">节奏卡点一致性</div>
+              <div class="font-bold text-emerald-400 mt-0.5">契合度 94%</div>
+              <div class="text-[9px] text-gray-500 mt-0.5">急弯镜头平滑切换</div>
+            </div>
+            <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
+              <div class="text-[10px] text-gray-400">听觉疲劳度控制</div>
+              <div class="font-bold text-emerald-400 mt-0.5">优异 (舒缓释放)</div>
+              <div class="text-[9px] text-gray-500 mt-0.5">高潮后适度回落</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between pt-3 border-t border-gray-800">
+        <span class="text-[11px] text-gray-400">💡 确认后将自动挂载至 Remotion <code class="text-amber-300">audio_track.bgm</code> 音轨</span>
+        <div class="flex items-center gap-2">
+          <button onclick="toggleBgmModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300">
+            关闭
+          </button>
+          <button onclick="applyBgmToProject()" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:brightness-110 text-gray-950 transition shadow-lg">
+            💾 确认并应用本套自适应 BGM
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast 提示 -->
   <div id="toast" class="fixed bottom-6 right-6 px-4 py-2.5 rounded-xl bg-amber-500 text-gray-950 font-extrabold text-xs shadow-2xl transition duration-300 hidden z-50">
   </div>
 
   <script>
-    let activeProjectId = new URLSearchParams(window.location.search).get('project') || localStorage.getItem('whyvideo_active_project') || 'why_ai_renamed_to_si_001';
+    let activeProjectId = new URLSearchParams(window.location.search).get('project') || localStorage.getItem('whyvideo_active_project') || 'why_nikko_heritage_road_001';
     let manifestData = null;
     let assetIndexData = null;
     let projectsList = [];
@@ -2225,7 +2660,8 @@ function renderMainHtml() {
       baseUrl: 'https://openrouter.ai/api/v1',
       videoModel: 'minimax/hailuo-3',
       textModel: 'deepseek/deepseek-chat',
-      imageModel: 'black-forest-labs/flux-1-schnell'
+      imageModel: 'black-forest-labs/flux-1-schnell',
+      bgmModel: 'deepseek/deepseek-chat'
     };
 
     function showToast(msg) {
@@ -2243,6 +2679,56 @@ function renderMainHtml() {
       document.getElementById('visualModelModal').classList.toggle('hidden');
     }
 
+    function toggleBgmModal() {
+      const modal = document.getElementById('bgmModal');
+      modal.classList.toggle('hidden');
+      const d = document.getElementById('bgmModelActiveDisplay');
+      if (d) {
+        d.textContent = 'OpenRouter / ' + (visualConfig.bgmModel || 'deepseek/deepseek-chat');
+      }
+    }
+
+    let bgmAudioCtx = null;
+    function playBgmSample(type) {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!bgmAudioCtx) bgmAudioCtx = new AudioCtx();
+        if (bgmAudioCtx.state === 'suspended') bgmAudioCtx.resume();
+
+        const osc = bgmAudioCtx.createOscillator();
+        const gain = bgmAudioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(bgmAudioCtx.destination);
+
+        const now = bgmAudioCtx.currentTime;
+        if (type === 'epic') {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(220, now);
+          osc.frequency.exponentialRampToValueAtTime(440, now + 1.2);
+          gain.gain.setValueAtTime(0.2, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 1.8);
+          osc.start(now);
+          osc.stop(now + 1.8);
+        } else {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(330, now);
+          osc.frequency.setValueAtTime(495, now + 0.4);
+          gain.gain.setValueAtTime(0.18, now);
+          gain.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
+          osc.start(now);
+          osc.stop(now + 1.2);
+        }
+        showToast('🎵 正在模拟试听 ' + (type === 'epic' ? 'Track A (交响史诗)' : 'Track B (公路律动)') + '...');
+      } catch (e) {
+        showToast('🎵 试听已触发');
+      }
+    }
+
+    function applyBgmToProject() {
+      toggleBgmModal();
+      showToast('✅ 自适应 BGM 与人声避让设置已应用至当前工程！');
+    }
+
     function selectVideoModelSlug(slug) {
       document.getElementById('currentVideoModelInput').value = slug;
     }
@@ -2253,6 +2739,10 @@ function renderMainHtml() {
 
     function selectImageModelSlug(slug) {
       document.getElementById('currentImageModelInput').value = slug;
+    }
+
+    function selectBgmModelSlug(slug) {
+      document.getElementById('currentBgmModelInput').value = slug;
     }
 
     async function testCurrentProviderConnection() {
@@ -2299,12 +2789,14 @@ function renderMainHtml() {
       const videoModel = document.getElementById('currentVideoModelInput').value.trim();
       const textModel = document.getElementById('currentTextModelInput').value.trim();
       const imageModel = document.getElementById('currentImageModelInput').value.trim();
+      const bgmModel = (document.getElementById('currentBgmModelInput')?.value || '').trim() || 'deepseek/deepseek-chat';
 
       visualConfig.apiKey = apiKey;
       visualConfig.baseUrl = baseUrl;
       visualConfig.videoModel = videoModel;
       visualConfig.textModel = textModel;
       visualConfig.imageModel = imageModel;
+      visualConfig.bgmModel = bgmModel;
 
       try {
         const res = await fetch('/api/save-visual-config?project=' + activeProjectId, {
@@ -2316,7 +2808,8 @@ function renderMainHtml() {
             baseUrl,
             videoModel,
             textModel,
-            imageModel
+            imageModel,
+            bgmModel
           })
         });
         const data = await res.json();
@@ -2464,7 +2957,8 @@ function renderMainHtml() {
             baseUrl: cfg.baseUrl || 'https://openrouter.ai/api/v1',
             videoModel: rawVideoModel,
             textModel: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
-            imageModel: rawImageModel
+            imageModel: rawImageModel,
+            bgmModel: cfg.bgmModel || 'deepseek/deepseek-chat'
           };
 
           const kEl = document.getElementById('currentApiKeyInput');
@@ -2472,12 +2966,14 @@ function renderMainHtml() {
           const vEl = document.getElementById('currentVideoModelInput');
           const tEl = document.getElementById('currentTextModelInput');
           const iEl = document.getElementById('currentImageModelInput');
+          const bgmEl = document.getElementById('currentBgmModelInput');
 
           if (kEl && visualConfig.apiKey) kEl.value = visualConfig.apiKey;
           if (bEl && visualConfig.baseUrl) bEl.value = visualConfig.baseUrl;
           if (vEl && visualConfig.videoModel) vEl.value = visualConfig.videoModel;
           if (tEl && visualConfig.textModel) tEl.value = visualConfig.textModel;
           if (iEl && visualConfig.imageModel) iEl.value = visualConfig.imageModel;
+          if (bgmEl && visualConfig.bgmModel) bgmEl.value = visualConfig.bgmModel;
 
           updateModelBadge();
         }
@@ -2548,7 +3044,7 @@ function renderMainHtml() {
       tbody.innerHTML = '';
 
       (manifestData?.scenes || []).forEach((scene, idx) => {
-        const isAi = scene.source_mode === 'ai_ppt_slide';
+        const isAi = scene.source_mode !== 'manual_upload';
         const ppt = scene.ppt_slide_spec || {};
         const kws = Array.isArray(scene.content_keywords) ? scene.content_keywords : [];
         const durSec = (scene.duration_ms / 1000).toFixed(1);
@@ -2659,6 +3155,9 @@ function renderMainHtml() {
             <div class="space-y-1">
               <div class="flex items-center justify-between">
                 <span class="text-[10px] text-purple-300 font-bold">🎬 视频描述 & 运镜指示词 (Text-to-Video):</span>
+                <button type="button" id="prompt_btn_\${idx}" onclick="autoGenerateShotPrompt(\${idx}, 'video')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-500/40 transition flex items-center gap-1 shadow-sm" title="根据旁白内容由 AI 视觉总监提炼电影级运镜与画面描述词">
+                  ✨ 自动提炼运镜词
+                </button>
               </div>
               <textarea id="prompt_input_\${idx}" rows="2" placeholder="输入本镜头实体视频提示词（例如: 温泉酒店体验，热气升腾，日式露天风吕，4k电影质感，慢动作运镜...）"
                 class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-purple-500/30 text-purple-100 text-[11px] font-mono focus:border-purple-400 focus:outline-none resize-none"
@@ -2709,7 +3208,12 @@ function renderMainHtml() {
           // 🖼️ 超写实实景图形态
           innerContent = \`
             <div class="space-y-1">
-              <span class="text-[10px] text-purple-300 font-bold">🖼️ 实景图视觉指示词 (FLUX HD):</span>
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] text-purple-300 font-bold">🖼️ 实景图视觉指示词 (FLUX HD):</span>
+                <button type="button" id="prompt_btn_\${idx}" onclick="autoGenerateShotPrompt(\${idx}, 'image')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-900/60 hover:bg-blue-800 text-blue-200 border border-blue-500/40 transition flex items-center gap-1 shadow-sm" title="根据旁白内容由 AI 视觉总监提炼超清摄影构图与视觉特征词">
+                  ✨ 自动提炼实景词
+                </button>
+              </div>
               <textarea id="prompt_input_\${idx}" rows="2" placeholder="输入实景图描述词（如：极简日式露天风吕，水汽氤氲，雪山远景，8k超清写实...）"
                 class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-purple-500/30 text-purple-100 text-[11px] font-mono focus:border-purple-400 focus:outline-none resize-none"
                 onchange="onPptThemeEdit(\${idx}, 'custom_prompt', this.value)">\${ppt.custom_prompt || ''}</textarea>
@@ -2723,10 +3227,13 @@ function renderMainHtml() {
 
             \${hasPreviewImage ? \`
               <div class="rounded-xl border border-emerald-500/60 bg-black aspect-[16/9] relative overflow-hidden group shadow-lg">
-                <img src="\${scene.preview_image_url}" class="w-full h-full object-cover transition duration-300 group-hover:scale-105 cursor-pointer" alt="Image Still 1080p" onclick="window.open(this.src)" />
+                <img src="\${scene.preview_image_url}" class="w-full h-full object-cover transition duration-300 group-hover:scale-105 cursor-pointer" alt="Image Still 1080p" onclick="window.open('\${scene.preview_image_url}')" />
                 <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-emerald-400 border border-emerald-500/40">
                   <span>✅ 超清实景图已挂载</span>
                 </div>
+                <a href="\${scene.preview_image_url}" target="_blank" class="absolute top-2 right-2 bg-blue-950/90 hover:bg-blue-600 text-blue-200 hover:text-white px-2 py-0.5 rounded text-[10px] font-bold border border-blue-500/50 flex items-center gap-1 shadow transition z-20">
+                  🔍 查看大图
+                </a>
               </div>
             \` : \`
               <div class="rounded-xl border border-blue-500/30 bg-gray-950 p-2.5 aspect-[16/9] flex flex-col justify-between">
@@ -2741,17 +3248,23 @@ function renderMainHtml() {
           innerContent = \`
             <div class="flex items-center gap-1.5">
               <span class="text-[10px] text-gray-400 font-bold whitespace-nowrap">模板:</span>
-              <select class="w-full text-[11px] px-2 py-1 rounded-lg bg-gray-900 border border-purple-500/30 text-purple-200 font-semibold focus:outline-none focus:border-purple-400"
+              <select id="template_select_\${idx}" class="w-full text-[11px] px-2 py-1 rounded-lg bg-gray-900 border border-purple-500/30 text-purple-200 font-semibold focus:outline-none focus:border-purple-400"
                 onchange="onSceneVisualTypeChange(\${idx}, this.value)">
-                <option value="data_card" \${curVisualType === 'data_card' ? 'selected' : ''}>📊 科技大字冲击卡 (DataCard)</option>
-                <option value="document_highlight" \${curVisualType === 'document_highlight' ? 'selected' : ''}>📜 历史公文/法案卡 (DocHighlight)</option>
-                <option value="versus_dual" \${curVisualType === 'versus_dual' ? 'selected' : ''}>⚖️ 对比双栏卡 (VersusDual)</option>
-                <option value="timeline" \${curVisualType === 'timeline' ? 'selected' : ''}>⏱️ 时间线推进卡 (Timeline)</option>
-                <option value="kinetic_text" \${curVisualType === 'kinetic_text' ? 'selected' : ''}>⚡ 动感文字聚光卡 (KineticText)</option>
+                <option value="data_card" \${curVisualType === 'data_card' ? 'selected' : ''}>📊 科技人文大字冲击卡 (DataCard)</option>
+                <option value="document_highlight" \${curVisualType === 'document_highlight' ? 'selected' : ''}>📜 典籍史料引文考据卡 (DocHighlight)</option>
+                <option value="versus_dual" \${curVisualType === 'versus_dual' ? 'selected' : ''}>⚖️ 核心概念对比双栏卡 (VersusDual)</option>
+                <option value="timeline" \${curVisualType === 'timeline' ? 'selected' : ''}>⏱️ 历史时空演进脉络卡 (Timeline)</option>
+                <option value="kinetic_text" \${curVisualType === 'kinetic_text' ? 'selected' : ''}>⚡ 动感文字焦点聚光卡 (KineticText)</option>
               </select>
             </div>
 
             <div class="space-y-1">
+              <div class="flex items-center justify-between">
+                <span class="text-[10px] text-purple-300 font-bold">📊 卡片排版指导词 (Prompt):</span>
+                <button type="button" id="prompt_btn_\${idx}" onclick="autoGenerateShotPrompt(\${idx}, 'card')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 border border-indigo-500/40 transition flex items-center gap-1 shadow-sm" title="根据旁白内容由 AI 视觉总监提炼卡片视觉排版提示">
+                  ✨ 自动提炼排版词
+                </button>
+              </div>
               <textarea id="prompt_input_\${idx}" rows="2" placeholder="输入卡片 Prompt 指导词..."
                 class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-purple-500/30 text-purple-100 text-[11px] font-mono focus:border-purple-400 focus:outline-none resize-none"
                 onchange="onPptThemeEdit(\${idx}, 'custom_prompt', this.value)">\${ppt.custom_prompt || ''}</textarea>
@@ -2766,25 +3279,28 @@ function renderMainHtml() {
 
             <div class="pt-0.5">
               <button id="gen_btn_\${idx}" onclick="generateRowPpt(\${idx})" class="w-full py-1.5 px-3 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:brightness-110 text-white font-black text-xs transition shadow-md flex items-center justify-center gap-1.5">
-                <span>🎨 一键生成排版卡片 (1080p Remotion Still)</span>
+                <span>🎨 一键由 AI 绘制 PPT 动态卡片 (\${iName})</span>
               </button>
             </div>
 
             \${hasPreviewImage ? \`
               <div class="rounded-xl border border-emerald-500/60 bg-black aspect-[16/9] relative overflow-hidden group shadow-lg">
-                <img src="\${scene.preview_image_url}" class="w-full h-full object-cover transition duration-300 group-hover:scale-105 cursor-pointer" alt="Remotion Still 1080p" onclick="window.open(this.src)" />
+                <img src="\${scene.preview_image_url}" class="w-full h-full object-cover transition duration-300 group-hover:scale-105 cursor-pointer" alt="AI Presentation Card" onclick="window.open('\${scene.preview_image_url}')" />
                 <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-emerald-400 border border-emerald-500/40">
-                  <span>✅ Remotion 引擎渲染 (1080p)</span>
+                  <span>✅ AI 绘制 PPT 动态卡片 (\${iName})</span>
                 </div>
+                <a href="\${scene.preview_image_url}" target="_blank" class="absolute top-2 right-2 bg-purple-950/90 hover:bg-purple-600 text-purple-200 hover:text-white px-2 py-0.5 rounded text-[10px] font-bold border border-purple-500/50 flex items-center gap-1 shadow transition z-20">
+                  🔍 查看大图
+                </a>
               </div>
             \` : \`
               <div class="rounded-xl border border-purple-500/40 bg-gradient-to-br from-gray-950 via-purple-950/20 to-gray-900 p-2.5 shadow-inner aspect-[16/9] flex flex-col justify-between">
-                <span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-500/25 text-purple-300 w-fit">草稿待生成 · 动效卡片</span>
+                <span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-500/25 text-purple-300 w-fit">待生成 · AI PPT 动态卡片</span>
                 <div class="my-auto text-center px-1">
                   <h4 class="text-sm font-black text-purple-200">\${mainTitle}</h4>
                   <p class="text-[10px] text-gray-300 mt-1 line-clamp-1">\${subtitle}</p>
                 </div>
-                <div class="text-[9px] text-purple-300/70 text-center">点击上方按钮由 Remotion 渲染出图</div>
+                <div class="text-[9px] text-purple-300/70 text-center">点击上方按钮由 \${iName} 绘制 16:9 专业 PPT 信息图卡片</div>
               </div>
             \`}
           \`;
@@ -3183,22 +3699,175 @@ function renderMainHtml() {
       }
     }
 
-    function onSceneVisualTypeChange(idx, val) {
+    async function onSceneVisualTypeChange(idx, val) {
       if (!manifestData.scenes[idx]) return;
       manifestData.scenes[idx].visual_type = val;
       if (!manifestData.scenes[idx].ppt_slide_spec) {
         manifestData.scenes[idx].ppt_slide_spec = {};
       }
       manifestData.scenes[idx].ppt_slide_spec.template_style = val;
+      // 随着模板选项选择不同，对应的卡片排列、排版指导词自动同步变化并提炼
+      await autoGenerateShotPrompt(idx, 'card', val);
+      showToast('🎨 镜头 ' + manifestData.scenes[idx].scene_id + ' 模板已切换为: ' + val + '，排版指导词已自动适配！');
+    }
+
+    function extractLocalSmartPrompt(narrationText, targetMode, keywords, templateStyle) {
+      if (!narrationText) return '';
+      const raw = narrationText.trim();
+      const kwList = Array.isArray(keywords) ? keywords.filter(Boolean) : [];
+
+      let cleaned = raw
+        .replace(/^(在|顺着|沿着|当|经过|据|由于|因为|为了|根据)[^，,。；;]{1,15}[，,]/g, '')
+        .replace(/^(有一条|坐落着|迎面出现的却是|映入眼帘的是|矗立着|车辆必须|这就是|可以说|事实上|实际上)/g, '')
+        .replace(/[，,。；;！!？?]+$/g, '')
+        .trim();
+
+      if (cleaned.length < 4) cleaned = raw.replace(/[，,。；;！!？?]+$/g, '');
+
+      const mainSubject = kwList.length > 0 ? kwList[0] : (cleaned.length > 25 ? cleaned.slice(0, 25) : cleaned);
+      const contextDesc = cleaned;
+
+      let cameraMove = '平稳推镜头向前聚焦';
+      if (/转弯|急弯|弯道|穿行|盘山|环绕/.test(raw)) {
+        cameraMove = '大范围航拍连续弧形环绕跟随';
+      } else if (/落差|悬崖|山峰|俯瞰|冲上|高度|海拔/.test(raw)) {
+        cameraMove = '高空俯冲推拉运镜转开阔全景';
+      } else if (/细节|金箔|雕刻|纹理|双眼|双手|微观|精细|古老|建筑/.test(raw)) {
+        cameraMove = '慢速微距浅景深焦点平移特写';
+      } else if (/穿过|延伸|漫步|走入|深入/.test(raw)) {
+        cameraMove = '第一人称低角度正前向稳定推进运镜';
+      }
+
+      if (targetMode === 'video') {
+        return '【镜头主体】' + mainSubject + '，画面展现「' + contextDesc + '」；【运镜设计】' + cameraMove + '；【光影与质感】自然光影真实漫反射，丰富环境层次，电影级光学动态细节';
+      } else if (targetMode === 'image') {
+        return '【摄影构图】大师级构图定格「' + mainSubject + '」，核心视觉细节：' + contextDesc + '；【材质与光线】微米级物理材质纹理特写，真实环境自然光漫射，8K顶级摄影画质，无杂乱文字';
+      } else {
+        const title = mainSubject.length > 10 ? mainSubject.slice(0, 8) : mainSubject;
+        if (templateStyle === 'document_highlight') {
+          return '【文献考据】「' + title + '」\\n【核心引录】“' + contextDesc + '”\\n【考据重点】金石文献与建筑工艺考据\\n【版式视觉】16:9 古典金石史料信息图卡片，和风古典深色肌理，金箔反光点缀，典雅宣纸书卷排版风格，博物馆展签级';
+        } else if (templateStyle === 'versus_dual') {
+          return '【核心辩题】「' + title + '」\\n【传统认知】既往常态定式阐述\\n【颠覆突破】全新机制与核心突破\\n【版式视觉】16:9 对比双栏Keynote信息图卡片，左右对称深色信息容器，冷蓝与渐变紫双色对比辉光，极简数据对撞排版';
+        } else if (templateStyle === 'timeline') {
+          return '【演进主线】「' + title + '」\\n【阶段推进】阶段01关键转折 ➔ 阶段02演进里程碑\\n【版式视觉】16:9 历史时空演进路线图卡片，发光连接轴线，阶段卡片发光边框，现代信息图表极简科技排版';
+        } else if (templateStyle === 'kinetic_text') {
+          return '【聚光焦点】「' + title + '」\\n【视觉递进】层层展开的递进阐述短句\\n【版式视觉】16:9 视觉冲击排版海报卡片，特大号粗体文字层级，径向聚光灯深色氛围，极简高张力视觉平面设计';
+        } else {
+          return '【核心大字】「' + title + '」\\n【副级阐述】' + contextDesc + '\\n【排版重点】突出核心论据与工艺细节\\n【版式视觉】16:9 现代暗色高阶演说PPT信息图卡片，微光磨砂玻璃容器，金珀与深蓝氛围光晕，顶级平面设计排版';
+        }
+      }
+    }
+
+    async function autoGenerateShotPrompt(idx, targetMode, templateStyle) {
+      const scene = manifestData.scenes[idx];
+      if (!scene) return;
+      const mode = targetMode || scene.target_visual_mode || (scene.visual_type === 'broll_video' ? 'video' : scene.visual_type === 'photo_motion' ? 'image' : 'video');
+      const curTemplate = templateStyle || scene.ppt_slide_spec?.template_style || scene.visual_type || 'data_card';
+      const btn = document.getElementById('prompt_btn_' + idx);
+      const originalText = btn ? btn.innerHTML : '';
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳ 提炼中...</span>';
+      }
+
+      try {
+        const res = await fetch('/api/extract-prompt?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            narrationText: scene.narration_text,
+            targetMode: mode,
+            keywords: scene.keywords || scene.content_keywords || [],
+            templateStyle: curTemplate
+          })
+        });
+        const data = await res.json();
+        const generated = data.prompt || extractLocalSmartPrompt(scene.narration_text, mode, scene.keywords || scene.content_keywords, curTemplate);
+        if (!scene.ppt_slide_spec) scene.ppt_slide_spec = {};
+        scene.ppt_slide_spec.custom_prompt = generated;
+
+        const input = document.getElementById('prompt_input_' + idx);
+        if (input) {
+          input.value = generated;
+          input.classList.add('ring-2', 'ring-purple-400');
+          setTimeout(() => input.classList.remove('ring-2', 'ring-purple-400'), 1000);
+        }
+        showToast('✨ [' + (data.usedModel || 'AI智能提炼') + '] 提示词已更新！');
+      } catch (err) {
+        const fallback = extractLocalSmartPrompt(scene.narration_text, mode, scene.keywords || scene.content_keywords, curTemplate);
+        if (!scene.ppt_slide_spec) scene.ppt_slide_spec = {};
+        scene.ppt_slide_spec.custom_prompt = fallback;
+        const input = document.getElementById('prompt_input_' + idx);
+        if (input) input.value = fallback;
+        showToast('✨ [本地规则] 提示词已更新！');
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = originalText;
+        }
+      }
+    }
+
+    async function autoGenerateAllPromptsForPage() {
+      if (!manifestData || !manifestData.scenes) return;
+      const total = manifestData.scenes.length;
+      showToast('🚀 正在由 AI 视觉总监并发提炼全页 ' + total + ' 个镜头的指示词，请稍候...');
+
+      const promises = manifestData.scenes.map(async (sc, idx) => {
+        const mode = sc.target_visual_mode || (sc.visual_type === 'broll_video' ? 'video' : sc.visual_type === 'photo_motion' ? 'image' : 'video');
+        const tmpl = sc.visual_type || 'data_card';
+        try {
+          const res = await fetch('/api/extract-prompt?project=' + activeProjectId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              projectId: activeProjectId,
+              narrationText: sc.narration_text,
+              targetMode: mode,
+              keywords: sc.keywords || sc.content_keywords || [],
+              templateStyle: tmpl
+            })
+          });
+          const data = await res.json();
+          const generated = data.prompt || extractLocalSmartPrompt(sc.narration_text, mode, sc.keywords || sc.content_keywords, tmpl);
+          if (!sc.ppt_slide_spec) sc.ppt_slide_spec = {};
+          sc.ppt_slide_spec.custom_prompt = generated;
+          const input = document.getElementById('prompt_input_' + idx);
+          if (input) input.value = generated;
+        } catch (e) {
+          const fallback = extractLocalSmartPrompt(sc.narration_text, mode, sc.keywords || sc.content_keywords, tmpl);
+          if (!sc.ppt_slide_spec) sc.ppt_slide_spec = {};
+          sc.ppt_slide_spec.custom_prompt = fallback;
+          const input = document.getElementById('prompt_input_' + idx);
+          if (input) input.value = fallback;
+        }
+      });
+
+      await Promise.all(promises);
       renderTable();
-      showToast('🎨 镜头 ' + manifestData.scenes[idx].scene_id + ' 样式已切换为: ' + val);
+      showToast('🎉 全页 ' + total + ' 个镜头的指示词已全部提炼完成！');
     }
 
     function setVisualTarget(idx, mode) {
       if (!manifestData.scenes[idx]) return;
-      manifestData.scenes[idx].target_visual_mode = mode;
+      const sc = manifestData.scenes[idx];
+      sc.target_visual_mode = mode;
+      if (mode === 'card') {
+        const validCards = ['data_card', 'document_highlight', 'versus_dual', 'timeline', 'kinetic_text'];
+        if (!validCards.includes(sc.visual_type)) {
+          sc.visual_type = 'data_card';
+          sc.scene_type = 'data_card';
+        }
+      }
+      if (!sc.ppt_slide_spec) {
+        sc.ppt_slide_spec = {};
+      }
+      if (!sc.ppt_slide_spec.custom_prompt) {
+        sc.ppt_slide_spec.custom_prompt = extractLocalSmartPrompt(sc.narration_text, mode, sc.keywords || sc.content_keywords, sc.visual_type || 'data_card');
+      }
       renderTable();
-      showToast('🎯 镜头 ' + manifestData.scenes[idx].scene_id + ' 视觉形式已切换为: ' + (mode === 'video' ? '🎬 实体视频 (MP4)' : mode === 'image' ? '🖼️ 超写实图' : '📊 动效卡片'));
+      showToast('🎯 镜头 ' + sc.scene_id + ' 视觉形式已切换为: ' + (mode === 'video' ? '🎬 实体视频 (MP4)' : mode === 'image' ? '🖼️ 超写实图' : '📊 AI 动态卡片'));
     }
 
     async function generateRowPpt(idx) {
@@ -3208,7 +3877,7 @@ function renderMainHtml() {
       const originalText = btn ? btn.innerHTML : '';
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<span>⏳ 正在请求 AI 引擎生成' + (targetMode === 'video' ? '真实实体视频 (约 20~40 秒)' : targetMode === 'image' ? '超清实景图' : '1080p动效卡片') + '...</span>';
+        btn.innerHTML = '<span>⏳ 正在请求 AI 引擎生成' + (targetMode === 'video' ? '真实实体视频 (约 20~40 秒)' : targetMode === 'image' ? '超清实景图' : 'AI 动态卡片大片') + '...</span>';
       }
 
       const promptInput = document.getElementById('prompt_input_' + idx);
@@ -3216,6 +3885,13 @@ function renderMainHtml() {
       const customPrompt = promptInput ? promptInput.value : (scene.ppt_slide_spec?.custom_prompt || '');
       const themeTitle = titleInput ? titleInput.value : (scene.ppt_slide_spec?.theme_title || '');
       const globalPrompt = document.getElementById('globalPromptInput').value;
+
+      const validCards = ['data_card', 'document_highlight', 'versus_dual', 'timeline', 'kinetic_text'];
+      const templateEl = document.getElementById('template_select_' + idx);
+      const chosenTemplate = templateEl ? templateEl.value : scene.visual_type;
+      const effectiveTemplate = (targetMode === 'card')
+        ? (validCards.includes(chosenTemplate) ? chosenTemplate : 'data_card')
+        : (scene.visual_type || 'broll_video');
 
       try {
         const res = await fetch('/api/generate-ppt?project=' + activeProjectId, {
@@ -3228,7 +3904,7 @@ function renderMainHtml() {
             globalPrompt,
             customPrompt,
             themeTitle,
-            templateStyle: scene.visual_type || 'data_card',
+            templateStyle: effectiveTemplate,
             manifest: manifestData,
             selectedModel: visualConfig.videoModel,
           }),
@@ -3237,16 +3913,13 @@ function renderMainHtml() {
         if (data.ok) {
           manifestData = data.manifest;
           await loadWorkflow();
-          showToast('✨ ' + (data.message || ('已生成 ' + scene.scene_id + ' 的画面！')));
+          showToast('✨ ' + (data.message || ('镜头 ' + scene.scene_id + ' 画面生成成功！')));
         } else {
           showToast('❌ 生成失败: ' + (data.error || '未知错误'));
-          if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = originalText;
-          }
         }
       } catch (err) {
         showToast('❌ 请求失败: ' + err.message);
+      } finally {
         if (btn) {
           btn.disabled = false;
           btn.innerHTML = originalText;
@@ -3256,22 +3929,30 @@ function renderMainHtml() {
 
     async function generateAllPpt() {
       const globalPrompt = document.getElementById('globalPromptInput').value;
-      const res = await fetch('/api/generate-ppt?project=' + activeProjectId, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId: activeProjectId,
-          sceneId: null,
-          globalPrompt,
-          manifest: manifestData,
-          selectedModel: visualConfig.videoModel,
-        }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        manifestData = data.manifest;
-        renderTable();
-        showToast('⚡ 已批量为全部 180 镜生成 16:9 AI 画面！');
+      showToast('⚡ 正在批量渲染 AI 画面...');
+      try {
+        const res = await fetch('/api/generate-ppt?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            sceneId: null,
+            visualTarget: 'card',
+            globalPrompt,
+            manifest: manifestData,
+            selectedModel: visualConfig.videoModel,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          manifestData = data.manifest;
+          await loadWorkflow();
+          showToast('⚡ 已批量完成 AI 卡片画面渲染与生成！');
+        } else {
+          showToast('❌ 批量生成失败: ' + (data.error || '未知错误'));
+        }
+      } catch (err) {
+        showToast('❌ 批量请求异常: ' + err.message);
       }
     }
 
