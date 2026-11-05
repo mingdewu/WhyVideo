@@ -29,6 +29,14 @@ function loadEnv() {
 }
 loadEnv();
 
+// 动态挂载开发态 Antigravity 调试副驾驶 (发布生产环境时直接删除 dev-bridge.mjs 即可无缝自动剥离)
+let devBridge = null;
+try {
+  devBridge = await import('./dev-bridge.mjs');
+} catch (e) {
+  devBridge = null;
+}
+
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
@@ -55,6 +63,8 @@ function getPaths(projectId = defaultProjectId) {
     publicDir: path.join(projectDir, 'public'),
     outputDir: path.join(projectDir, 'output'),
     briefPath: path.join(projectDir, 'data', 'brief.json'),
+    evidencePath: path.join(projectDir, 'data', 'evidence-cards.json'),
+    outlinePath: path.join(projectDir, 'data', 'outline.json'),
     manifestPath: path.join(projectDir, 'data', 'scene-manifest.json'),
     assetIndexPath: path.join(projectDir, 'data', 'asset-index.json'),
     statusPath: path.join(projectDir, 'data', 'project-status.json'),
@@ -236,6 +246,513 @@ function recompileProject(projectId) {
   );
 }
 
+function scanLocalExportScripts() {
+  const exportsDir = path.join(rootDir, 'exports');
+  if (!fs.existsSync(exportsDir)) return [];
+  const files = fs.readdirSync(exportsDir);
+  const results = [];
+
+  for (const f of files) {
+    if (f.startsWith('.')) continue;
+    const ext = path.extname(f).toLowerCase();
+    if (!['.txt', '.md', '.json'].includes(ext)) continue;
+    const fullPath = path.join(exportsDir, f);
+    try {
+      const stat = fs.statSync(fullPath);
+      if (!stat.isFile()) continue;
+      const raw = fs.readFileSync(fullPath, 'utf8');
+
+      let title = path.basename(f, ext);
+      let suggestedProjectId = '';
+      let wordCount = 0;
+      let isFullScript = false;
+      let preview = '';
+
+      if (ext === '.json') {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.title) title = parsed.title;
+          if (parsed.project_id) suggestedProjectId = parsed.project_id;
+          if (parsed.total_word_count) wordCount = parsed.total_word_count;
+          if (parsed.script_segments) isFullScript = true;
+          preview = (parsed.script_segments?.opening || raw).slice(0, 160);
+        } catch (e) {
+          continue;
+        }
+      } else {
+        const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+        if (lines.length > 0) {
+          const cleanFirst = lines[0].replace(/^#+\s*/, '').replace(/^《(.*)》$/, '$1').trim();
+          if (cleanFirst && cleanFirst.length < 50) {
+            title = cleanFirst;
+          }
+        }
+        const idMatch = raw.match(/(?:项目ID|project_id|Project ID)[:：]\s*([a-zA-Z0-9_-]+)/i);
+        if (idMatch) suggestedProjectId = idMatch[1];
+
+        const cnChars = (raw.match(/[\u4e00-\u9fa5]/g) || []).length;
+        wordCount = cnChars || raw.length;
+        if (f.includes('完整文案') || f.includes('final') || raw.includes('第1章') || raw.includes('第一章') || raw.includes('开篇')) {
+          isFullScript = true;
+        }
+        preview = lines.slice(0, 5).join(' ').slice(0, 160);
+      }
+
+      if (!suggestedProjectId) {
+        const safeBase = path.basename(f, ext).replace(/[^\w]/g, '_').toLowerCase().slice(0, 24);
+        suggestedProjectId = `why_${safeBase || 'project'}_001`.replace(/_+/g, '_');
+      }
+
+      results.push({
+        filename: f,
+        filePath: fullPath,
+        title,
+        suggestedProjectId,
+        wordCount,
+        sizeKb: Math.round(stat.size / 1024),
+        isFullScript,
+        preview,
+        ext,
+      });
+    } catch (e) {}
+  }
+
+  return results.sort((a, b) => {
+    if (a.isFullScript && !b.isFullScript) return -1;
+    if (!a.isFullScript && b.isFullScript) return 1;
+    return b.wordCount - a.wordCount;
+  });
+}
+
+function parseScriptToScenes(content, { projectId = 'why_project_001', title = '', targetSeconds = 5.5 } = {}) {
+  let detectedTitle = title || '';
+  let detectedProjectId = projectId;
+  const chapters = [];
+
+  let isJson = false;
+  if (typeof content === 'string' && (content.trim().startsWith('{') || content.trim().startsWith('['))) {
+    try {
+      const obj = JSON.parse(content);
+      isJson = true;
+      if (obj.title && !detectedTitle) detectedTitle = obj.title;
+      if (obj.project_id && (!detectedProjectId || detectedProjectId === 'why_project_001')) {
+        detectedProjectId = obj.project_id;
+      }
+      if (obj.script_segments) {
+        if (obj.script_segments.opening) {
+          chapters.push({ chapterTitle: '开篇导引', text: obj.script_segments.opening });
+        }
+        if (Array.isArray(obj.script_segments.chapters)) {
+          for (const ch of obj.script_segments.chapters) {
+            chapters.push({
+              chapterTitle: ch.chapter_title ? `第${ch.chapter_number || ''}章: ${ch.chapter_title}` : `第${ch.chapter_number || ''}章`,
+              text: ch.narration_text || '',
+            });
+          }
+        }
+        if (obj.script_segments.ending) {
+          chapters.push({ chapterTitle: '单片终局结尾', text: obj.script_segments.ending });
+        }
+      }
+    } catch (e) {
+      isJson = false;
+    }
+  }
+
+  if (!isJson) {
+    const rawLines = content.split('\n');
+    let currentChapter = '开篇导引';
+    let currentTextLines = [];
+
+    for (let i = 0; i < Math.min(15, rawLines.length); i++) {
+      const line = rawLines[i].trim();
+      if (!line) continue;
+      if (!detectedTitle && !line.startsWith('=') && !line.startsWith('#') && !line.includes('字数') && !line.includes('项目ID') && !line.includes('编写标准')) {
+        detectedTitle = line.replace(/^[#\s]+/, '').replace(/^《(.*)》$/, '$1').trim();
+      }
+      const idMatch = line.match(/(?:项目ID|project_id)[:：]\s*([a-zA-Z0-9_-]+)/i);
+      if (idMatch && (!detectedProjectId || detectedProjectId === 'why_project_001')) {
+        detectedProjectId = idMatch[1];
+      }
+    }
+
+    const chapterHeaderRegex = /^[ \t]*(?:[#=*-]{2,}\s*)?(?:【)?\s*(开篇[^\n】]*|开场[^\n】]*|导[言读][^\n】]*|引言[^\n】]*|第\s*\d+\s*章[^\n=】]*|第\s*[一二三四五六七八九十百]+\s*章[^\n=】]*|结[尾局][^\n】]*|single_final_ending[^\n】]*)(?:】)?\s*(?:[#=*-]{2,})?$/i;
+
+    let seenFirstHeader = false;
+    for (let line of rawLines) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      if (/^={3,}$/.test(trimmed)) continue;
+      if (/^[-*_]{3,}$/.test(trimmed)) continue;
+      if (/^(?:全片总字数|预计播讲时长|编写标准|支持证据卡)/.test(trimmed)) continue;
+
+      const headerMatch = trimmed.match(chapterHeaderRegex);
+      if (headerMatch) {
+        if (currentTextLines.length > 0) {
+          chapters.push({ chapterTitle: currentChapter, text: currentTextLines.join('\n') });
+          currentTextLines = [];
+        }
+        currentChapter = headerMatch[1].replace(/[\s=*-]+$/, '').trim();
+        seenFirstHeader = true;
+      } else {
+        if (!seenFirstHeader) {
+          // Skip leading title / meta lines before the first chapter header
+          if (trimmed === detectedTitle || trimmed.includes(detectedProjectId) || trimmed.includes('项目ID')) {
+            continue;
+          }
+        }
+        currentTextLines.push(trimmed);
+      }
+    }
+
+    if (currentTextLines.length > 0) {
+      chapters.push({ chapterTitle: currentChapter, text: currentTextLines.join('\n') });
+    }
+  }
+
+  if (chapters.length === 0) {
+    chapters.push({ chapterTitle: '正文', text: content });
+  }
+
+  if (!detectedTitle) detectedTitle = '未命名工程';
+  if (!detectedProjectId) detectedProjectId = 'why_' + Date.now().toString(36);
+
+  const msPerChar = 240;
+  const targetChars = Math.round((targetSeconds * 1000) / msPerChar);
+  const minShotDuration = 4000;
+  const maxShotDuration = 9000;
+
+  const scenes = [];
+  let curMs = 0;
+  let totalWords = 0;
+
+  function pushScene(text, chTitle) {
+    const idx = scenes.length;
+    const rawDur = Math.round(text.length * msPerChar);
+    const dur = Math.max(minShotDuration, Math.min(maxShotDuration, rawDur));
+    const startMs = curMs;
+    const endMs = curMs + dur;
+    curMs = endMs;
+
+    let kw = text.replace(/^[“"‘'（(【\[\s]+/, '').replace(/[，。！？!?、；：“”"’'）)】\]\s]/g, '').slice(0, 10);
+    if (!kw || kw.length < 2) kw = chTitle.slice(0, 8) || '核心观点';
+
+    scenes.push({
+      scene_id: `Shot-${String(idx + 1).padStart(3, '0')}`,
+      scene_index: idx + 1,
+      chapter_ref: chTitle,
+      start_ms: startMs,
+      end_ms: endMs,
+      duration_ms: dur,
+      visual_type: 'data_card',
+      source_mode: 'ai_ppt_slide',
+      visual_purpose: `${chTitle} · ${kw}`,
+      narration_text: text,
+      content_keywords: [kw],
+      ppt_slide_spec: {
+        theme_title: kw,
+        subtitle: text.slice(0, 32),
+        bullet_points: [`核心要点：${text.slice(0, 24)}`, `章节归属：${chTitle}`],
+        custom_prompt: '',
+      },
+      procedural_props: {
+        badge_label: `镜头 ${idx + 1} · ${kw}`,
+        headline: kw,
+        subheadline: text.slice(0, 32),
+        items: [text.slice(0, 26)],
+        accent_color: '#6366f1',
+      },
+      status: 'READY_PROCEDURAL',
+      final_asset_id: null,
+      human_review_required: false,
+    });
+  }
+
+  for (const ch of chapters) {
+    const chTitle = ch.chapterTitle;
+    const paragraphs = ch.text.split('\n').map((p) => p.trim()).filter(Boolean);
+    const rawSentences = [];
+
+    for (const para of paragraphs) {
+      const parts = para.split(/([。！？!?；;\n]+)/);
+      for (let i = 0; i < parts.length; i += 2) {
+        const sentence = (parts[i] + (parts[i + 1] || '')).trim();
+        if (!sentence) continue;
+        if (sentence.length > 38) {
+          const subParts = sentence.split(/([，,、]+)/);
+          for (let j = 0; j < subParts.length; j += 2) {
+            const sub = (subParts[j] + (subParts[j + 1] || '')).trim();
+            if (sub) rawSentences.push(sub);
+          }
+        } else {
+          rawSentences.push(sentence);
+        }
+      }
+    }
+
+    let currentShotText = '';
+    for (const s of rawSentences) {
+      totalWords += s.length;
+      if (!currentShotText) {
+        currentShotText = s;
+      } else if (
+        currentShotText.length + s.length <= targetChars + 6 &&
+        currentShotText.length * msPerChar < targetSeconds * 1000
+      ) {
+        currentShotText += s;
+      } else {
+        pushScene(currentShotText, chTitle);
+        currentShotText = s;
+      }
+    }
+    if (currentShotText) {
+      pushScene(currentShotText, chTitle);
+    }
+  }
+
+  const totalDurationSec = Number((curMs / 1000).toFixed(1));
+  const estimatedMinutes = Number((curMs / 60000).toFixed(1));
+
+  const manifest = {
+    project_id: detectedProjectId,
+    project_title: detectedTitle,
+    total_scenes: scenes.length,
+    total_duration_ms: curMs,
+    total_duration_sec: totalDurationSec,
+    captions_file: 'captions/captions.srt',
+    scenes,
+  };
+
+  const finalScript = {
+    project_id: detectedProjectId,
+    title: detectedTitle,
+    total_word_count: totalWords,
+    estimated_duration_minutes: estimatedMinutes,
+    revision_count: 0,
+    script_segments: {
+      chapters: chapters.map((c, i) => ({
+        chapter_number: i + 1,
+        chapter_title: c.chapterTitle,
+        narration_text: c.text,
+      })),
+    },
+  };
+
+  return {
+    projectId: detectedProjectId,
+    title: detectedTitle,
+    manifest,
+    finalScript,
+    totalWords,
+    totalDurationSec,
+    estimatedMinutes,
+    scenesCount: scenes.length,
+    sampleScenes: scenes.slice(0, 4),
+  };
+}
+
+function createProjectFromScript({ projectId, title, content, targetSeconds = 5.5 }) {
+  if (!content || !content.trim()) {
+    return { ok: false, error: '文案内容不能为空' };
+  }
+
+  const parsed = parseScriptToScenes(content, { projectId, title, targetSeconds });
+  const cleanId = (parsed.projectId || projectId || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]/g, '_')
+    .replace(/_+/g, '_') || `why_${Date.now().toString(36)}`;
+  const curPaths = getPaths(cleanId);
+
+  fs.mkdirSync(curPaths.dataDir, { recursive: true });
+  fs.mkdirSync(curPaths.audioDir, { recursive: true });
+  fs.mkdirSync(path.dirname(curPaths.captionsPath), { recursive: true });
+  fs.mkdirSync(curPaths.outputDir, { recursive: true });
+
+  parsed.manifest.project_id = cleanId;
+  parsed.manifest.project_title = parsed.title;
+  parsed.manifest.captions_file = 'captions/captions.srt';
+  parsed.finalScript.project_id = cleanId;
+
+  fs.writeFileSync(curPaths.finalScriptPath, JSON.stringify(parsed.finalScript, null, 2), 'utf8');
+  fs.writeFileSync(curPaths.manifestPath, JSON.stringify(parsed.manifest, null, 2), 'utf8');
+
+  if (!fs.existsSync(curPaths.assetIndexPath)) {
+    fs.writeFileSync(curPaths.assetIndexPath, JSON.stringify({ project_id: cleanId, assets: [] }, null, 2), 'utf8');
+  }
+
+  if (!fs.existsSync(curPaths.promptConfigPath)) {
+    fs.writeFileSync(
+      curPaths.promptConfigPath,
+      JSON.stringify(
+        {
+          selected_visual_model: 'minimax/hailuo-3',
+          selected_image_model: 'black-forest-labs/flux-1-schnell',
+          selected_text_model: 'deepseek/deepseek-chat',
+          global_ai_visual_prompt:
+            '作为 16:9 纪录片视觉总监，结合旁白片段与关键词，在 16:9 画幅中央提炼一个醒目标志大字（不超过 14 字），搭配 1 条副级阐述，用于动效视觉传达。',
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+  }
+
+  recompileProject(cleanId);
+
+  return {
+    ok: true,
+    projectId: cleanId,
+    title: parsed.title,
+    totalScenes: parsed.manifest.scenes.length,
+    totalDurationSec: parsed.manifest.total_duration_sec,
+    estimatedMinutes: parsed.estimatedMinutes,
+  };
+}
+
+function getWriterData(projectId) {
+  const curPaths = getPaths(projectId);
+  let brief = null;
+  let evidenceCards = [];
+  let outline = null;
+  let chapters = [];
+  let finalScript = null;
+
+  if (fs.existsSync(curPaths.briefPath)) {
+    try {
+      brief = JSON.parse(fs.readFileSync(curPaths.briefPath, 'utf8'));
+    } catch (e) {}
+  }
+
+  if (fs.existsSync(curPaths.evidencePath)) {
+    try {
+      evidenceCards = JSON.parse(fs.readFileSync(curPaths.evidencePath, 'utf8'));
+    } catch (e) {}
+  }
+
+  if (fs.existsSync(curPaths.outlinePath)) {
+    try {
+      outline = JSON.parse(fs.readFileSync(curPaths.outlinePath, 'utf8'));
+    } catch (e) {}
+  }
+
+  const chaptersPath = path.join(curPaths.dataDir, 'chapters.json');
+  if (fs.existsSync(chaptersPath)) {
+    try {
+      chapters = JSON.parse(fs.readFileSync(chaptersPath, 'utf8'));
+    } catch (e) {}
+  } else if (fs.existsSync(curPaths.dataDir)) {
+    const chFiles = fs
+      .readdirSync(curPaths.dataDir)
+      .filter((f) => /^chapter_\d+\.json$/.test(f))
+      .sort();
+    for (const cf of chFiles) {
+      try {
+        const cData = JSON.parse(fs.readFileSync(path.join(curPaths.dataDir, cf), 'utf8'));
+        chapters.push(cData);
+      } catch (e) {}
+    }
+  }
+
+  if (fs.existsSync(curPaths.finalScriptPath)) {
+    try {
+      finalScript = JSON.parse(fs.readFileSync(curPaths.finalScriptPath, 'utf8'));
+    } catch (e) {}
+  }
+
+  let activeStep = 1;
+  if (finalScript && finalScript.total_word_count > 0) {
+    activeStep = 5;
+  } else if (chapters.length > 0) {
+    activeStep = 4;
+  } else if (outline && outline.chapters && outline.chapters.length > 0) {
+    activeStep = outline.approval_status === 'approved' ? 4 : 3;
+  } else if (evidenceCards.length > 0) {
+    activeStep = 2;
+  } else if (brief) {
+    activeStep = 1;
+  }
+
+  return {
+    projectId,
+    brief,
+    evidenceCards,
+    outline,
+    chapters,
+    finalScript,
+    activeStep,
+  };
+}
+
+function extractJsonFromText(text) {
+  if (!text) return null;
+  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  const jsonStr = match ? match[1] : text;
+  try {
+    return JSON.parse(jsonStr.trim());
+  } catch (e) {
+    const firstBrace = text.indexOf('{');
+    const lastBrace = text.lastIndexOf('}');
+    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+      try {
+        return JSON.parse(text.slice(firstBrace, lastBrace + 1));
+      } catch (err) {}
+    }
+    const firstBracket = text.indexOf('[');
+    const lastBracket = text.lastIndexOf(']');
+    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
+      try {
+        return JSON.parse(text.slice(firstBracket, lastBracket + 1));
+      } catch (err) {}
+    }
+    return null;
+  }
+}
+
+async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, baseUrl, maxTokens = 3500 } = {}) {
+  const curApiKey = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
+  const curBase = (baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
+  const curModel = (model || 'deepseek/deepseek-chat').trim();
+
+  if (!curApiKey) {
+    return null;
+  }
+
+  try {
+    const resp = await fetch(`${curBase}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${curApiKey}`,
+        'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+        'X-Title': 'WhyVideo Studio',
+      },
+      body: JSON.stringify({
+        model: curModel,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.4,
+        max_tokens: maxTokens,
+      }),
+    });
+
+    if (!resp.ok) {
+      const err = await resp.text();
+      console.warn(`[Writer Text Warning] Status ${resp.status}: ${err.slice(0, 100)}`);
+      return null;
+    }
+
+    const json = await resp.json();
+    return json.choices?.[0]?.message?.content?.trim() || '';
+  } catch (err) {
+    console.error('[Writer Text Error]:', err);
+    return null;
+  }
+}
+
 function renderRemotionStill(projectId, sceneId) {
   const curPaths = getPaths(projectId);
   if (!fs.existsSync(curPaths.manifestPath)) return null;
@@ -303,7 +820,19 @@ function renderRemotionStill(projectId, sceneId) {
 
 async function callOpenRouterDirector(cfg, scene, customPrompt, templateStyle) {
   const apiKey = (cfg.apiKey || '').trim();
-  if (!apiKey) throw new Error('未配置 OpenRouter API Key');
+  if (!apiKey || apiKey === 'antigravity-local-dev') {
+    const kws = scene.content_keywords || [];
+    const narration = scene.narration_text || '';
+    return {
+      theme_title: kws[0] || (narration ? narration.slice(0, 10) : '核心要点'),
+      subtitle: narration.slice(0, 24),
+      bullet_points: [
+        narration.slice(0, 18),
+        kws[1] ? `关注焦点：${kws[1]}` : '关键事实依据'
+      ],
+      recommended_template: templateStyle || 'data_card'
+    };
+  }
 
   const baseUrl = (cfg.baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
   const model = (cfg.model || 'anthropic/claude-3.5-sonnet').trim();
@@ -1115,6 +1644,76 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
+    // 0.1 扫描本地 exports/ 文案库
+    if (req.method === 'GET' && pathname === '/api/scan-local-scripts') {
+      const scripts = scanLocalExportScripts();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, scripts }));
+    }
+
+    // 0.2 获取 exports/ 具体文案全文
+    if (req.method === 'GET' && pathname === '/api/get-export-script') {
+      const filename = path.basename(url.searchParams.get('filename') || '');
+      const fullPath = path.join(rootDir, 'exports', filename);
+      if (!fs.existsSync(fullPath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '文件不存在' }));
+      }
+      const raw = fs.readFileSync(fullPath, 'utf8');
+      const ext = path.extname(filename).toLowerCase();
+      let title = path.basename(filename, ext);
+      let suggestedProjectId = '';
+
+      if (ext === '.json') {
+        try {
+          const parsed = JSON.parse(raw);
+          if (parsed.title) title = parsed.title;
+          if (parsed.project_id) suggestedProjectId = parsed.project_id;
+        } catch (e) {}
+      } else {
+        const lines = raw.split('\n').map((l) => l.trim()).filter(Boolean);
+        if (lines.length > 0) {
+          const cleanFirst = lines[0].replace(/^#+\s*/, '').replace(/^《(.*)》$/, '$1').trim();
+          if (cleanFirst && cleanFirst.length < 50) title = cleanFirst;
+        }
+        const idMatch = raw.match(/(?:项目ID|project_id|Project ID)[:：]\s*([a-zA-Z0-9_-]+)/i);
+        if (idMatch) suggestedProjectId = idMatch[1];
+      }
+
+      if (!suggestedProjectId) {
+        const safeBase = path.basename(filename, ext).replace(/[^\w]/g, '_').toLowerCase().slice(0, 24);
+        suggestedProjectId = `why_${safeBase || 'project'}_001`.replace(/_+/g, '_');
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, filename, title, suggestedProjectId, content: raw }));
+    }
+
+    // 0.3 实时切片预览
+    if (req.method === 'POST' && pathname === '/api/preview-script-segmentation') {
+      const body = await readBody(req);
+      const previewResult = parseScriptToScenes(body.content || '', {
+        projectId: body.projectId || 'why_preview',
+        title: body.title || '',
+        targetSeconds: Number(body.targetSeconds) || 5.5,
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, ...previewResult }));
+    }
+
+    // 0.4 确认导入并创建工程
+    if (req.method === 'POST' && pathname === '/api/import-script-project') {
+      const body = await readBody(req);
+      const resData = createProjectFromScript({
+        projectId: body.projectId,
+        title: body.title,
+        content: body.content,
+        targetSeconds: Number(body.targetSeconds) || 5.5,
+      });
+      res.writeHead(resData.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(resData));
+    }
+
     // 1. 获取工作流完整数据
     if (req.method === 'GET' && pathname === '/api/workflow-data') {
       if (!fs.existsSync(paths.manifestPath)) {
@@ -1299,9 +1898,14 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const { provider = 'openrouter', apiKey, baseUrl, model } = body;
 
-      if (!apiKey && provider !== 'remotion') {
-        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, error: '请先填入对应平台的 API Key' }));
+      // 本地免 Key 开发模式 / Antigravity 调试模式
+      if (!apiKey || apiKey === 'antigravity-local-dev' || provider === 'antigravity' || (baseUrl && (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')))) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({
+          ok: true,
+          latencyMs: 1,
+          message: '✅ Antigravity 本地协同开发引擎已就绪！开发调试全程零费用，无需外部 API Key！'
+        }));
       }
 
       const startTime = Date.now();
@@ -1350,6 +1954,42 @@ const server = http.createServer(async (req, res) => {
             ok: true,
             latencyMs,
             message: `Runway API 连接正常！耗时 ${latencyMs}ms`
+          }));
+        } else if (provider === 'gemini' || (baseUrl && baseUrl.includes('generativelanguage.googleapis.com'))) {
+          // Google Gemini 官方端点：直接向官方 /models 端点验证 API Key 有效性（零模型依赖）
+          const cleanBase = (baseUrl || 'https://generativelanguage.googleapis.com/v1beta').trim().replace(/\/+$/, '');
+          const rootBase = cleanBase.replace(/\/openai\/?$/, '');
+          const testUrl = `${rootBase}/models?key=${apiKey.trim()}`;
+
+          const testRes = await fetch(testUrl);
+          const latencyMs = Date.now() - startTime;
+          if (!testRes.ok) {
+            const errText = await testRes.text();
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({
+              ok: false,
+              latencyMs,
+              error: `Google Gemini 校验未通过 (HTTP ${testRes.status}): ${errText.slice(0, 200)}`,
+            }));
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({
+            ok: true,
+            latencyMs,
+            message: `Google Gemini 官方 API 连接成功！（密钥有效，耗时 ${latencyMs}ms）`,
+          }));
+        } else if (baseUrl && (baseUrl.includes('127.0.0.1:51000') || baseUrl.includes('localhost:51000'))) {
+          // 本地 Antigravity 网关测试
+          const cleanBase = baseUrl.trim().replace(/\/+$/, '');
+          const testRes = await fetch(`${cleanBase.replace(/\/v1beta\/?$/, '')}/health`, {
+            headers: { 'Authorization': `Bearer ${apiKey.trim()}` }
+          });
+          const latencyMs = Date.now() - startTime;
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({
+            ok: testRes.ok,
+            latencyMs,
+            message: testRes.ok ? `本地 Antigravity 模型网关连接成功！（耗时 ${latencyMs}ms）` : '本地网关返回异常',
           }));
         } else if (provider === 'remotion') {
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -1544,7 +2184,77 @@ const server = http.createServer(async (req, res) => {
 
       fs.writeFileSync(curPaths.promptConfigPath, JSON.stringify(updated, null, 2), 'utf8');
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: true, config: updated, message: 'OpenRouter 统一模型配置已保存！' }));
+      return res.end(JSON.stringify({ ok: true, config: updated, message: '模型网关配置已保存！' }));
+    }
+
+    // 4.25 开发态 Antigravity 调试副驾驶端点 (生产发布若移除 dev-bridge.mjs 则安全忽略)
+    if (req.method === 'GET' && pathname === '/api/dev/status') {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({
+        ok: true,
+        enabled: Boolean(devBridge && devBridge.IS_DEV_MODE),
+        mode: 'antigravity-dev-copilot',
+        message: devBridge ? '开发态 Antigravity 调试助手已就绪' : '生产模式（开发态接口已剥离）'
+      }));
+    }
+
+    if (req.method === 'GET' && pathname === '/api/dev/audit') {
+      if (!devBridge) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '开发态组件已剥离' }));
+      }
+      const curPaths = getPaths(queryProject);
+      if (!fs.existsSync(curPaths.manifestPath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '未找到分镜清单' }));
+      }
+      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      const report = devBridge.auditScenes(manifest);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, report }));
+    }
+
+    if (req.method === 'POST' && pathname === '/api/dev/chat') {
+      if (!devBridge) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '开发态组件已剥离' }));
+      }
+      const body = await readBody(req);
+      const { projectId = queryProject, prompt } = body;
+      const curPaths = getPaths(projectId);
+      let promptCfg = {};
+      if (fs.existsSync(curPaths.promptConfigPath)) {
+        try { promptCfg = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8')); } catch (e) {}
+      }
+      try {
+        const result = await devBridge.executeDevChat({
+          projectId,
+          prompt,
+          visualConfig: promptCfg
+        });
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: true, ...result }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
+    }
+
+    if (req.method === 'POST' && pathname === '/api/dev/apply-patch') {
+      if (!devBridge) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '开发态组件已剥离' }));
+      }
+      const body = await readBody(req);
+      const { projectId = queryProject, sceneId, patch } = body;
+      try {
+        const result = devBridge.applyScenePatch(projectId, sceneId, patch);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: true, ...result }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: err.message }));
+      }
     }
 
     // 4.5 智能分镜与指示词提炼 API (调用 OpenRouter 统一网关指定的模型)
@@ -1617,6 +2327,29 @@ const server = http.createServer(async (req, res) => {
           videoPrompt += '，电影质感，超清4K，细腻写实，真实环境光影';
         }
 
+        // 本地免 Key 模式：调用 Remotion 离线动效引擎就绪
+        if (!normalizedCfg.apiKey || normalizedCfg.apiKey === 'antigravity-local-dev' || (normalizedCfg.baseUrl && normalizedCfg.baseUrl.includes('localhost'))) {
+          s.visual_type = 'photo_motion';
+          s.target_visual_mode = 'video';
+          s.status = 'READY_APPROVED';
+          s.review_status = 'APPROVED';
+          s.ai_visual_prompt = videoPrompt;
+          syncTableToManifest(targetManifest);
+          fs.writeFileSync(curPaths.manifestPath, JSON.stringify(targetManifest, null, 2), 'utf8');
+          recompileProject(targetProject);
+          const stillRelPath = renderRemotionCardStill(curPaths, s.scene_id, targetProject);
+          if (stillRelPath) {
+            s.preview_image_url = `/public/${targetProject}/${stillRelPath}?t=${Date.now()}`;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({
+            ok: true,
+            manifest: targetManifest,
+            previewUrl: s.preview_image_url,
+            message: `🎬 镜头 ${s.scene_id} 运镜画面已由 Remotion 本地动效引擎就绪！若需生成云端实体 MP4 视频，可在右上角填入对应视频模型 API Key。`
+          }));
+        }
+
         try {
           const videoUrl = await callGatewayVideoGeneration(
             {
@@ -1680,6 +2413,30 @@ const server = http.createServer(async (req, res) => {
 
         const kws = Array.isArray(s.content_keywords) && s.content_keywords.length > 0 ? s.content_keywords : [];
         const imgPrompt = (customPrompt || `${s.narration_text}，${kws.join('，')}`) + '，超清写实摄影，8k电影画质，真实光影';
+
+        // 本地免 Key 模式：无需 API Key，提示在 Antigravity 对话框中调用内置生图引擎
+        if (!normalizedCfg.apiKey || normalizedCfg.apiKey === 'antigravity-local-dev' || (normalizedCfg.baseUrl && normalizedCfg.baseUrl.includes('localhost'))) {
+          s.visual_type = 'photo_motion';
+          s.scene_type = 'photo_motion';
+          s.target_visual_mode = 'image';
+          s.status = 'READY_APPROVED';
+          s.review_status = 'APPROVED';
+          s.ai_visual_prompt = imgPrompt;
+          syncTableToManifest(targetManifest);
+          fs.writeFileSync(curPaths.manifestPath, JSON.stringify(targetManifest, null, 2), 'utf8');
+          recompileProject(targetProject);
+          const stillRelPath = renderRemotionCardStill(curPaths, s.scene_id, targetProject);
+          if (stillRelPath) {
+            s.preview_image_url = `/public/${targetProject}/${stillRelPath}?t=${Date.now()}`;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({
+            ok: true,
+            manifest: targetManifest,
+            previewUrl: s.preview_image_url,
+            message: `💡 镜头 ${s.scene_id} 已设定实景摄影构图。您可直接在 Antigravity 聊天窗口对我说：『请为镜头 ${s.scene_id} 生成 16:9 实景图』，我将调用内置生图引擎生成后自动存入工程，全程零费用！`
+          }));
+        }
 
         try {
           const remoteImgUrl = await callGatewayImageGeneration(
@@ -1760,6 +2517,32 @@ const server = http.createServer(async (req, res) => {
 
         const layoutStyle = templateStylePrompts[chosenTemplate] || templateStylePrompts.data_card;
         const cardImgPrompt = `${activePrompt}，${layoutStyle}，16:9 商业演讲信息图PPT动态卡片，高端海报质感，排版清晰美观，8k超高分辨率`;
+
+        // 本地免 Key 模式：调用 Remotion 原生离线卡片引擎进行即时渲染
+        if (!normalizedCfg.apiKey || normalizedCfg.apiKey === 'antigravity-local-dev' || (normalizedCfg.baseUrl && normalizedCfg.baseUrl.includes('localhost'))) {
+          s.source_mode = 'ai_ppt_slide';
+          s.visual_type = chosenTemplate;
+          s.scene_type = chosenTemplate;
+          s.status = 'READY_APPROVED';
+          s.review_status = 'APPROVED';
+          s.human_review_required = false;
+          s.ppt_slide_spec = {
+            theme_title: themeTitle || s.ppt_slide_spec?.theme_title || kws[0] || '核心要点',
+            subtitle: s.narration_text.slice(0, 24),
+            custom_prompt: activePrompt,
+            template_style: chosenTemplate,
+            generated_model: 'Antigravity Local Engine',
+            generated_at: new Date().toISOString()
+          };
+          syncTableToManifest(targetManifest);
+          fs.writeFileSync(curPaths.manifestPath, JSON.stringify(targetManifest, null, 2), 'utf8');
+          recompileProject(targetProject);
+          const stillRelPath = renderRemotionCardStill(curPaths, s.scene_id, targetProject);
+          if (stillRelPath) {
+            s.preview_image_url = `/public/${targetProject}/${stillRelPath}?t=${Date.now()}`;
+          }
+          continue;
+        }
 
         try {
           const remoteImgUrl = await callGatewayImageGeneration(
@@ -2168,6 +2951,10 @@ function renderMainHtml() {
             </select>
           </div>
 
+          <button type="button" onclick="toggleImportScriptModal()" class="px-3 py-1.5 text-xs font-extrabold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 border border-violet-400/40 cursor-pointer" title="导入定稿文案自动智能切分分镜建项">
+            📝 导入文案建项
+          </button>
+
           <span id="projectStageBadge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
             加载中...
           </span>
@@ -2296,6 +3083,34 @@ function renderMainHtml() {
       </div>
 
       <div class="space-y-4">
+        <!-- 模型生态一键预设方案 (Gemini / OpenRouter / Antigravity 本地) -->
+        <div class="p-3.5 rounded-xl bg-gradient-to-r from-blue-950/70 via-purple-950/60 to-cyan-950/70 border border-cyan-500/30 flex flex-wrap items-center justify-between gap-2.5">
+          <div>
+            <div class="text-xs font-black text-cyan-300 flex items-center gap-1.5">
+              <span>🪐 一键载入全家桶预设</span>
+              <span class="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-500/30">推荐</span>
+            </div>
+            <p class="text-[10px] text-gray-400 mt-0.5">自动配置 5 大模型位（分镜总监、卡片排版、AI 生图、实体视频、BGM情绪）最佳组合</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-1.5">
+            <button type="button" onclick="applyModelPreset('antigravity-dev')" class="px-2.5 py-1 rounded-lg text-xs font-black bg-emerald-600/40 hover:bg-emerald-600/70 text-emerald-200 border border-emerald-400/60 transition flex items-center gap-1 shadow-sm">
+              <span>🆓 Antigravity 本地免 Key (推荐开发期)</span>
+            </button>
+            <button type="button" onclick="applyModelPreset('gemini')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-600/30 hover:bg-blue-600/60 text-blue-200 border border-blue-400/50 transition flex items-center gap-1 shadow-sm">
+              <span>🪐 Gemini 生态全家桶</span>
+            </button>
+            <button type="button" onclick="applyModelPreset('gemini-pro')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-cyan-600/30 hover:bg-cyan-600/60 text-cyan-200 border border-cyan-400/50 transition flex items-center gap-1 shadow-sm">
+              <span>💎 Gemini 2.5 Pro 顶配版</span>
+            </button>
+            <button type="button" onclick="applyModelPreset('openrouter-fast')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600/30 hover:bg-purple-600/60 text-purple-200 border border-purple-400/50 transition flex items-center gap-1 shadow-sm">
+              <span>🚀 OpenRouter 混合极速</span>
+            </button>
+            <button type="button" onclick="applyModelPreset('antigravity-local')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-600/30 hover:bg-emerald-600/60 text-emerald-200 border border-emerald-400/50 transition flex items-center gap-1 shadow-sm">
+              <span>🧪 本地 Antigravity 网关</span>
+            </button>
+          </div>
+        </div>
+
         <!-- 统一网关与 API Key -->
         <div class="p-4 rounded-xl bg-gray-950 border border-purple-500/30 space-y-3">
           <div class="flex items-center justify-between">
@@ -2305,10 +3120,11 @@ function renderMainHtml() {
 
           <div>
             <label class="block text-[11px] font-bold text-gray-300 mb-1">
-              OpenRouter / 网关 API Key：
-              <a href="https://openrouter.ai/keys" target="_blank" class="text-purple-400 hover:underline text-[10px] ml-1">获取 Key ↗</a>
+              API Key：
+              <a href="https://openrouter.ai/keys" target="_blank" class="text-purple-400 hover:underline text-[10px] ml-1">OpenRouter Key ↗</a>
+              <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-400 hover:underline text-[10px] ml-2">Google Gemini Key ↗</a>
             </label>
-            <input type="password" id="currentApiKeyInput" placeholder="在此填入您的 OpenRouter API Key (sk-or-v1-...)..."
+            <input type="password" id="currentApiKeyInput" placeholder="在此填入您的 API Key (OpenRouter sk-or-... 或 Gemini Key)..."
               class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
           </div>
 
@@ -2321,11 +3137,14 @@ function renderMainHtml() {
                 <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://openrouter.ai/api/v1'" class="text-[10px] text-purple-400 hover:underline">
                   OpenRouter 官方
                 </button>
-                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://api.siliconflow.cn/v1'; document.getElementById('currentVideoModelInput').value = 'tencent/HunyuanVideo';" class="text-[10px] text-emerald-400 hover:underline">
-                  硅基流动 (实体视频)
+                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://generativelanguage.googleapis.com/v1beta/openai'" class="text-[10px] text-blue-400 hover:underline">
+                  Google Gemini (兼容)
                 </button>
-                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://api.minimax.chat/v1'; document.getElementById('currentVideoModelInput').value = 'video-01';" class="text-[10px] text-amber-400 hover:underline">
-                  MiniMax 官方
+                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'http://127.0.0.1:51000/v1beta'" class="text-[10px] text-cyan-400 hover:underline">
+                  本地 Antigravity
+                </button>
+                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://api.siliconflow.cn/v1'; document.getElementById('currentVideoModelInput').value = 'tencent/HunyuanVideo';" class="text-[10px] text-emerald-400 hover:underline">
+                  硅基流动
                 </button>
               </div>
             </div>
@@ -2644,6 +3463,157 @@ function renderMainHtml() {
     </div>
   </div>
 
+  <!-- 📝 文案导入与镜头切分工作台 Modal -->
+  <div id="importScriptModal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 hidden">
+    <div class="card bg-gray-900 border border-violet-500/40 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+      
+      <!-- Modal 头部 -->
+      <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gradient-to-r from-violet-950/40 via-gray-900 to-gray-900">
+        <div>
+          <h2 class="text-lg font-black text-white flex items-center gap-2">
+            <span class="p-1.5 rounded-lg bg-violet-600/30 text-violet-400 border border-violet-500/30">📝</span>
+            导入定稿文案 · 自动切分镜头工作台
+          </h2>
+          <p class="text-xs text-gray-400 mt-0.5">
+            直接载入本地生成的文案或自由粘贴，智能按 4.0 ~ 8.0 秒标准节奏切分镜头与生成时间轴
+          </p>
+        </div>
+        <button type="button" onclick="toggleImportScriptModal()" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg transition">✕</button>
+      </div>
+
+      <!-- Modal 滚动主体 -->
+      <div class="p-6 overflow-y-auto space-y-5 flex-1 text-sm custom-scrollbar">
+        
+        <!-- 1. 工程基本设定 (项目ID 与 中文标题) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-950/60 p-4 rounded-xl border border-gray-800">
+          <div>
+            <label class="block text-xs font-bold text-gray-300 mb-1 flex items-center gap-1">
+              <span>🆔 项目唯一英文 ID</span>
+              <span class="text-[10px] text-gray-500 font-normal">(仅支持英文、数字、下划线)</span>
+            </label>
+            <input type="text" id="importProjectId" placeholder="例如: why_fujisan_symbol_001"
+              class="w-full bg-gray-900 text-white font-mono text-xs px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-violet-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-300 mb-1 flex items-center gap-1">
+              <span>🏷️ 视频中文标题</span>
+              <span class="text-[10px] text-gray-500 font-normal">(用于展示与分镜主题)</span>
+            </label>
+            <input type="text" id="importProjectTitle" placeholder="例如: 富士山，日本象征，富士山为什么如此出名"
+              class="w-full bg-gray-900 text-white font-bold text-xs px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-violet-500" />
+          </div>
+        </div>
+
+        <!-- 2. 文案载入模式切换 Tabs -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-violet-300 flex items-center gap-1.5">
+              <span>📂 文案载入来源：</span>
+            </span>
+            <div class="inline-flex p-1 bg-gray-950 rounded-xl border border-gray-800 text-xs font-semibold">
+              <button type="button" id="tabBtnLocal" onclick="switchImportTab('local')" class="px-3 py-1 rounded-lg bg-violet-600 text-white shadow transition">
+                📁 本地导出库 (exports/)
+              </button>
+              <button type="button" id="tabBtnPaste" onclick="switchImportTab('paste')" class="px-3 py-1 rounded-lg text-gray-400 hover:text-white transition">
+                ✍️ 剪贴板快速粘贴
+              </button>
+              <button type="button" id="tabBtnUpload" onclick="switchImportTab('upload')" class="px-3 py-1 rounded-lg text-gray-400 hover:text-white transition">
+                📤 本地文件拖拽
+              </button>
+            </div>
+          </div>
+
+          <!-- Tab 1: 本地 exports 扫描库 -->
+          <div id="importTabLocal" class="space-y-2">
+            <div class="flex items-center justify-between text-xs text-gray-400 px-1">
+              <span>自动检索项目根目录下 <code class="text-violet-300 font-mono">exports/</code> 的文案文件：</span>
+              <button type="button" onclick="loadScannedScripts()" class="text-violet-400 hover:underline flex items-center gap-1">
+                🔄 刷新扫描
+              </button>
+            </div>
+            <div id="scannedScriptsList" class="grid grid-cols-1 gap-2.5 max-h-56 overflow-y-auto pr-1">
+              <div class="text-center py-6 text-gray-500 text-xs">正在扫描 exports/ 目录...</div>
+            </div>
+          </div>
+
+          <!-- Tab 2: 自由粘贴 -->
+          <div id="importTabPaste" class="space-y-2 hidden">
+            <textarea id="importRawText" rows="7" placeholder="在此粘贴在 Antigravity 中生成的完整文案（支持 TXT、Markdown、章节标题或 JSON 格式）..."
+              oninput="onScriptTextInput()"
+              class="w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-800 focus:outline-none focus:border-violet-500 font-mono leading-relaxed resize-y"></textarea>
+          </div>
+
+          <!-- Tab 3: 文件上传/拖拽 -->
+          <div id="importTabUpload" class="space-y-2 hidden">
+            <div id="importDropZone" ondragover="onImportDragOver(event)" ondragleave="onImportDragLeave(event)" ondrop="onImportDrop(event)"
+              class="border-2 border-dashed border-gray-700 hover:border-violet-500 rounded-xl p-6 text-center cursor-pointer transition bg-gray-950/40">
+              <div class="text-3xl mb-2">📄</div>
+              <div class="text-xs font-semibold text-gray-300">拖拽文案文件到此处，或点击浏览文件</div>
+              <div class="text-[11px] text-gray-500 mt-1">支持 .txt、.md、.json 格式的完整文案文件</div>
+              <input type="file" id="importFileInput" accept=".txt,.md,.json" onchange="onImportFileSelected(event)" class="hidden" />
+              <button type="button" onclick="document.getElementById('importFileInput').click()" class="mt-3 px-3 py-1.5 text-xs font-bold rounded-lg bg-gray-800 hover:bg-gray-700 text-violet-300 border border-gray-700">
+                选择本地文件
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 切镜参数与实时统计 -->
+        <div class="bg-gray-950/70 p-4 rounded-xl border border-gray-800/80 space-y-3">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-amber-300">⏱️ 切镜节奏策略：</span>
+              <select id="importTargetDuration" onchange="triggerUpdatePreview()" class="bg-gray-900 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400">
+                <option value="5.5" selected>标准长视频节奏 (约 4.0 ~ 7.5 秒/镜 · 推荐)</option>
+                <option value="4.2">紧凑信息流节奏 (约 3.5 ~ 5.5 秒/镜)</option>
+                <option value="7.0">沉稳纪录片节奏 (约 5.5 ~ 9.0 秒/镜)</option>
+              </select>
+            </div>
+
+            <!-- 统计标签 -->
+            <div class="flex items-center gap-2 text-xs flex-wrap">
+              <span class="px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                字数: <b id="statWordCount">0</b> 字
+              </span>
+              <span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                预估时长: <b id="statDurationMin">0.0</b> 分钟
+              </span>
+              <span class="px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                预估镜头: <b id="statScenesCount">0</b> 镜
+              </span>
+            </div>
+          </div>
+
+          <!-- 分镜切片实时预览 -->
+          <div>
+            <div class="text-[11px] font-bold text-gray-400 mb-1.5 flex items-center justify-between">
+              <span>🔍 自动切片效果预览 (前 3 镜)：</span>
+              <span id="previewNotice" class="text-[10px] text-gray-500">载入或粘贴文案后自动计算</span>
+            </div>
+            <div id="segmentPreviewList" class="space-y-1.5 bg-gray-900/90 p-2.5 rounded-lg border border-gray-800 text-xs font-mono max-h-36 overflow-y-auto">
+              <div class="text-gray-500 text-center py-3 text-[11px]">暂无预览数据，请选择文案或粘贴内容</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Modal 底部提交按钮 -->
+      <div class="px-6 py-3.5 border-t border-gray-800 bg-gray-950 flex items-center justify-between">
+        <span id="importStatusMessage" class="text-xs text-gray-400 font-medium"></span>
+        <div class="flex items-center gap-3">
+          <button type="button" onclick="toggleImportScriptModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300">
+            取消
+          </button>
+          <button type="button" id="confirmImportBtn" onclick="confirmImportScript()" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
+            🚀 确认导入并立即进入工程
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
   <!-- Toast 提示 -->
   <div id="toast" class="fixed bottom-6 right-6 px-4 py-2.5 rounded-xl bg-amber-500 text-gray-950 font-extrabold text-xs shadow-2xl transition duration-300 hidden z-50">
   </div>
@@ -2669,6 +3639,254 @@ function renderMainHtml() {
       t.textContent = msg;
       t.classList.remove('hidden');
       setTimeout(() => t.classList.add('hidden'), 3000);
+    }
+
+    let scannedExportScripts = [];
+    let importDebounceTimer = null;
+
+    function toggleImportScriptModal() {
+      const modal = document.getElementById('importScriptModal');
+      const isHidden = modal.classList.contains('hidden');
+      if (isHidden) {
+        modal.classList.remove('hidden');
+        loadScannedScripts();
+      } else {
+        modal.classList.add('hidden');
+      }
+    }
+
+    function switchImportTab(tab) {
+      document.getElementById('importTabLocal').classList.toggle('hidden', tab !== 'local');
+      document.getElementById('importTabPaste').classList.toggle('hidden', tab !== 'paste');
+      document.getElementById('importTabUpload').classList.toggle('hidden', tab !== 'upload');
+
+      const tabs = ['local', 'paste', 'upload'];
+      const btnMap = { local: 'tabBtnLocal', paste: 'tabBtnPaste', upload: 'tabBtnUpload' };
+      tabs.forEach((t) => {
+        const btn = document.getElementById(btnMap[t]);
+        if (t === tab) {
+          btn.className = 'px-3 py-1 rounded-lg bg-violet-600 text-white shadow transition cursor-pointer';
+        } else {
+          btn.className = 'px-3 py-1 rounded-lg text-gray-400 hover:text-white transition cursor-pointer';
+        }
+      });
+    }
+
+    async function loadScannedScripts() {
+      const container = document.getElementById('scannedScriptsList');
+      container.innerHTML =
+        '<div class="text-center py-6 text-gray-400 text-xs flex items-center justify-center gap-2"><span class="animate-spin">🔄</span> 正在扫描 exports/ 目录下的可用文案...</div>';
+      try {
+        const res = await fetch('/api/scan-local-scripts');
+        const data = await res.json();
+        scannedExportScripts = data.scripts || [];
+        if (scannedExportScripts.length === 0) {
+          container.innerHTML =
+            '<div class="text-center py-6 text-gray-500 text-xs">exports/ 目录下未发现 .txt / .md / .json 文案文件，请使用“剪贴板快速粘贴”或“文件拖拽”。</div>';
+          return;
+        }
+
+        container.innerHTML = scannedExportScripts
+          .map(
+            (s) => \`
+          <div class="p-3 rounded-xl bg-gray-900 border border-gray-800 hover:border-violet-500/50 transition flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div class="space-y-1 flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs font-bold text-white truncate max-w-md">\${s.title}</span>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded \${s.isFullScript ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30 font-bold' : 'bg-gray-800 text-gray-400'}">
+                  \${s.isFullScript ? '✨ 完整长片文案' : '📄 章节草稿'}
+                </span>
+                <span class="text-[10px] text-gray-400">\${s.wordCount} 字 · \${s.sizeKb} KB · \${s.ext}</span>
+              </div>
+              <div class="text-[11px] text-gray-400 line-clamp-1 font-mono">\${s.preview || s.filename}</div>
+            </div>
+            <button type="button" onclick="selectScannedScript('\${s.filename}')" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-violet-600/90 hover:bg-violet-600 text-white shrink-0 transition flex items-center gap-1 shadow cursor-pointer">
+              <span>📥 载入并智能切镜</span>
+            </button>
+          </div>
+        \`
+          )
+          .join('');
+      } catch (e) {
+        container.innerHTML = '<div class="text-center py-4 text-rose-400 text-xs">扫描失败: ' + e.message + '</div>';
+      }
+    }
+
+    async function selectScannedScript(filename) {
+      const script = scannedExportScripts.find((s) => s.filename === filename);
+      if (!script) return;
+      document.getElementById('importStatusMessage').innerHTML = '<span class="text-amber-400">正在读取文案内容...</span>';
+      try {
+        const res = await fetch('/api/get-export-script?filename=' + encodeURIComponent(filename));
+        const data = await res.json();
+        if (data.ok) {
+          document.getElementById('importProjectId').value = data.suggestedProjectId || script.suggestedProjectId;
+          document.getElementById('importProjectTitle').value = data.title || script.title;
+          document.getElementById('importRawText').value = data.content;
+          document.getElementById('importStatusMessage').innerHTML =
+            '<span class="text-emerald-400 font-bold">✅ 已成功载入 《' + (data.title || script.title) + '》</span>';
+          triggerUpdatePreview();
+        } else {
+          alert('读取文案失败: ' + data.error);
+        }
+      } catch (e) {
+        alert('读取文案出错: ' + e.message);
+      }
+    }
+
+    function onScriptTextInput() {
+      clearTimeout(importDebounceTimer);
+      importDebounceTimer = setTimeout(() => {
+        triggerUpdatePreview();
+      }, 400);
+    }
+
+    async function triggerUpdatePreview() {
+      const content = document.getElementById('importRawText').value;
+      const targetSeconds = parseFloat(document.getElementById('importTargetDuration').value) || 5.5;
+      const title = document.getElementById('importProjectTitle').value;
+      const projectId = document.getElementById('importProjectId').value;
+
+      if (!content || !content.trim()) {
+        document.getElementById('statWordCount').textContent = '0';
+        document.getElementById('statDurationMin').textContent = '0.0';
+        document.getElementById('statScenesCount').textContent = '0';
+        document.getElementById('segmentPreviewList').innerHTML =
+          '<div class="text-gray-500 text-center py-3 text-[11px]">暂无预览数据，请选择文案或粘贴内容</div>';
+        return;
+      }
+
+      document.getElementById('previewNotice').textContent = '正在计算切片...';
+      try {
+        const res = await fetch('/api/preview-script-segmentation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content, title, projectId, targetSeconds }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          if (!document.getElementById('importProjectId').value && data.projectId) {
+            document.getElementById('importProjectId').value = data.projectId;
+          }
+          if (!document.getElementById('importProjectTitle').value && data.title) {
+            document.getElementById('importProjectTitle').value = data.title;
+          }
+
+          document.getElementById('statWordCount').textContent = data.totalWords;
+          document.getElementById('statDurationMin').textContent = data.estimatedMinutes;
+          document.getElementById('statScenesCount').textContent = data.scenesCount;
+          document.getElementById('previewNotice').textContent = \`共预估切分为 \${data.scenesCount} 个镜头 (无缝拼接)\`;
+
+          const previewEl = document.getElementById('segmentPreviewList');
+          if (data.sampleScenes && data.sampleScenes.length > 0) {
+            previewEl.innerHTML = data.sampleScenes
+              .map(
+                (sc) => \`
+              <div class="p-2 rounded bg-gray-950 border border-gray-800 text-[11px] space-y-0.5">
+                <div class="flex items-center justify-between text-gray-400">
+                  <span class="text-amber-400 font-bold">\${sc.scene_id} · [\${sc.chapter_ref}]</span>
+                  <span class="text-[10px] text-gray-500">\${(sc.start_ms / 1000).toFixed(1)}s ~ \${(sc.end_ms / 1000).toFixed(1)}s (\${(sc.duration_ms / 1000).toFixed(1)}s)</span>
+                </div>
+                <div class="text-gray-200 line-clamp-1">\${sc.narration_text}</div>
+                <div class="text-[10px] text-purple-400 font-semibold">🎯 提炼关键词: \${sc.content_keywords?.join('、')}</div>
+              </div>
+            \`
+              )
+              .join('');
+          }
+        }
+      } catch (e) {
+        console.warn('切片预览失败:', e);
+      }
+    }
+
+    function onImportDragOver(e) {
+      e.preventDefault();
+      document.getElementById('importDropZone').classList.add('border-violet-500', 'bg-violet-950/20');
+    }
+
+    function onImportDragLeave(e) {
+      e.preventDefault();
+      document.getElementById('importDropZone').classList.remove('border-violet-500', 'bg-violet-950/20');
+    }
+
+    function onImportDrop(e) {
+      e.preventDefault();
+      document.getElementById('importDropZone').classList.remove('border-violet-500', 'bg-violet-950/20');
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        handleImportFile(e.dataTransfer.files[0]);
+      }
+    }
+
+    function onImportFileSelected(e) {
+      if (e.target.files && e.target.files.length > 0) {
+        handleImportFile(e.target.files[0]);
+      }
+    }
+
+    function handleImportFile(file) {
+      const reader = new FileReader();
+      reader.onload = function (evt) {
+        const text = evt.target.result;
+        document.getElementById('importRawText').value = text;
+        const baseName = file.name.replace(/\.[^/.]+$/, '');
+        if (!document.getElementById('importProjectTitle').value) {
+          document.getElementById('importProjectTitle').value = baseName;
+        }
+        switchImportTab('paste');
+        triggerUpdatePreview();
+        showToast('📄 已成功读取文件: ' + file.name);
+      };
+      reader.readAsText(file);
+    }
+
+    async function confirmImportScript() {
+      const content = document.getElementById('importRawText').value;
+      const title = document.getElementById('importProjectTitle').value.trim();
+      const projectId = document.getElementById('importProjectId').value.trim();
+      const targetSeconds = parseFloat(document.getElementById('importTargetDuration').value) || 5.5;
+      const statusEl = document.getElementById('importStatusMessage');
+      const btn = document.getElementById('confirmImportBtn');
+
+      if (!content || !content.trim()) {
+        alert('请先选择或粘贴文案内容！');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ 正在切镜并构建工程...</span>';
+      statusEl.innerHTML = '<span class="text-amber-400">正在生成镜头清单、时间轴与 Remotion 属性...</span>';
+
+      try {
+        const res = await fetch('/api/import-script-project', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId, title, content, targetSeconds }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          statusEl.innerHTML = '<span class="text-emerald-400 font-bold">🎉 工程构建完成！</span>';
+          showToast('🎉 工程《' + data.title + '》创建成功！共 ' + data.totalScenes + ' 个镜头');
+          toggleImportScriptModal();
+
+          activeProjectId = data.projectId;
+          localStorage.setItem('whyvideo_active_project', data.projectId);
+          const url = new URL(window.location);
+          url.searchParams.set('project', data.projectId);
+          window.history.pushState({}, '', url);
+          await loadProjects();
+          await loadWorkflow();
+        } else {
+          statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ ' + (data.error || '创建失败') + '</span>';
+          alert('创建失败: ' + (data.error || '未知错误'));
+        }
+      } catch (e) {
+        statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 网络异常: ' + e.message + '</span>';
+        alert('导入异常: ' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '🚀 确认导入并立即进入工程';
+      }
     }
 
     function toggleAudioModal() {
@@ -4049,10 +5267,316 @@ function renderMainHtml() {
       }
     }
 
+    // 🪐 5 大模型预设快捷切换
+    function applyModelPreset(type) {
+      const bEl = document.getElementById('currentBaseUrlInput');
+      const vEl = document.getElementById('currentVideoModelInput');
+      const tEl = document.getElementById('currentTextModelInput');
+      const iEl = document.getElementById('currentImageModelInput');
+      const bgmEl = document.getElementById('currentBgmModelInput');
+      const kEl = document.getElementById('currentApiKeyInput');
+
+      if (type === 'antigravity-dev') {
+        if (kEl) kEl.value = 'antigravity-local-dev';
+        if (bEl) bEl.value = 'http://localhost:4000/api/dev (本地 Antigravity 免Key引擎)';
+        if (vEl) vEl.value = 'remotion-procedural-motion';
+        if (tEl) tEl.value = 'antigravity-gemini-director';
+        if (iEl) iEl.value = 'antigravity-flux-image';
+        if (bgmEl) bgmEl.value = 'antigravity-bgm-analyzer';
+        showToast('🎉 已载入【Antigravity 本地免 Key 开发模式】！开发期零 API 费用！');
+      } else if (type === 'gemini') {
+        if (bEl) bEl.value = 'https://generativelanguage.googleapis.com/v1beta/openai';
+        if (vEl) vEl.value = 'veo-2.0-generate-001';
+        if (tEl) tEl.value = 'gemini-1.5-flash';
+        if (iEl) iEl.value = 'imagen-3.0-generate-002';
+        if (bgmEl) bgmEl.value = 'gemini-1.5-flash';
+        showToast('🪐 已载入【Google AI Studio 官方 Gemini 全家桶】预设！');
+      } else if (type === 'gemini-pro') {
+        if (bEl) bEl.value = 'https://generativelanguage.googleapis.com/v1beta/openai';
+        if (vEl) vEl.value = 'veo-2.0-generate-001';
+        if (tEl) tEl.value = 'gemini-1.5-pro';
+        if (iEl) iEl.value = 'imagen-3.0-generate-002';
+        if (bgmEl) bgmEl.value = 'gemini-1.5-flash';
+        showToast('💎 已载入【Google Gemini 1.5 Pro 深度版】预设！');
+      } else if (type === 'openrouter-fast') {
+        if (bEl) bEl.value = 'https://openrouter.ai/api/v1';
+        if (vEl) vEl.value = 'minimax/hailuo-3-max';
+        if (tEl) tEl.value = 'deepseek/deepseek-chat';
+        if (iEl) iEl.value = 'black-forest-labs/flux-3-image';
+        if (bgmEl) bgmEl.value = 'deepseek/deepseek-chat';
+        showToast('🚀 已载入【OpenRouter 混合高性价比】预设！');
+      } else if (type === 'antigravity-local') {
+        if (bEl) bEl.value = 'http://127.0.0.1:51000/v1beta';
+        if (tEl) tEl.value = 'gemini-2.5-pro';
+        if (vEl) vEl.value = 'google/veo-2';
+        if (iEl) iEl.value = 'imagen-3.0-generate-002';
+        if (bgmEl) bgmEl.value = 'gemini-2.5-flash';
+        showToast('🧪 已载入【本地 Antigravity 模型网关】预设！');
+      }
+    }
+
+    // 🛠️ Antigravity 调试副驾驶逻辑 (开发态特有)
+    function escapeHtml(str) {
+      if (!str) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+
+    function toggleDevCopilot() {
+      const drawer = document.getElementById('devCopilotDrawer');
+      if (drawer) {
+        drawer.classList.toggle('hidden');
+      }
+    }
+
+    async function runDevAudit() {
+      const msgBox = document.getElementById('devChatMessages');
+      if (!msgBox) return;
+
+      const tempId = 'audit-' + Date.now();
+      msgBox.innerHTML += \`
+        <div id="\${tempId}" class="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2">
+          <span class="animate-spin">⏳</span>
+          <span>正在执行分镜视听节奏与多模态自动化体检...</span>
+        </div>
+      \`;
+      msgBox.scrollTop = msgBox.scrollHeight;
+
+      try {
+        const res = await fetch('/api/dev/audit?project=' + activeProjectId);
+        const data = await res.json();
+        const tempEl = document.getElementById(tempId);
+
+        if (data.ok && data.report) {
+          const r = data.report;
+          const issuesHtml = r.issues.length > 0
+            ? r.issues.map(i => \`<li class="text-amber-300">⚠️ \${escapeHtml(i)}</li>\`).join('')
+            : '<li class="text-emerald-300">✅ 未发现明显节奏或结构问题</li>';
+          const suggHtml = r.suggestions.map(s => \`<li class="text-cyan-200">💡 \${escapeHtml(s)}</li>\`).join('');
+
+          const resultHtml = \`
+            <div class="p-3.5 rounded-xl bg-gray-900 border border-cyan-500/40 space-y-2.5 shadow-lg">
+              <div class="flex items-center justify-between border-b border-gray-800 pb-2">
+                <span class="font-black text-cyan-300 text-xs">🩺 分镜体检报告</span>
+                <span class="px-2 py-0.5 rounded font-black text-xs \${r.score >= 80 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}">
+                  综合评分: \${r.score}分
+                </span>
+              </div>
+              <div class="grid grid-cols-2 gap-2 text-[11px] text-gray-300">
+                <div>镜头总数：<b>\${r.totalScenes} 镜</b></div>
+                <div>全片预估时长：<b>\${r.totalDurationSec} 秒</b></div>
+              </div>
+              <div class="text-[11px] space-y-1">
+                <div class="font-bold text-gray-300">检测发现：</div>
+                <ul class="list-disc list-inside space-y-0.5 pl-1">\${issuesHtml}</ul>
+              </div>
+              <div class="text-[11px] space-y-1 pt-1 border-t border-gray-800">
+                <div class="font-bold text-cyan-400">导演调优建议：</div>
+                <ul class="list-disc list-inside space-y-0.5 pl-1">\${suggHtml}</ul>
+              </div>
+            </div>
+          \`;
+          if (tempEl) tempEl.outerHTML = resultHtml;
+        } else {
+          if (tempEl) tempEl.innerHTML = \`<span class="text-red-400">体检失败: \${escapeHtml(data.error || '未知错误')}</span>\`;
+        }
+      } catch (e) {
+        const tempEl = document.getElementById(tempId);
+        if (tempEl) tempEl.innerHTML = \`<span class="text-red-400">请求异常: \${escapeHtml(e.message)}</span>\`;
+      }
+      msgBox.scrollTop = msgBox.scrollHeight;
+    }
+
+    async function sendDevChat() {
+      const input = document.getElementById('devChatInput');
+      const msgBox = document.getElementById('devChatMessages');
+      const btn = document.getElementById('btnSendDevChat');
+      if (!input || !msgBox) return;
+
+      const text = input.value.trim();
+      if (!text) return;
+
+      input.value = '';
+      msgBox.innerHTML += \`
+        <div class="flex justify-end">
+          <div class="max-w-[85%] px-3 py-2 rounded-xl bg-cyan-600 text-white text-xs font-medium shadow">
+            \${escapeHtml(text)}
+          </div>
+        </div>
+      \`;
+      msgBox.scrollTop = msgBox.scrollHeight;
+
+      const tempId = 'reply-' + Date.now();
+      msgBox.innerHTML += \`
+        <div id="\${tempId}" class="flex items-center gap-2 p-2.5 rounded-xl bg-gray-900 border border-gray-800 text-gray-400 text-xs">
+          <span class="animate-spin">⏳</span>
+          <span>Gemini 调试助手正在深度思考...</span>
+        </div>
+      \`;
+      msgBox.scrollTop = msgBox.scrollHeight;
+      if (btn) btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/dev/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            prompt: text
+          })
+        });
+        const data = await res.json();
+        const tempEl = document.getElementById(tempId);
+
+        if (data.ok) {
+          let patchBtnHtml = '';
+          if (data.patchAction && data.patchAction.scene_id) {
+            const patchJsonStr = encodeURIComponent(JSON.stringify(data.patchAction));
+            patchBtnHtml = \`
+              <div class="mt-2 pt-2 border-t border-gray-800 flex items-center justify-between">
+                <span class="text-[11px] text-cyan-300 font-bold">🎯 包含镜头 Patch 方案 (\${escapeHtml(data.patchAction.scene_id)})</span>
+                <button type="button" onclick="applyDevPatch('\${patchJsonStr}')" class="px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-gray-950 font-black text-[11px] transition">
+                  ⚡ 一键应用至工程
+                </button>
+              </div>
+            \`;
+          }
+
+          const formattedReply = escapeHtml(data.reply).replace(/\\n/g, '<br/>');
+          const botHtml = \`
+            <div class="p-3 rounded-xl bg-gray-900 border border-gray-800 text-gray-200 text-xs space-y-1">
+              <div class="flex items-center justify-between text-[10px] text-gray-400 mb-1">
+                <span class="text-cyan-400 font-bold">🤖 Gemini 调试建议</span>
+                <span>模型: \${data.usedModel ? escapeHtml(data.usedModel.split('/').pop()) : 'Gemini'}</span>
+              </div>
+              <div>\${formattedReply}</div>
+              \${patchBtnHtml}
+            </div>
+          \`;
+          if (tempEl) tempEl.outerHTML = botHtml;
+        } else {
+          if (tempEl) tempEl.outerHTML = \`<div class="p-2.5 rounded-xl bg-red-950/60 border border-red-500/40 text-red-200 text-xs">❌ 错误: \${escapeHtml(data.error || '请求失败')}</div>\`;
+        }
+      } catch (e) {
+        const tempEl = document.getElementById(tempId);
+        if (tempEl) tempEl.outerHTML = \`<div class="p-2.5 rounded-xl bg-red-950/60 border border-red-500/40 text-red-200 text-xs">❌ 连接异常: \${escapeHtml(e.message)}</div>\`;
+      } finally {
+        if (btn) btn.disabled = false;
+        msgBox.scrollTop = msgBox.scrollHeight;
+      }
+    }
+
+    async function applyDevPatch(patchJsonStr) {
+      try {
+        const actionObj = JSON.parse(decodeURIComponent(patchJsonStr));
+        const res = await fetch('/api/dev/apply-patch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            sceneId: actionObj.scene_id,
+            patch: actionObj.patch
+          })
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showToast('⚡ 已成功将 Gemini 调试建议 Patch 应用到镜头：' + actionObj.scene_id);
+          loadWorkflow();
+        } else {
+          alert('应用 Patch 失败: ' + (data.error || '未知错误'));
+        }
+      } catch (e) {
+        alert('解析或应用 Patch 异常: ' + e.message);
+      }
+    }
+
+    function sendDevQuickPrompt(promptText) {
+      const input = document.getElementById('devChatInput');
+      if (input) {
+        input.value = promptText;
+        sendDevChat();
+      }
+    }
+
     loadProjects().then(() => {
       loadWorkflow();
     });
   </script>
+
+  <!-- 🛠️ Antigravity 调试副驾驶 (Gemini 生态 / Dev Mode) 浮动抽屉与气泡 -->
+  <div id="devCopilotContainer" class="fixed bottom-6 right-6 z-40 flex flex-col items-end pointer-events-none">
+    <!-- 展开后的对话抽屉窗 -->
+    <div id="devCopilotDrawer" class="hidden pointer-events-auto mb-3 w-[450px] max-w-[calc(100vw-32px)] h-[560px] max-h-[82vh] bg-gray-950/95 backdrop-blur-xl border border-cyan-500/40 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200">
+      <!-- 窗口顶部标题栏 -->
+      <div class="px-4 py-3 bg-gradient-to-r from-gray-900 via-cyan-950/40 to-gray-900 border-b border-cyan-500/30 flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <span class="text-base">🤖</span>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-black text-white">Antigravity 调试副驾驶</span>
+              <span class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">Gemini Dev</span>
+            </div>
+            <p class="text-[10px] text-gray-400">调试期实时诊断、提示词润色与分镜 Patch</p>
+          </div>
+        </div>
+        <div class="flex items-center gap-1">
+          <button onclick="toggleDevCopilot()" class="p-1 rounded hover:bg-gray-800 text-gray-400 hover:text-white text-xs">✕</button>
+        </div>
+      </div>
+
+      <!-- 快捷动作工具栏 -->
+      <div class="px-3 py-2 bg-gray-900/60 border-b border-gray-800/80 flex items-center gap-1.5 overflow-x-auto text-[11px]">
+        <button type="button" onclick="runDevAudit()" class="shrink-0 px-2.5 py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/30 font-bold transition flex items-center gap-1">
+          🩺 诊断分镜节奏
+        </button>
+        <button type="button" onclick="sendDevQuickPrompt('请分析当前分镜的视觉形式分布，并建议如何搭配卡片模板与实景生图')" class="shrink-0 px-2.5 py-1 rounded-lg bg-blue-950/60 hover:bg-blue-900/80 text-blue-300 border border-blue-500/30 font-bold transition">
+          📐 卡片搭配建议
+        </button>
+        <button type="button" onclick="sendDevQuickPrompt('请检查所有镜头的生图提示词，帮我润色更有画面感、更符合16:9纪录片的视觉描述')" class="shrink-0 px-2.5 py-1 rounded-lg bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-500/30 font-bold transition">
+          ✨ 润色提示词
+        </button>
+      </div>
+
+      <!-- 消息列表与体检卡片区域 -->
+      <div id="devChatMessages" class="flex-1 p-4 overflow-y-auto space-y-3 text-xs leading-relaxed">
+        <div class="p-3 rounded-xl bg-gray-900/90 border border-gray-800 text-gray-300 space-y-1.5">
+          <div class="flex items-center gap-1.5 text-cyan-400 font-bold text-[11px]">
+            <span>💡 调试副驾驶已挂载</span>
+          </div>
+          <p class="text-[11px] text-gray-300">
+            我是为 WhyVideo 打造的 Gemini 调试副驾驶。在调试期，我可以实时读取当前工程的解说词、分镜清单与卡片结构。您可以直接在此提问、审查镜头或让我调优分镜！
+          </p>
+          <div class="text-[10px] text-gray-400 pt-1 border-t border-gray-800/80">
+            🛠️ <b>剥离说明</b>：调试完成后，移除 <code class="text-cyan-300">packages/qc-tools/dev-bridge.mjs</code> 即可完全回到纯 API 生产版。
+          </div>
+        </div>
+      </div>
+
+      <!-- 底部输入栏 -->
+      <div class="p-2.5 bg-gray-900 border-t border-gray-800 space-y-2">
+        <div class="flex items-center gap-2">
+          <input type="text" id="devChatInput" placeholder="输入调试需求，例如：帮我把第3镜改为数据对比卡片..."
+            class="flex-1 px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-cyan-400 placeholder:text-gray-500"
+            onkeydown="if(event.key === 'Enter' && !event.shiftKey) sendDevChat();" />
+          <button id="btnSendDevChat" onclick="sendDevChat()" class="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition flex items-center gap-1 shadow-lg shadow-cyan-600/30">
+            <span>发送</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 浮动胶囊入口按钮 -->
+    <button onclick="toggleDevCopilot()" id="devCopilotFloatingBtn"
+      class="pointer-events-auto px-4 py-2.5 rounded-full bg-gradient-to-r from-cyan-600 via-blue-600 to-purple-600 text-white font-bold text-xs shadow-2xl hover:scale-105 active:scale-95 transition flex items-center gap-2 border border-cyan-400/40">
+      <span class="animate-pulse">🤖</span>
+      <span>Antigravity 调试副驾驶</span>
+      <span class="px-1.5 py-0.2 rounded-full text-[9px] bg-black/40 text-cyan-200">Gemini</span>
+    </button>
+  </div>
 </body>
 </html>`;
 }
