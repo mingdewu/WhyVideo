@@ -1625,6 +1625,138 @@ function readBody(req) {
   });
 }
 
+function getWriterProjectData(projectId) {
+  const paths = getPaths(projectId);
+  let brief = null;
+  let evidenceCards = [];
+  let outline = null;
+  let chapters = [];
+  let finalScript = null;
+
+  if (fs.existsSync(paths.briefPath)) {
+    try { brief = JSON.parse(fs.readFileSync(paths.briefPath, 'utf8')); } catch (e) {}
+  }
+  if (fs.existsSync(paths.evidencePath)) {
+    try { evidenceCards = JSON.parse(fs.readFileSync(paths.evidencePath, 'utf8')); } catch (e) {}
+  }
+  if (fs.existsSync(paths.outlinePath)) {
+    try { outline = JSON.parse(fs.readFileSync(paths.outlinePath, 'utf8')); } catch (e) {}
+  }
+  if (fs.existsSync(paths.dataDir)) {
+    const files = fs.readdirSync(paths.dataDir);
+    for (const f of files) {
+      if (/^chapter_(\d+)\.json$/i.test(f)) {
+        try {
+          const chData = JSON.parse(fs.readFileSync(path.join(paths.dataDir, f), 'utf8'));
+          chapters.push(chData);
+        } catch (e) {}
+      }
+    }
+    chapters.sort((a, b) => (a.chapter_number || 0) - (b.chapter_number || 0));
+  }
+  if (fs.existsSync(paths.finalScriptPath)) {
+    try { finalScript = JSON.parse(fs.readFileSync(paths.finalScriptPath, 'utf8')); } catch (e) {}
+  }
+
+  // 兜底补齐：若工程缺少 brief，则提供标准化 WhyExplainerVideoWriter 规范默认 Brief 骨架
+  if (!brief) {
+    let defaultTitle = projectId.replace(/^why_/, '').replace(/_\d+$/, '').replace(/_/g, ' ');
+    if (finalScript && finalScript.title) defaultTitle = finalScript.title;
+    brief = {
+      project_id: projectId,
+      title: defaultTitle || '为什么……？',
+      core_question: `为什么${defaultTitle}？背后的地理、历史与经济机制是什么？`,
+      tentative_conclusion: '核心答案简述：由地理环境演变、历史传统沉淀与产业分工共同造就。',
+      target_audience: '泛知识纪录片观众、高知好奇心探索者',
+      target_duration_minutes: 25,
+      target_word_count: 7500,
+      planned_chapter_count: outline && Array.isArray(outline.chapters) ? outline.chapters.length : 6,
+      forbidden_claims: [
+        "绝对禁止使用'全世界只有'、'所有外国人'、'自古以来无一例外'等绝对化词汇",
+        "传说与轶事 (legend_or_anecdote) 严禁写成客观事实，必须标注'相传'或'有一种说法'",
+        "严禁脑补伪造历史人物现场心理活动或微表情独白"
+      ],
+      reference_materials: []
+    };
+  }
+
+  // 兜底补齐：若无 outline 但有 finalScript，提取大纲
+  if (!outline && finalScript && finalScript.script_segments && Array.isArray(finalScript.script_segments.chapters)) {
+    outline = {
+      project_id: projectId,
+      title: finalScript.title || brief.title,
+      review_status: 'APPROVED',
+      human_review_notes: '已由定稿文案自动生成大纲映射',
+      chapters: finalScript.script_segments.chapters.map((ch, idx) => ({
+        chapter_number: ch.chapter_number || idx + 1,
+        chapter_title: ch.chapter_title || `第${idx + 1}章`,
+        core_question: `第${idx + 1}章核心问题探讨`,
+        mechanism: '背景与机制分析',
+        bound_evidence_ids: [],
+        target_words: (ch.narration_text || '').length || 1200
+      }))
+    };
+  }
+
+  return {
+    projectId,
+    brief,
+    evidenceCards: Array.isArray(evidenceCards) ? evidenceCards : [],
+    outline,
+    chapters,
+    finalScript
+  };
+}
+
+function saveWriterProjectData(projectId, part, payload) {
+  const paths = getPaths(projectId);
+  if (!fs.existsSync(paths.dataDir)) {
+    fs.mkdirSync(paths.dataDir, { recursive: true });
+  }
+
+  if (part === 'brief') {
+    fs.writeFileSync(paths.briefPath, JSON.stringify(payload, null, 2), 'utf8');
+    return { ok: true, message: '立项 Brief 已保存' };
+  }
+  if (part === 'evidence') {
+    fs.writeFileSync(paths.evidencePath, JSON.stringify(payload, null, 2), 'utf8');
+    return { ok: true, message: '证据卡库已保存' };
+  }
+  if (part === 'outline') {
+    fs.writeFileSync(paths.outlinePath, JSON.stringify(payload, null, 2), 'utf8');
+    return { ok: true, message: '结构大纲已保存' };
+  }
+  if (part === 'chapter') {
+    const chNum = payload.chapter_number || 1;
+    const chPath = path.join(paths.dataDir, `chapter_${chNum}.json`);
+    fs.writeFileSync(chPath, JSON.stringify(payload, null, 2), 'utf8');
+    return { ok: true, message: `第 ${chNum} 章已保存` };
+  }
+  if (part === 'finalScript') {
+    fs.writeFileSync(paths.finalScriptPath, JSON.stringify(payload, null, 2), 'utf8');
+    return { ok: true, message: '全文文案与终稿已保存' };
+  }
+  return { ok: false, error: '未知数据分区类型: ' + part };
+}
+
+function syncWriterToProducer(projectId, finalScriptOrText) {
+  let content = '';
+  let title = '';
+  if (typeof finalScriptOrText === 'string') {
+    content = finalScriptOrText;
+  } else if (finalScriptOrText && typeof finalScriptOrText === 'object') {
+    title = finalScriptOrText.title || '';
+    content = JSON.stringify(finalScriptOrText, null, 2);
+  }
+  const result = createProjectFromScript({
+    projectId,
+    title,
+    content,
+    targetSeconds: 5.5
+  });
+  return result;
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
@@ -1712,6 +1844,242 @@ const server = http.createServer(async (req, res) => {
       });
       res.writeHead(resData.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify(resData));
+    }
+
+    // 0.5 获取文案创作台 (Writer) 数据
+    if (req.method === 'GET' && pathname === '/api/writer/data') {
+      const data = getWriterProjectData(queryProject);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, ...data }));
+    }
+
+    // 0.6 保存文案创作台 (Writer) 单个阶段数据
+    if (req.method === 'POST' && pathname === '/api/writer/save') {
+      const body = await readBody(req);
+      const part = body.part;
+      const payload = body.data;
+      const resData = saveWriterProjectData(queryProject, part, payload);
+      res.writeHead(resData.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(resData));
+    }
+
+    // 0.7 文案终稿一键同步至视觉分镜台 (Producer) 并生成镜头清单
+    if (req.method === 'POST' && pathname === '/api/writer/sync-to-producer') {
+      const body = await readBody(req);
+      const resData = syncWriterToProducer(queryProject, body.finalScript || body.content);
+      res.writeHead(resData.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(resData));
+    }
+
+    // 0.8 AI 生成立项 Brief
+    if (req.method === 'POST' && pathname === '/api/writer/ai/generate-brief') {
+      const body = await readBody(req);
+      const { title, materials, durationMinutes = 25, model, apiKey, baseUrl } = body;
+      if (!title || !materials || materials.trim().length < 15) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '请提供明确的视频题目和至少一段真实的参考资料' }));
+      }
+      const sys = `你是一名严谨的知识型长视频纪录片策划总监。请根据用户提供的选题与资料，生成一份标准的视频立项 brief。
+必须且仅输出合法的 JSON 格式，字段包括：
+{
+  "project_id": "why_xxx_001",
+  "title": "视频标题（为什么……）",
+  "core_question": "全片核心设问",
+  "short_answer": "开篇前2分钟给出的简短核心答案（2-4句话，通俗透彻）",
+  "target_duration_minutes": 25,
+  "estimated_word_count": 6500,
+  "planned_chapter_count": 6,
+  "scope": {
+    "time_range": "时间跨度",
+    "geographic_scope": "地理范围",
+    "included_dimensions": ["机制一", "机制二"],
+    "excluded_dimensions": ["排除领域"]
+  },
+  "taboos_and_exclusions": ["严禁模仿特定博主口吻", "零编造", "禁用排外煽情"]
+}`;
+      const user = `【视频题目】：${title}\n【预期时长】：${durationMinutes} 分钟\n【原始研究资料】：\n${materials}`;
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500 });
+      const parsed = extractJsonFromText(aiText);
+      if (parsed) {
+        parsed.project_id = queryProject;
+        saveWriterProjectData(queryProject, 'brief', parsed);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: true, brief: parsed, rawAi: aiText }));
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的 Brief JSON', rawAi: aiText }));
+    }
+
+    // 0.9 AI 从原始资料提取原子化证据卡
+    if (req.method === 'POST' && pathname === '/api/writer/ai/extract-evidence') {
+      const body = await readBody(req);
+      const { title, materials, model, apiKey, baseUrl } = body;
+      const sys = `你是一名严谨的知识型纪录片资料考证员。你的任务是将用户提供的原始资料拆解为一组原子化的证据卡（Evidence Cards）。
+核心规则：
+1. 每张证据卡只包含一个独立事实主张；
+2. claim_type 严格限定四选一：verified_fact（已证实客观事实）、disputed_claim（存在争议）、legend_or_anecdote（民间传说/轶事）、author_interpretation（主观推论）；
+3. 必须输出 JSON 数组，每项包含：
+   - evidence_id: 如 "EV-001"
+   - claim_type: 四选一
+   - evidence_summary: 事实客观中文概括
+   - source_title: 资料出处说明
+   - reliability: high / medium / low
+请直接输出纯 JSON 数组，严禁包含任何前缀后缀说明。`;
+      const user = `【视频题目】：${title}\n【原始资料内容】：\n${materials}`;
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 3500 });
+      let list = extractJsonFromText(aiText);
+      if (Array.isArray(list) && list.length > 0) {
+        saveWriterProjectData(queryProject, 'evidenceCards', list);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: true, evidenceCards: list }));
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '大模型未返回证据卡 JSON 数组', rawAi: aiText }));
+    }
+
+    // 0.10 AI 基于证据卡构建 5~7 章大纲
+    if (req.method === 'POST' && pathname === '/api/writer/ai/build-outline') {
+      const body = await readBody(req);
+      const { brief, evidenceCards, model, apiKey, baseUrl } = body;
+      const sys = `你是一名知识型长视频总编剧。请基于 brief 与已审核的证据卡列表，构建一份 5 到 7 章的标准结构化大纲。
+核心规则：
+1. 单章单问：每一章必须且仅回答一个明确的子问题；
+2. 5~7 章递进：第1章破除表面误解与建立反差，第2-3章底层地理/历史/技术机制，第4-5章商业/基建/制度转折，第6-7章现代固化与代价；
+3. 必须绑定 supporting_evidence_ids；
+4. 必须且仅输出合法的 JSON 格式：
+{
+  "project_id": "xxx",
+  "title": "视频标题",
+  "approval_status": "pending_user_review",
+  "opening_hook": {
+    "opening_question": "开头抛出的生活反差矛盾",
+    "immediate_short_answer": "前2分钟直接给出的核心答案",
+    "supporting_evidence_ids": ["EV-001"]
+  },
+  "chapters": [
+    {
+      "chapter_number": 1,
+      "chapter_title": "第1章标题",
+      "sub_question": "本章回答的核心子问题",
+      "mechanism_or_background_summary": "机制阐述",
+      "supporting_evidence_ids": ["EV-001", "EV-002"],
+      "transition_to_next": "引向下一章的自然过渡设问"
+    }
+  ],
+  "single_ending_plan": {
+    "revisit_core_question": "回扣开篇核心问题",
+    "final_takeaway": "全片唯一收尾升华，严禁加入未经前文证实的新事实"
+  }
+}`;
+      const user = `【立项 Brief】：\n${JSON.stringify(brief, null, 2)}\n\n【可用证据卡列表】：\n${JSON.stringify(evidenceCards, null, 2)}`;
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000 });
+      const outline = extractJsonFromText(aiText);
+      if (outline && Array.isArray(outline.chapters)) {
+        outline.project_id = queryProject;
+        outline.approval_status = 'pending_user_review';
+        saveWriterProjectData(queryProject, 'outline', outline);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: true, outline }));
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的 Outline JSON', rawAi: aiText }));
+    }
+
+    // 0.11 AI 单章受控撰写 (四段式结构)
+    if (req.method === 'POST' && pathname === '/api/writer/ai/write-chapter') {
+      const body = await readBody(req);
+      const { chapterNumber, outline, evidenceCards, model, apiKey, baseUrl } = body;
+      const targetChapter = (outline.chapters || []).find((c) => Number(c.chapter_number) === Number(chapterNumber));
+      if (!targetChapter) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: `在大纲中未找到第 ${chapterNumber} 章` }));
+      }
+
+      const sys = `你是一名知识型纪录片撰稿人。你的任务是严格撰写指定单章的旁白文稿。
+核心规则：
+1. 严禁一次写整片，只写当前这一章（约 800-1400 中文字）；
+2. 内部结构严格遵循四段式：
+   - 1_question_or_contradiction: 章节问题或矛盾（承接上文）
+   - 2_mechanism_or_background: 形成机制或底层背景（逻辑拆解）
+   - 3_sourced_concrete_examples: 有来源的具体例子（绑定证据卡，平实具象，严禁伪造内心独白）
+   - 4_mini_summary_and_transition: 小结与自然引出下一章（非终章严禁做全局大总结）
+3. 必须输出合法 JSON 格式：
+{
+  "chapter_number": ${chapterNumber},
+  "chapter_title": "${targetChapter.chapter_title}",
+  "sub_question": "${targetChapter.sub_question}",
+  "sections": {
+    "1_question_or_contradiction": "...",
+    "2_mechanism_or_background": "...",
+    "3_sourced_concrete_examples": "...",
+    "4_mini_summary_and_transition": "..."
+  },
+  "full_chapter_narration": "拼接后的单章完整口语化旁白正文",
+  "used_evidence_ids": targetChapter.supporting_evidence_ids,
+  "word_count": 1000
+}`;
+      const user = `【本章大纲规划】：\n${JSON.stringify(targetChapter, null, 2)}\n\n【关联证据卡库】：\n${JSON.stringify(evidenceCards, null, 2)}`;
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000 });
+      const chData = extractJsonFromText(aiText);
+      if (chData && chData.sections) {
+        chData.chapter_number = Number(chapterNumber);
+        if (!chData.full_chapter_narration) {
+          chData.full_chapter_narration = Object.values(chData.sections).filter(Boolean).join('\n\n');
+        }
+        chData.word_count = chData.full_chapter_narration.length;
+        saveWriterProjectData(queryProject, 'chapter', chData);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: true, chapter: chData }));
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的章节 JSON', rawAi: aiText }));
+    }
+
+    // 0.12 AI 全文统稿去伪结尾与定稿
+    if (req.method === 'POST' && pathname === '/api/writer/ai/finalize-script') {
+      const body = await readBody(req);
+      const { outline, chapters, model, apiKey, baseUrl } = body;
+      const sys = `你是一名资深长视频总编审。你的任务是对全片章节进行全文统稿编辑（Full Script Editing）。
+核心规则：
+1. 删除跨章节重复论点与重复例子；
+2. 统一全片术语、年代读法与口语化节奏；
+3. 识别并删除中间各章节末尾的“伪结尾”，全片只保留一个正式终局结尾；
+4. 输出标准 final-script.json 结构：
+{
+  "project_id": "xxx",
+  "title": "视频标题",
+  "total_word_count": 6500,
+  "estimated_duration_minutes": 25.0,
+  "revision_count": 0,
+  "editorial_changes_log": {
+    "removed_duplicate_arguments": ["删除了第X章关于...的重复解释"],
+    "removed_duplicate_examples": ["统一了...案例的出场位置"],
+    "unified_terms_and_names": ["统一专有名词"],
+    "removed_false_endings_count": 2
+  },
+  "script_segments": {
+    "opening": "开篇旁白正文",
+    "chapters": [
+      {
+        "chapter_number": 1,
+        "chapter_title": "第1章标题",
+        "narration_text": "本章正文"
+      }
+    ],
+    "ending": "全片唯一终局收尾正文"
+  }
+}`;
+      const user = `【大纲结构】：\n${JSON.stringify(outline, null, 2)}\n\n【全部已撰写章节】：\n${JSON.stringify(chapters, null, 2)}`;
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4500 });
+      const finalScript = extractJsonFromText(aiText);
+      if (finalScript && finalScript.script_segments) {
+        finalScript.project_id = queryProject;
+        saveWriterProjectData(queryProject, 'finalScript', finalScript);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: true, finalScript }));
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的 final-script JSON', rawAi: aiText }));
     }
 
     // 1. 获取工作流完整数据
@@ -2951,9 +3319,15 @@ function renderMainHtml() {
             </select>
           </div>
 
-          <button type="button" onclick="toggleImportScriptModal()" class="px-3 py-1.5 text-xs font-extrabold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 border border-violet-400/40 cursor-pointer" title="导入定稿文案自动智能切分分镜建项">
-            📝 导入文案建项
-          </button>
+          <!-- SPA 顶栏一键切换导航胶囊 (无需跳页，状态最顺滑) -->
+          <div class="inline-flex p-1 bg-gray-950/90 rounded-xl border border-purple-500/40 shadow-inner">
+            <button id="navTabWriter" type="button" onclick="switchWorkspaceTab('writer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
+              ✍️ 文案创作台 (Writer)
+            </button>
+            <button id="navTabProducer" type="button" onclick="switchWorkspaceTab('producer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow cursor-pointer">
+              🎬 视觉分镜台 (Producer)
+            </button>
+          </div>
 
           <span id="projectStageBadge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
             加载中...
@@ -2965,31 +3339,48 @@ function renderMainHtml() {
         </h1>
       </div>
 
-      <div class="flex flex-wrap items-center gap-3">
+      <!-- 视觉分镜制作台快捷操作组 -->
+      <div id="producerHeaderActions" class="flex flex-wrap items-center gap-3">
         <!-- 核心新增：AI 视频与画面模型配置中心 -->
-        <button onclick="toggleVisualModelModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5">
+        <button onclick="toggleVisualModelModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
           🎬 AI 画面/视频模型指定
         </button>
-        <button onclick="toggleAudioModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white transition shadow-lg flex items-center gap-1.5">
+        <button onclick="toggleAudioModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
           🎙️ 配音引擎配置
         </button>
-        <button onclick="toggleBgmModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-gray-950 transition shadow-lg flex items-center gap-1.5">
+        <button onclick="toggleBgmModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-gray-950 transition shadow-lg flex items-center gap-1.5 cursor-pointer">
           🎵 AI 自适应 BGM 工作台
         </button>
-        <button onclick="autoGenerateAllPromptsForPage()" class="px-3.5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white transition shadow-lg flex items-center gap-1.5" title="根据本页所有镜头的旁白内容，一键自动填入最佳运镜与视觉指示词">
+        <button onclick="autoGenerateAllPromptsForPage()" class="px-3.5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="根据本页所有镜头的旁白内容，一键自动填入最佳运镜与视觉指示词">
           ✨ 一键提炼全页指示词
         </button>
-        <button onclick="generateAllPpt()" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition shadow-lg flex items-center gap-1.5">
+        <button onclick="generateAllPpt()" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
           ⚡ 批量生成全部 AI 画面
         </button>
-        <button onclick="saveAll()" class="px-4 py-2 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 transition shadow-lg">
+        <button onclick="saveAll()" class="px-4 py-2 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 transition shadow-lg cursor-pointer">
           💾 保存镜头表并同步 Remotion
         </button>
         <a href="http://localhost:3100" target="_blank" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-blue-500 text-blue-300 transition">
           🎬 Remotion 预览 (:3100) ↗
         </a>
       </div>
+
+      <!-- 文案创作台快捷操作组 (初始隐藏，切换到 Writer 时激活) -->
+      <div id="writerHeaderActions" class="hidden flex items-center gap-3">
+        <button type="button" onclick="openWriterImportDirectly()" class="px-3.5 py-2 text-xs font-bold rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
+          📥 导入已有文案 (exports/)
+        </button>
+        <button type="button" onclick="saveCurrentWriterPart()" class="px-3.5 py-2 text-xs font-bold rounded-xl bg-gray-900 hover:bg-gray-800 text-amber-300 border border-amber-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
+          💾 保存当前草稿
+        </button>
+        <button type="button" onclick="syncWriterToProducerUI()" class="px-4 py-2 text-xs font-extrabold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 transition shadow-xl flex items-center gap-1.5 cursor-pointer">
+          🚀 文案定稿 · 一键流转至制作台
+        </button>
+      </div>
     </header>
+
+    <!-- 视图 1：视觉分镜制作台 (Producer Workspace) -->
+    <div id="viewProducerContainer" class="space-y-5">
 
     <!-- 视频预览 / 工程状态概览 -->
     <div id="videoContainer" class="card p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
@@ -3068,6 +3459,543 @@ function renderMainHtml() {
     </div>
 
   </div>
+  <!-- 视觉分镜制作台 (Producer Workspace) 结束 -->
+
+  <!-- 视图 2：✍️ 知识长视频文案创作工坊 (Writer Workspace - 深度落地 WhyExplainerVideoWriter 标准) -->
+  <div id="viewWriterContainer" class="space-y-5 hidden">
+    
+    <!-- 顶部五阶段导航与人工审核门禁指示条 -->
+    <div class="card p-4 rounded-2xl border border-purple-500/30 bg-gradient-to-r from-gray-950 via-purple-950/20 to-gray-950">
+      <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-gray-800/80">
+        <div class="flex items-center gap-2">
+          <span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-purple-500/20 text-purple-300 border border-purple-500/40">
+            ✍️ 文案策划工作流
+          </span>
+          <span class="text-xs text-gray-400">
+            遵循知识型纪录片规范 · 零编造 · 证据卡核验 · 5~7章大纲 · 四段式单章受控撰写 · 单一终局结尾
+          </span>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+          <span class="text-gray-400">当前阶段：</span>
+          <span id="writerCurrentStepBadge" class="px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+            Step 1 · 立项与资料输入
+          </span>
+        </div>
+      </div>
+
+      <!-- 五阶段按钮指示器 (点击可直接跳转查看对应阶段) -->
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-3">
+        <button type="button" onclick="setWriterStep(1)" id="stepBtn1" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow">
+          <span class="w-6 h-6 rounded-full bg-purple-600 text-white font-bold flex items-center justify-center text-xs shrink-0">1</span>
+          <div class="min-w-0">
+            <div class="text-xs font-bold truncate">立项与资料</div>
+            <div class="text-[10px] text-gray-400 truncate">Brief & 设问</div>
+          </div>
+        </button>
+
+        <button type="button" onclick="setWriterStep(2)" id="stepBtn2" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white">
+          <span class="w-6 h-6 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-xs shrink-0">2</span>
+          <div class="min-w-0">
+            <div class="text-xs font-bold truncate">证据卡提取核验</div>
+            <div class="text-[10px] text-gray-400 truncate">Evidence Cards</div>
+          </div>
+        </button>
+
+        <button type="button" onclick="setWriterStep(3)" id="stepBtn3" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white">
+          <span class="w-6 h-6 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-xs shrink-0">3</span>
+          <div class="min-w-0">
+            <div class="text-xs font-bold truncate">5~7章大纲策划</div>
+            <div class="text-[10px] text-gray-400 truncate">Outline & 门禁</div>
+          </div>
+        </button>
+
+        <button type="button" onclick="setWriterStep(4)" id="stepBtn4" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white">
+          <span class="w-6 h-6 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-xs shrink-0">4</span>
+          <div class="min-w-0">
+            <div class="text-xs font-bold truncate">逐章撰写与润色</div>
+            <div class="text-[10px] text-gray-400 truncate">四段式单章受控</div>
+          </div>
+        </button>
+
+        <button type="button" onclick="setWriterStep(5)" id="stepBtn5" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white">
+          <span class="w-6 h-6 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-xs shrink-0">5</span>
+          <div class="min-w-0">
+            <div class="text-xs font-bold truncate">全文统稿与定稿</div>
+            <div class="text-[10px] text-gray-400 truncate">去伪结尾并同步</div>
+          </div>
+        </button>
+      </div>
+    </div>
+
+    <!-- 主工作区：左 30% 资料与设定参数，右 70% 阶段执行看板 -->
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      
+      <!-- 左栏 (30% / 4 Cols)：工程基本设定、资料库与大模型配置 -->
+      <div class="lg:col-span-4 space-y-4">
+        
+        <!-- 工程基础卡片 -->
+        <div class="card p-4 rounded-2xl border border-gray-800 space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-gray-800">
+            <span class="text-xs font-bold text-white flex items-center gap-1.5">
+              <span>📌 当前工程信息</span>
+            </span>
+            <span id="writerProjectIdBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-800 text-purple-300 font-bold">
+              why_project
+            </span>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-gray-300 mb-1">🏷️ 视频核心标题（提问形式）</label>
+            <input type="text" id="wInputTitle" placeholder="例如：为什么日本温泉旅馆的晚餐常常是一小碟一小碟？"
+              class="w-full bg-gray-950 text-white font-bold text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[11px] text-gray-400 mb-1">⏱️ 目标时长 (分钟)</label>
+              <input type="number" id="wInputDuration" value="25" min="5" max="60"
+                class="w-full bg-gray-950 text-white font-mono text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-gray-400 mb-1">📑 规划章节数</label>
+              <input type="number" id="wInputChapterCount" value="6" min="5" max="7"
+                class="w-full bg-gray-950 text-white font-mono text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+            </div>
+          </div>
+
+          <div>
+            <label class="block text-[11px] text-gray-400 mb-1">🤖 写作所用大模型 (OpenRouter 网关)</label>
+            <select id="wInputModel" class="w-full bg-gray-950 text-white text-xs px-2.5 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500">
+              <option value="deepseek/deepseek-chat" selected>DeepSeek Chat (V3 / 高效严谨推理 · 推荐)</option>
+              <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet (纪录片文学文风)</option>
+              <option value="google/gemini-2.5-pro">Gemini 2.5 Pro (超长上下文与深度事实考证)</option>
+              <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B Instruct</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 文案快速导入入口 (置顶醒目呈现) -->
+        <div class="card p-3.5 rounded-2xl border border-violet-500/40 bg-gradient-to-r from-violet-950/40 to-indigo-950/30 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-black text-violet-300 flex items-center gap-1.5">
+              <span>📥 本地已有文案？</span>
+            </span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/20 text-violet-300 border border-violet-500/30">
+              免从头生成
+            </span>
+          </div>
+          <p class="text-[11px] text-gray-300 leading-relaxed">
+            本地已有 10 篇定稿文案？一键直接载入并自动切分分镜。
+          </p>
+          <button type="button" onclick="switchStep1SubTab('import')" class="w-full py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow flex items-center justify-center gap-1.5 cursor-pointer">
+            📝 打开文案导入中心 (exports/ 库)
+          </button>
+        </div>
+
+        <!-- 原始资料与文献输入区 (核心拦截保护：无资料不硬编) -->
+        <div class="card p-4 rounded-2xl border border-gray-800 space-y-2.5">
+          <div class="flex items-center justify-between pb-2 border-b border-gray-800">
+            <span class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+              <span>📚 原始研究资料与来源</span>
+            </span>
+            <span class="text-[10px] text-gray-500">零硬编</span>
+          </div>
+
+          <p class="text-[11px] text-gray-400 leading-relaxed">
+            粘贴人工收集的历史档案、统计数据、著作摘录。系统将严格基于此资料提取证据卡。
+          </p>
+
+          <textarea id="wInputMaterials" rows="5" placeholder="在此粘贴原始资料文本、文献记载、统计年份与数字、学术论文要点或考证事实..."
+            class="w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500 font-mono leading-relaxed resize-y"></textarea>
+
+          <div class="flex items-center justify-between pt-1">
+            <span id="wMaterialWordCount" class="text-[11px] text-gray-400">已输入 0 字资料</span>
+            <button type="button" onclick="loadSampleMaterialToWriter()" class="text-xs text-purple-400 hover:underline">
+              💡 载入示例考证资料
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- 右栏 (70% / 8 Cols)：阶段执行与人工审核看板 -->
+      <div class="lg:col-span-8 space-y-4">
+
+        <!-- ==================== Step 1 面板：立项与设问定义 (Brief) / 本地文案直接导入 ==================== -->
+        <div id="wPanelStep1" class="card p-5 rounded-2xl border border-gray-800 space-y-4">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+            <div>
+              <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <span>📋 阶段 1：立项设问与文案建项</span>
+              </h3>
+              <p class="text-xs text-gray-400 mt-0.5">支持从 0 全新设问立项，或直接从本地 exports/ 库导入已有定稿文案</p>
+            </div>
+            <!-- 双模式切换 Tab 胶囊 -->
+            <div class="inline-flex p-1 bg-gray-950 rounded-xl border border-purple-500/30">
+              <button type="button" id="wStep1SubTabCreateBtn" onclick="switchStep1SubTab('create')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-purple-600 text-white shadow cursor-pointer">
+                ✍️ 全新设问立项
+              </button>
+              <button type="button" id="wStep1SubTabImportBtn" onclick="switchStep1SubTab('import')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
+                📂 导入本地已有文案 (exports/)
+              </button>
+            </div>
+          </div>
+
+          <!-- 子模式 1：从 0 全新设问立项 (Brief Setup) -->
+          <div id="wStep1SubViewCreate" class="space-y-4">
+            <div class="flex items-center justify-between bg-purple-950/20 p-3 rounded-xl border border-purple-500/30">
+              <div class="text-xs text-purple-200">
+                <span class="font-bold">🎯 标准 5 步流程：</span>基于左侧考证资料，提炼核心设问与开篇答案
+              </div>
+              <button type="button" onclick="aiGenerateBrief()" id="btnAiBrief" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <span>🤖 AI 分析资料并生成 Brief</span>
+              </button>
+            </div>
+
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs font-bold text-gray-300 mb-1">🎯 全片核心问题 (Core Question)</label>
+                <input type="text" id="wBriefCoreQuestion" placeholder="例如：为什么富士山能跨越千年成为日本的国家精神象征，并在全世界享誉盛名？"
+                  class="w-full bg-gray-950 text-white text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-gray-300 mb-1">⚡ 开篇前2分钟简短直接答案 (Immediate Short Answer)</label>
+                <textarea id="wBriefShortAnswer" rows="3" placeholder="先用 2~4 句话给出客观清晰的答案框架，拒绝卖关子拖延，让观众一听就懂核心因果链条..."
+                  class="w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500 font-sans leading-relaxed"></textarea>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-gray-300 mb-1">🗺️ 讨论范围与地理/历史跨度</label>
+                  <input type="text" id="wBriefScope" placeholder="例如：从公元864年贞观喷发至2024年现代过度旅游治理"
+                    class="w-full bg-gray-950 text-white text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-300 mb-1">🚫 内容禁区与排外排除规范</label>
+                  <input type="text" id="wBriefTaboos" value="严禁模仿特定博主口吻、零编造数据年代、禁用排外与煽情口吻"
+                    class="w-full bg-gray-950 text-white text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+                </div>
+              </div>
+            </div>
+
+            <div class="pt-3 border-t border-gray-800 flex items-center justify-between">
+              <span class="text-xs text-gray-400">💡 确认立项信息无误后，即可进入证据卡提取</span>
+              <div class="flex items-center gap-2">
+                <button type="button" onclick="saveWriterPartManual('brief')" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+                  💾 保存 Brief
+                </button>
+                <button type="button" onclick="setWriterStep(2)" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer">
+                  <span>👉 进入阶段 2：提取证据卡</span>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 子模式 2：直接导入本地已有文案 (exports/ 库快速切镜建项) -->
+          <div id="wStep1SubViewImport" class="space-y-4 hidden">
+            <div class="p-4 rounded-xl bg-gradient-to-r from-violet-950/40 via-indigo-950/30 to-gray-950 border border-violet-500/40 space-y-2">
+              <div class="flex items-center justify-between">
+                <div class="text-xs font-black text-violet-300 flex items-center gap-1.5">
+                  <span>📂 本地 exports/ 文案库扫描</span>
+                  <span class="px-2 py-0.5 rounded-full text-[10px] bg-violet-500/20 text-violet-200 border border-violet-500/30">
+                    一键切镜建项
+                  </span>
+                </div>
+                <button type="button" onclick="loadStep1ScannedScripts()" class="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1 cursor-pointer">
+                  🔄 刷新 exports/ 目录
+                </button>
+              </div>
+              <p class="text-xs text-gray-400 leading-relaxed">
+                无需从头策划，直接选择下方已完成的深度长片文案（包含《富士山》《美国AI改名SI》等），系统将自动进行 4.0 ~ 8.0 秒智能节奏切镜并建立工程：
+              </p>
+            </div>
+
+            <!-- 扫描到的文案列表容器 -->
+            <div id="wStep1ScannedList" class="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+              <div class="text-center py-8 text-gray-500 text-xs">正在扫描 exports/ 文案...</div>
+            </div>
+
+            <!-- 当前选中导入的文案参数与切镜配置 -->
+            <div id="wStep1ImportConfigBox" class="p-4 rounded-xl bg-gray-950 border border-gray-800 space-y-3 hidden">
+              <div class="flex items-center justify-between pb-2 border-b border-gray-800">
+                <span class="text-xs font-bold text-amber-300 flex items-center gap-1">
+                  <span>⚡ 切镜与建项设定</span>
+                </span>
+                <span id="wStep1SelectedSummary" class="text-xs text-purple-300 font-mono"></span>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-gray-300 mb-1">🆔 项目英文 ID</label>
+                  <input type="text" id="wStep1ImportProjId" class="w-full bg-gray-900 text-white font-mono text-xs px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-violet-500" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-300 mb-1">🏷️ 视频中文标题</label>
+                  <input type="text" id="wStep1ImportProjTitle" class="w-full bg-gray-900 text-white font-bold text-xs px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-violet-500" />
+                </div>
+              </div>
+
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-gray-400">⏱️ 切镜步长：</span>
+                  <select id="wStep1ImportDuration" onchange="previewStep1ImportSegmentation()" class="bg-gray-900 text-white text-xs px-2 py-1 rounded border border-gray-700">
+                    <option value="5.5" selected>标准长视频节奏 (4.0 ~ 7.5 秒/镜 · 推荐)</option>
+                    <option value="4.2">紧凑信息流节奏 (3.5 ~ 5.5 秒/镜)</option>
+                    <option value="7.0">沉稳纪录片节奏 (5.5 ~ 9.0 秒/镜)</option>
+                  </select>
+                </div>
+                <div id="wStep1ImportPreviewCount" class="text-xs text-emerald-400 font-bold"></div>
+              </div>
+
+              <div class="pt-2 flex justify-end gap-2 border-t border-gray-800">
+                <button type="button" onclick="confirmStep1ImportToProducer()" id="btnStep1ImportExec" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
+                  🚀 确认切镜并直接进入制作台
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== Step 2 面板：证据卡提取与核验 (Evidence Cards) ==================== -->
+        <div id="wPanelStep2" class="card p-5 rounded-2xl border border-gray-800 space-y-4 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+            <div>
+              <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <span>🗂️ 阶段 2：证据卡提取与事实分型 (Evidence Cards Review)</span>
+              </h3>
+              <p class="text-xs text-gray-400 mt-0.5">单一主张原则 · 严格区分事实(verified_fact)与传说(legend_or_anecdote)</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="addCustomEvidenceCard()" class="px-3 py-1.5 rounded-xl card hover:border-gray-600 text-xs font-bold text-gray-300 transition flex items-center gap-1 cursor-pointer">
+                <span>➕ 手动添加证据卡</span>
+              </button>
+              <button type="button" onclick="aiExtractEvidence()" id="btnAiEvidence" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <span>🤖 从资料中提取证据卡</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 证据卡列表容器 -->
+          <div id="wEvidenceCardsList" class="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
+            <div class="text-center py-10 text-gray-500 text-xs">暂无证据卡，请在左侧填入资料后点击上方「🤖 从资料中提取证据卡」</div>
+          </div>
+
+          <!-- 人工审核门禁 (Human Review Gate) -->
+          <div class="p-3.5 rounded-xl bg-gray-950 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="text-base">🚦</span>
+              <div>
+                <div class="text-xs font-bold text-amber-300">人工审核门禁：事实真实性核对</div>
+                <div class="text-[11px] text-gray-400">请逐一核验上述证据卡是否存在编造或存疑，确认无误后方可生成大纲。</div>
+              </div>
+            </div>
+            <button type="button" onclick="approveEvidenceCardsGate()" class="px-4 py-2 text-xs font-extrabold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition shadow flex items-center gap-1.5 shrink-0 cursor-pointer">
+              <span>✅ 证据核验无误 · 解锁大纲策划</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ==================== Step 3 面板：5~7 章大纲策划与审核门禁 (Outline) ==================== -->
+        <div id="wPanelStep3" class="card p-5 rounded-2xl border border-gray-800 space-y-4 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+            <div>
+              <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <span>📑 阶段 3：5~7 章结构化大纲策划 (Outline Gate)</span>
+              </h3>
+              <p class="text-xs text-gray-400 mt-0.5">单章单问原则 · 层层递进 · 绑定证据卡 · 严禁未审核即写正文</p>
+            </div>
+            <button type="button" onclick="aiBuildOutline()" id="btnAiOutline" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+              <span>🤖 基于证据卡生成大纲</span>
+            </button>
+          </div>
+
+          <!-- 开篇反差设计 -->
+          <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
+            <div class="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+              <span>🪝 开篇反差切入与直接答案 (Opening Hook)</span>
+            </div>
+            <input type="text" id="wOutlineOpeningQuestion" placeholder="开篇具体反常矛盾..."
+              class="w-full bg-gray-900 text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+            <textarea id="wOutlineOpeningAnswer" rows="2" placeholder="开篇简短直接结论..."
+              class="w-full bg-gray-900 text-gray-300 text-xs p-2.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500"></textarea>
+          </div>
+
+          <!-- 5~7 章列表容器 -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between text-xs font-bold text-gray-300 px-1">
+              <span>📚 章节规划列表 (严格 5~7 章)：</span>
+              <span id="wOutlineChapterCountBadge" class="text-[10px] text-purple-400 font-mono">0 章</span>
+            </div>
+            <div id="wOutlineChaptersList" class="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+              <div class="text-center py-8 text-gray-500 text-xs">暂无大纲数据，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>
+            </div>
+          </div>
+
+          <!-- 唯一终局结尾规划 -->
+          <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
+            <div class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+              <span>🏁 全片唯一终局收尾规划 (Single Ending Plan)</span>
+              <span class="text-[10px] text-gray-500 font-normal">全片只准保留一个正式结尾，严禁在中间各章作总结</span>
+            </div>
+            <input type="text" id="wOutlineEndingTakeaway" placeholder="回扣核心问题，升华本质运转机制..."
+              class="w-full bg-gray-900 text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400" />
+          </div>
+
+          <!-- 大纲审核门禁 (STOP & REVIEW) -->
+          <div class="p-4 rounded-xl bg-purple-950/30 border border-purple-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-extrabold text-purple-300 flex items-center gap-1.5">
+                <span>🛑 强制人工审核门禁 (STOP & REVIEW)</span>
+              </div>
+              <div class="text-[11px] text-gray-400 mt-0.5">
+                请确认上述章节是否条理清晰、因果链条严密。<b>未经明确确认，系统绝不启动正文撰写！</b>
+              </div>
+            </div>
+            <button type="button" onclick="approveOutlineGate()" id="btnApproveOutline" class="px-5 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer">
+              <span>👉 审核通过大纲 · 解锁逐章撰写</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ==================== Step 4 面板：逐章受控撰写与四段式结构 (Chapter Writer) ==================== -->
+        <div id="wPanelStep4" class="card p-5 rounded-2xl border border-gray-800 space-y-4 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+            <div>
+              <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <span>✍️ 阶段 4：单章受控撰写 (Chapter by Chapter)</span>
+              </h3>
+              <p class="text-xs text-gray-400 mt-0.5">一次只写一章 · 强制四段式结构 · 绑定证据卡 · 最多重写2次防死循环</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="aiWriteCurrentChapter()" id="btnAiWriteChapter" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <span>🤖 AI 撰写当前章节</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 章节切换 Tabs -->
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-1" id="wChapterTabsBar">
+            <span class="text-xs text-gray-500">大纲审核后在此切换章节</span>
+          </div>
+
+          <!-- 当前章节信息概览 -->
+          <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <div class="text-xs font-black text-white" id="wCurChapterHeader">第 1 章：正在载入...</div>
+              <div class="text-[11px] text-purple-300" id="wCurChapterSubQuestion">子问题：...</div>
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <span class="text-gray-400">已写字数: <b id="wCurChapterWordCount" class="text-emerald-400 font-mono">0</b> 字</span>
+              <span id="wCurChapterRevisionBadge" class="text-[10px] px-2 py-0.5 rounded bg-gray-800 text-gray-400">初稿</span>
+            </div>
+          </div>
+
+          <!-- 单章四段式结构编辑器 -->
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs font-bold text-amber-300 mb-1">
+                1️⃣ 章节问题或矛盾 (承接上文悬念，抛出本章反差)
+              </label>
+              <textarea id="wSec1Question" rows="2" placeholder="三五句话点出本章要解决的具体矛盾或反常现象..."
+                class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 leading-relaxed"></textarea>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-blue-300 mb-1">
+                2️⃣ 形成机制或背景 (拆解气候/运输/技术/商业/制度底层逻辑)
+              </label>
+              <textarea id="wSec2Mechanism" rows="3" placeholder="清晰拆解运作逻辑，把复杂概念拆成听得懂的因果链条..."
+                class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-400 leading-relaxed"></textarea>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-emerald-300 mb-1">
+                3️⃣ 有来源的具体例子 (基于证据卡，具象平实，严禁伪造内心戏)
+              </label>
+              <textarea id="wSec3Examples" rows="4" placeholder="具体案例、器物细节、动作或数据对比，必须严格有证据卡支持..."
+                class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-emerald-400 leading-relaxed"></textarea>
+            </div>
+
+            <div>
+              <label class="block text-xs font-bold text-purple-300 mb-1">
+                4️⃣ 小结与自然过渡 (收束本章子问题，引出下一章疑问，非终章严禁总结)
+              </label>
+              <textarea id="wSec4Transition" rows="2" placeholder="简短收束本章，并抛出下一章的悬念..."
+                class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-400 leading-relaxed"></textarea>
+            </div>
+          </div>
+
+          <div class="pt-3 border-t border-gray-800 flex items-center justify-between">
+            <span class="text-xs text-gray-400">💡 每一章完成后点击保存，全部写完即可进入全文统稿</span>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="saveCurrentChapterDraft()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+                💾 保存本章
+              </button>
+              <button type="button" onclick="setWriterStep(5)" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer">
+                <span>👉 进入阶段 5：全文统稿与定稿</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== Step 5 面板：全文统稿去伪结尾与定稿同步 (Finalize) ==================== -->
+        <div id="wPanelStep5" class="card p-5 rounded-2xl border border-gray-800 space-y-4 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+            <div>
+              <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <span>🏁 阶段 5：全文统稿与定稿 (Full Script Finalize & Sync)</span>
+              </h3>
+              <p class="text-xs text-gray-400 mt-0.5">跨章节去重 · 专有名词与年代统一 · 剔除中间伪结尾 · 唯一结尾回扣</p>
+            </div>
+            <button type="button" onclick="aiFinalizeFullScript()" id="btnAiFinalize" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+              <span>🤖 AI 全文统稿去重去伪结尾</span>
+            </button>
+          </div>
+
+          <!-- 统稿编辑报告 (去重、伪结尾统计) -->
+          <div id="wEditorialLogContainer" class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2 text-xs">
+            <div class="font-bold text-gray-300 flex items-center justify-between">
+              <span>📊 统稿清洗审计报告：</span>
+              <span id="wRemovedFalseEndingsBadge" class="text-[10px] text-amber-400">已清理伪结尾: 0 处</span>
+            </div>
+            <div id="wEditorialLogDetails" class="text-gray-400 space-y-1 font-mono text-[11px]">
+              <div>- 暂无统稿清洗记录，点击上方按钮由 AI 进行跨章去重与格式统稿。</div>
+            </div>
+          </div>
+
+          <!-- 全文旁白终稿预览区 -->
+          <div class="space-y-2">
+            <div class="flex items-center justify-between text-xs">
+              <span class="font-bold text-white">📑 完整长视频定稿文案 (Ready for Narration)：</span>
+              <span class="text-purple-300">总字数: <b id="wFinalScriptWords" class="font-mono">0</b> 字 · 预估播讲: <b id="wFinalScriptMin" class="font-mono">0.0</b> 分钟</span>
+            </div>
+            <textarea id="wFinalScriptFullText" rows="14" placeholder="统稿后的完整旁白文案将在此呈现，包含开篇导引、各章正文与唯一定稿结尾..."
+              class="w-full bg-gray-950 text-gray-200 text-xs p-3.5 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 font-mono leading-relaxed resize-y"></textarea>
+          </div>
+
+          <!-- 核心直通车按钮：一键进入分镜制作台 -->
+          <div class="p-4 rounded-xl bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-amber-500/15 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <div class="text-xs font-black text-amber-300 flex items-center gap-1.5">
+                <span>🚀 文案已定稿！一键直通分镜视觉工作台</span>
+              </div>
+              <div class="text-[11px] text-gray-400 mt-0.5">
+                系统将自动按 4.0 ~ 8.0 秒标准口语断句切分成全套镜头（Shots），生成时间轴并无缝切入制作台！
+              </div>
+            </div>
+            <button type="button" onclick="syncWriterToProducerUI()" class="px-6 py-2.5 text-xs font-black rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 transition shadow-xl flex items-center gap-1.5 shrink-0 cursor-pointer">
+              <span>🚀 确认定稿并进入分镜镜头工作台</span>
+            </button>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+  <!-- ✍️ 知识长视频文案创作工坊结束 -->
 
   <!-- 【核心升级】：全功能 AI 视频与分镜视觉模型控制中心 (OpenRouter 统一网关) -->
   <div id="visualModelModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
@@ -3641,6 +4569,863 @@ function renderMainHtml() {
       setTimeout(() => t.classList.add('hidden'), 3000);
     }
 
+    // ==========================================
+    // ✍️ 文案创作工坊 (Writer Workspace) SPA 状态与逻辑
+    // ==========================================
+    let currentWorkspaceTab = new URLSearchParams(window.location.search).get('tab') || 'producer';
+    let writerData = null;
+    let currentWriterStep = 1;
+    let currentChapterIndex = 0;
+
+    function switchWorkspaceTab(tab) {
+      currentWorkspaceTab = tab;
+      const url = new URL(window.location);
+      url.searchParams.set('tab', tab);
+      window.history.pushState({}, '', url);
+
+      const isProducer = tab === 'producer';
+      document.getElementById('viewProducerContainer').classList.toggle('hidden', !isProducer);
+      document.getElementById('viewWriterContainer').classList.toggle('hidden', isProducer);
+
+      document.getElementById('producerHeaderActions').classList.toggle('hidden', !isProducer);
+      document.getElementById('writerHeaderActions').classList.toggle('hidden', isProducer);
+
+      const navP = document.getElementById('navTabProducer');
+      const navW = document.getElementById('navTabWriter');
+
+      if (isProducer) {
+        navP.className = 'px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow cursor-pointer';
+        navW.className = 'px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer';
+      } else {
+        navW.className = 'px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow cursor-pointer';
+        navP.className = 'px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer';
+      }
+
+      const curProj = projectsList.find((p) => p.id === activeProjectId);
+      const titleStr = curProj ? curProj.title : activeProjectId;
+      if (isProducer) {
+        document.getElementById('projectHeaderTitle').textContent = titleStr + ' · 视觉镜头工作台';
+      } else {
+        document.getElementById('projectHeaderTitle').textContent = titleStr + ' · 知识长视频文案策划工坊';
+        loadWriterProjectData(activeProjectId);
+      }
+    }
+
+    async function loadWriterProjectData(projectId) {
+      document.getElementById('writerProjectIdBadge').textContent = projectId;
+      try {
+        const res = await fetch('/api/writer/data?project=' + projectId);
+        const data = await res.json();
+        if (data.ok) {
+          writerData = data;
+          
+          // 1. 填充 Brief
+          const curTitle = data.brief?.title || (projectsList.find((p) => p.id === projectId)?.title || '');
+          if (curTitle && !document.getElementById('wInputTitle').value) {
+            document.getElementById('wInputTitle').value = curTitle.replace(/^《(.*)》$/, '$1');
+          }
+          if (data.brief) {
+            document.getElementById('wInputTitle').value = data.brief.title || document.getElementById('wInputTitle').value;
+            document.getElementById('wInputDuration').value = data.brief.target_duration_minutes || 25;
+            document.getElementById('wInputChapterCount').value = data.brief.planned_chapter_count || 6;
+            document.getElementById('wBriefCoreQuestion').value = data.brief.core_question || '';
+            document.getElementById('wBriefShortAnswer').value = data.brief.short_answer || '';
+            document.getElementById('wBriefScope').value = data.brief.scope?.time_range || '';
+            document.getElementById('wBriefTaboos').value = (data.brief.taboos_and_exclusions || []).join('、');
+          }
+
+          // 2. 渲染证据卡
+          renderEvidenceCardsList();
+
+          // 3. 渲染大纲
+          renderOutlineView();
+
+          // 4. 渲染章节
+          renderChapterTabs();
+          renderCurrentChapterEditor();
+
+          // 5. 渲染定稿全文
+          renderFinalScriptView();
+
+          // 恢复用户所处的最优阶段
+          setWriterStep(data.activeStep || 1);
+        }
+      } catch (err) {
+        console.error('加载文案数据失败:', err);
+      }
+    }
+
+    function setWriterStep(step) {
+      currentWriterStep = step;
+      const stepNames = {
+        1: 'Step 1 · 立项与资料输入',
+        2: 'Step 2 · 证据卡提取与核验',
+        3: 'Step 3 · 5~7 章大纲策划',
+        4: 'Step 4 · 逐章撰写与四段式润色',
+        5: 'Step 5 · 全文统稿去伪结尾与定稿',
+      };
+      const badge = document.getElementById('writerCurrentStepBadge');
+      if (badge) badge.textContent = stepNames[step] || \`Step \${step}\`;
+
+      for (let i = 1; i <= 5; i++) {
+        const panel = document.getElementById(\`wPanelStep\${i}\`);
+        const btn = document.getElementById(\`stepBtn\${i}\`);
+        if (panel) panel.classList.toggle('hidden', i !== step);
+        if (btn) {
+          if (i === step) {
+            btn.className = 'p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow cursor-pointer';
+          } else {
+            btn.className = 'p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer';
+          }
+        }
+      }
+    }
+
+    // 渲染证据卡列表
+    function renderEvidenceCardsList() {
+      const container = document.getElementById('wEvidenceCardsList');
+      if (!container) return;
+      const cards = writerData?.evidenceCards || [];
+      if (cards.length === 0) {
+        container.innerHTML = '<div class="text-center py-10 text-gray-500 text-xs">暂无证据卡，请在左侧填入资料后点击上方「🤖 从资料中提取证据卡」</div>';
+        return;
+      }
+
+      const claimTypeBadge = {
+        verified_fact: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">已证实客观事实</span>',
+        disputed_claim: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">学界/行业存在争议</span>',
+        legend_or_anecdote: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">民间传说/轶事</span>',
+        author_interpretation: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">作者个人推论</span>',
+      };
+
+      container.innerHTML = cards
+        .map(
+          (c, idx) => \`
+        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800/80 hover:border-purple-500/40 transition space-y-1.5 text-xs">
+          <div class="flex items-center justify-between">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-mono font-bold text-amber-400">\${c.evidence_id || 'EV-' + String(idx + 1).padStart(3, '0')}</span>
+              \${claimTypeBadge[c.claim_type] || claimTypeBadge.verified_fact}
+              <span class="text-[10px] text-gray-400 font-mono">可靠度: \${c.reliability || 'high'}</span>
+            </div>
+            <button type="button" onclick="deleteEvidenceCard(\${idx})" class="text-gray-500 hover:text-rose-400 text-xs">✕ 删除</button>
+          </div>
+          <div class="text-gray-200 leading-relaxed font-sans">\${c.evidence_summary || c.claim || '无主张陈述'}</div>
+          <div class="text-[11px] text-gray-500 flex items-center justify-between">
+            <span class="truncate max-w-md">来源: \${c.source_title || c.source_url || '用户提供资料'}</span>
+          </div>
+        </div>
+      \`
+        )
+        .join('');
+    }
+
+    function addCustomEvidenceCard() {
+      const summary = prompt('请输入一条具体原子化事实主张（单一事实原则）：');
+      if (!summary || !summary.trim()) return;
+      if (!writerData) writerData = {};
+      if (!Array.isArray(writerData.evidenceCards)) writerData.evidenceCards = [];
+      const newId = \`EV-\${String(writerData.evidenceCards.length + 1).padStart(3, '0')}\`;
+      writerData.evidenceCards.push({
+        evidence_id: newId,
+        claim_type: 'verified_fact',
+        evidence_summary: summary.trim(),
+        source_title: '人工补充证据',
+        reliability: 'high',
+      });
+      renderEvidenceCardsList();
+      saveWriterProjectDataAsync('evidenceCards', writerData.evidenceCards);
+    }
+
+    function deleteEvidenceCard(idx) {
+      if (!writerData?.evidenceCards) return;
+      writerData.evidenceCards.splice(idx, 1);
+      renderEvidenceCardsList();
+      saveWriterProjectDataAsync('evidenceCards', writerData.evidenceCards);
+    }
+
+    // 渲染大纲
+    function renderOutlineView() {
+      const outline = writerData?.outline;
+      if (!outline) return;
+
+      if (outline.opening_hook) {
+        document.getElementById('wOutlineOpeningQuestion').value = outline.opening_hook.opening_question || '';
+        document.getElementById('wOutlineOpeningAnswer').value = outline.opening_hook.immediate_short_answer || '';
+      }
+      if (outline.single_ending_plan) {
+        document.getElementById('wOutlineEndingTakeaway').value = outline.single_ending_plan.final_takeaway || '';
+      }
+
+      const listEl = document.getElementById('wOutlineChaptersList');
+      const countEl = document.getElementById('wOutlineChapterCountBadge');
+      const chapters = outline.chapters || [];
+      countEl.textContent = \`\${chapters.length} 章\`;
+
+      if (chapters.length === 0) {
+        listEl.innerHTML = '<div class="text-center py-8 text-gray-500 text-xs">暂无大纲章节，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>';
+        return;
+      }
+
+      listEl.innerHTML = chapters
+        .map(
+          (ch, i) => \`
+        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="font-extrabold text-white text-xs">第 \${ch.chapter_number || i + 1} 章：\${ch.chapter_title}</span>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              \${(ch.supporting_evidence_ids || [])
+                .map((ev) => \`<span class="px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono text-[10px] font-bold">\${ev}</span>\`)
+                .join('')}
+            </div>
+          </div>
+          <div class="text-xs text-amber-300/90 font-medium">🎯 子问题：\${ch.sub_question}</div>
+          <div class="text-[11px] text-gray-400 leading-relaxed">💡 机制概述：\${ch.mechanism_or_background_summary || '无'}</div>
+          \${ch.transition_to_next ? \`<div class="text-[10px] text-gray-500 font-mono">↪ 过渡：\${ch.transition_to_next}</div>\` : ''}
+        </div>
+      \`
+        )
+        .join('');
+    }
+
+    // 渲染单章 Tabs 与编辑器
+    function renderChapterTabs() {
+      const bar = document.getElementById('wChapterTabsBar');
+      if (!bar) return;
+      const outline = writerData?.outline;
+      const chapters = outline?.chapters || [];
+      if (chapters.length === 0) {
+        bar.innerHTML = '<span class="text-xs text-gray-500 py-1">请先完成大纲审核，章节选项卡将在此呈现</span>';
+        return;
+      }
+
+      bar.innerHTML = chapters
+        .map(
+          (ch, idx) => \`
+        <button type="button" onclick="selectEditingChapter(\${idx})" class="px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer \${
+          idx === currentChapterIndex
+            ? 'bg-purple-600 text-white shadow'
+            : 'card text-gray-400 hover:text-white hover:border-purple-500/40'
+        }">
+          第 \${ch.chapter_number || idx + 1} 章
+        </button>
+      \`
+        )
+        .join('');
+    }
+
+    function selectEditingChapter(idx) {
+      currentChapterIndex = idx;
+      renderChapterTabs();
+      renderCurrentChapterEditor();
+    }
+
+    function renderCurrentChapterEditor() {
+      const outline = writerData?.outline;
+      const targetCh = outline?.chapters?.[currentChapterIndex];
+      const chList = writerData?.chapters || [];
+      const writtenData = chList.find((c) => Number(c.chapter_number) === Number(targetCh?.chapter_number || currentChapterIndex + 1));
+
+      if (targetCh) {
+        document.getElementById('wCurChapterHeader').textContent = \`第 \${targetCh.chapter_number || currentChapterIndex + 1} 章：\${targetCh.chapter_title}\`;
+        document.getElementById('wCurChapterSubQuestion').textContent = \`子问题：\${targetCh.sub_question || '未设定'}\`;
+      } else {
+        document.getElementById('wCurChapterHeader').textContent = \`第 \${currentChapterIndex + 1} 章：草稿编辑\`;
+        document.getElementById('wCurChapterSubQuestion').textContent = '子问题：待大纲生成';
+      }
+
+      if (writtenData) {
+        document.getElementById('wSec1Question').value = writtenData.sections?.['1_question_or_contradiction'] || '';
+        document.getElementById('wSec2Mechanism').value = writtenData.sections?.['2_mechanism_or_background'] || '';
+        document.getElementById('wSec3Examples').value = writtenData.sections?.['3_sourced_concrete_examples'] || '';
+        document.getElementById('wSec4Transition').value = writtenData.sections?.['4_mini_summary_and_transition'] || '';
+        document.getElementById('wCurChapterWordCount').textContent = writtenData.word_count || writtenData.full_chapter_narration?.length || 0;
+        document.getElementById('wCurChapterRevisionBadge').textContent = \`修订数: \${writtenData.revision_count || 0}\`;
+      } else {
+        document.getElementById('wSec1Question').value = '';
+        document.getElementById('wSec2Mechanism').value = '';
+        document.getElementById('wSec3Examples').value = '';
+        document.getElementById('wSec4Transition').value = '';
+        document.getElementById('wCurChapterWordCount').textContent = '0';
+        document.getElementById('wCurChapterRevisionBadge').textContent = '未撰写';
+      }
+    }
+
+    // 渲染定稿与统稿报告
+    function renderFinalScriptView() {
+      const script = writerData?.finalScript;
+      if (!script) return;
+      document.getElementById('wFinalScriptWords').textContent = script.total_word_count || 0;
+      document.getElementById('wFinalScriptMin').textContent = script.estimated_duration_minutes || 0;
+
+      const fullText = [];
+      if (script.script_segments?.opening) {
+        fullText.push('【开篇导引】\\n' + script.script_segments.opening);
+      }
+      if (Array.isArray(script.script_segments?.chapters)) {
+        script.script_segments.chapters.forEach((c) => {
+          fullText.push(\`【第 \${c.chapter_number} 章：\${c.chapter_title}】\\n\` + c.narration_text);
+        });
+      }
+      if (script.script_segments?.ending) {
+        fullText.push('【全片终局收尾】\\n' + script.script_segments.ending);
+      }
+
+      document.getElementById('wFinalScriptFullText').value = fullText.join('\\n\\n========================================\\n\\n');
+
+      const log = script.editorial_changes_log;
+      if (log) {
+        document.getElementById('wRemovedFalseEndingsBadge').textContent = \`已清理伪结尾: \${log.removed_false_endings_count || 0} 处\`;
+        const logHtml = [];
+        if (log.removed_duplicate_arguments?.length) {
+          logHtml.push(\`<div>🗑️ 删除重复论点：\${log.removed_duplicate_arguments.join('；')}</div>\`);
+        }
+        if (log.unified_terms_and_names?.length) {
+          logHtml.push(\`<div>📝 统一专有名词与读法：\${log.unified_terms_and_names.join('；')}</div>\`);
+        }
+        document.getElementById('wEditorialLogDetails').innerHTML = logHtml.length ? logHtml.join('') : '<div>- 全篇逻辑顺畅，未发现明显冗余与伪结尾。</div>';
+      }
+    }
+
+    // ==========================================
+    // AI 自动化生成执行与异步请求
+    // ==========================================
+
+    async function aiGenerateBrief() {
+      const title = document.getElementById('wInputTitle').value.trim();
+      const materials = document.getElementById('wInputMaterials').value.trim();
+      const duration = parseInt(document.getElementById('wInputDuration').value, 10) || 25;
+      const model = document.getElementById('wInputModel').value;
+      const btn = document.getElementById('btnAiBrief');
+
+      if (!title) {
+        alert('请在左侧填入视频标题！');
+        return;
+      }
+      if (!materials || materials.length < 15) {
+        alert('【缺资料前置拦截】：请在左侧至少粘贴一段实质性考证资料或点击“载入示例考证资料”，严禁凭空硬编！');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ AI 正在深度分析资料...</span>';
+      try {
+        const res = await fetch('/api/writer/ai/generate-brief?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            materials,
+            durationMinutes: duration,
+            model,
+            apiKey: visualConfig.apiKey,
+            baseUrl: visualConfig.baseUrl,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && data.brief) {
+          if (!writerData) writerData = {};
+          writerData.brief = data.brief;
+          document.getElementById('wBriefCoreQuestion').value = data.brief.core_question || '';
+          document.getElementById('wBriefShortAnswer').value = data.brief.short_answer || '';
+          document.getElementById('wBriefScope').value = data.brief.scope?.time_range || '';
+          document.getElementById('wBriefTaboos').value = (data.brief.taboos_and_exclusions || []).join('、');
+          showToast('✅ Brief 立项已由 AI 生成！');
+        } else {
+          alert('生成 Brief 失败: ' + (data.error || '大模型返回格式异常'));
+        }
+      } catch (err) {
+        alert('请求失败: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🤖 AI 分析资料并生成 Brief</span>';
+      }
+    }
+
+    async function aiExtractEvidence() {
+      const title = document.getElementById('wInputTitle').value.trim();
+      const materials = document.getElementById('wInputMaterials').value.trim();
+      const model = document.getElementById('wInputModel').value;
+      const btn = document.getElementById('btnAiEvidence');
+
+      if (!materials || materials.length < 15) {
+        alert('【缺资料拦截】：请先在左侧输入需要考证抽取的原始资料文本！');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ 正在提取原子化证据卡...</span>';
+      try {
+        const res = await fetch('/api/writer/ai/extract-evidence?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            materials,
+            model,
+            apiKey: visualConfig.apiKey,
+            baseUrl: visualConfig.baseUrl,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && Array.isArray(data.evidenceCards)) {
+          if (!writerData) writerData = {};
+          writerData.evidenceCards = data.evidenceCards;
+          renderEvidenceCardsList();
+          showToast(\`✅ 已成功提取 \${data.evidenceCards.length} 张独立证据卡！\`);
+        } else {
+          alert('提取证据卡失败: ' + (data.error || '格式异常'));
+        }
+      } catch (err) {
+        alert('请求失败: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🤖 从资料中提取证据卡</span>';
+      }
+    }
+
+    function approveEvidenceCardsGate() {
+      const count = writerData?.evidenceCards?.length || 0;
+      if (count === 0) {
+        alert('当前尚未提取或录入任何证据卡，无法开启大纲策划！');
+        return;
+      }
+      showToast('🚦 证据卡已通过人工审核！进入阶段 3：大纲策划');
+      setWriterStep(3);
+    }
+
+    async function aiBuildOutline() {
+      const model = document.getElementById('wInputModel').value;
+      const btn = document.getElementById('btnAiOutline');
+      if (!writerData?.evidenceCards || writerData.evidenceCards.length === 0) {
+        alert('请先完成阶段 2 证据卡提取！');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ 正在规划 5~7 章结构化大纲...</span>';
+      try {
+        const res = await fetch('/api/writer/ai/build-outline?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            brief: writerData.brief || { title: document.getElementById('wInputTitle').value },
+            evidenceCards: writerData.evidenceCards,
+            model,
+            apiKey: visualConfig.apiKey,
+            baseUrl: visualConfig.baseUrl,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && data.outline) {
+          writerData.outline = data.outline;
+          renderOutlineView();
+          renderChapterTabs();
+          showToast('✅ 结构化大纲生成完成，请人工审核！');
+        } else {
+          alert('生成大纲失败: ' + (data.error || '大模型异常'));
+        }
+      } catch (err) {
+        alert('请求失败: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🤖 基于证据卡生成大纲</span>';
+      }
+    }
+
+    function approveOutlineGate() {
+      if (!writerData?.outline || !writerData.outline.chapters?.length) {
+        alert('请先生成大纲后再进行人工审核！');
+        return;
+      }
+      writerData.outline.approval_status = 'approved';
+      saveWriterProjectDataAsync('outline', writerData.outline);
+      showToast('🚦 大纲审核通过 (APPROVED)！解锁阶段 4 单章撰写');
+      renderChapterTabs();
+      renderCurrentChapterEditor();
+      setWriterStep(4);
+    }
+
+    async function aiWriteCurrentChapter() {
+      const outline = writerData?.outline;
+      const targetCh = outline?.chapters?.[currentChapterIndex];
+      const model = document.getElementById('wInputModel').value;
+      const btn = document.getElementById('btnAiWriteChapter');
+
+      if (!targetCh) {
+        alert('未找到当前章节的大纲规划！');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ 正在撰写本章 (四段式结构)...</span>';
+      try {
+        const res = await fetch('/api/writer/ai/write-chapter?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            chapterNumber: targetCh.chapter_number || currentChapterIndex + 1,
+            outline,
+            evidenceCards: writerData.evidenceCards || [],
+            model,
+            apiKey: visualConfig.apiKey,
+            baseUrl: visualConfig.baseUrl,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && data.chapter) {
+          if (!Array.isArray(writerData.chapters)) writerData.chapters = [];
+          const existIdx = writerData.chapters.findIndex((c) => Number(c.chapter_number) === Number(data.chapter.chapter_number));
+          if (existIdx >= 0) {
+            writerData.chapters[existIdx] = data.chapter;
+          } else {
+            writerData.chapters.push(data.chapter);
+          }
+          renderCurrentChapterEditor();
+          showToast(\`✅ 第 \${data.chapter.chapter_number} 章文案撰写完成（\${data.chapter.word_count} 字）！\`);
+        } else {
+          alert('撰写章节失败: ' + (data.error || '大模型异常'));
+        }
+      } catch (err) {
+        alert('请求失败: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🤖 AI 撰写当前章节</span>';
+      }
+    }
+
+    function saveCurrentChapterDraft() {
+      const targetNum = writerData?.outline?.chapters?.[currentChapterIndex]?.chapter_number || currentChapterIndex + 1;
+      const sec1 = document.getElementById('wSec1Question').value.trim();
+      const sec2 = document.getElementById('wSec2Mechanism').value.trim();
+      const sec3 = document.getElementById('wSec3Examples').value.trim();
+      const sec4 = document.getElementById('wSec4Transition').value.trim();
+      const fullText = [sec1, sec2, sec3, sec4].filter(Boolean).join('\\n\\n');
+
+      const chObj = {
+        chapter_number: Number(targetNum),
+        chapter_title: writerData?.outline?.chapters?.[currentChapterIndex]?.chapter_title || \`第\${targetNum}章\`,
+        sub_question: writerData?.outline?.chapters?.[currentChapterIndex]?.sub_question || '',
+        sections: {
+          '1_question_or_contradiction': sec1,
+          '2_mechanism_or_background': sec2,
+          '3_sourced_concrete_examples': sec3,
+          '4_mini_summary_and_transition': sec4,
+        },
+        full_chapter_narration: fullText,
+        word_count: fullText.length,
+      };
+
+      if (!Array.isArray(writerData.chapters)) writerData.chapters = [];
+      const existIdx = writerData.chapters.findIndex((c) => Number(c.chapter_number) === Number(targetNum));
+      if (existIdx >= 0) {
+        writerData.chapters[existIdx] = chObj;
+      } else {
+        writerData.chapters.push(chObj);
+      }
+
+      saveWriterProjectDataAsync('chapter', chObj);
+      showToast(\`💾 第 \${targetNum} 章草稿已保存！\`);
+    }
+
+    async function aiFinalizeFullScript() {
+      const outline = writerData?.outline;
+      const chapters = writerData?.chapters || [];
+      const model = document.getElementById('wInputModel').value;
+      const btn = document.getElementById('btnAiFinalize');
+
+      if (chapters.length === 0) {
+        alert('尚未撰写任何章节，无法统稿！');
+        return;
+      }
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ 正在全文去重去伪结尾与统稿...</span>';
+      try {
+        const res = await fetch('/api/writer/ai/finalize-script?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            outline,
+            chapters,
+            model,
+            apiKey: visualConfig.apiKey,
+            baseUrl: visualConfig.baseUrl,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && data.finalScript) {
+          writerData.finalScript = data.finalScript;
+          renderFinalScriptView();
+          showToast('🎉 全文统稿去伪结尾完成，文案已定稿！');
+        } else {
+          alert('全文统稿失败: ' + (data.error || '异常'));
+        }
+      } catch (err) {
+        alert('请求失败: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🤖 AI 全文统稿去重去伪结尾</span>';
+      }
+    }
+
+    async function saveWriterProjectDataAsync(part, data) {
+      try {
+        await fetch('/api/writer/save?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ part, data }),
+        });
+      } catch (e) {
+        console.warn('异步保存失败:', e);
+      }
+    }
+
+    function saveWriterPartManual(part) {
+      if (part === 'brief') {
+        const briefObj = {
+          project_id: activeProjectId,
+          title: document.getElementById('wInputTitle').value.trim(),
+          core_question: document.getElementById('wBriefCoreQuestion').value.trim(),
+          short_answer: document.getElementById('wBriefShortAnswer').value.trim(),
+          target_duration_minutes: parseInt(document.getElementById('wInputDuration').value, 10) || 25,
+          planned_chapter_count: parseInt(document.getElementById('wInputChapterCount').value, 10) || 6,
+          scope: { time_range: document.getElementById('wBriefScope').value.trim() },
+          taboos_and_exclusions: document.getElementById('wBriefTaboos').value.split(/[、,，\\n]+/).filter(Boolean),
+        };
+        if (!writerData) writerData = {};
+        writerData.brief = briefObj;
+        saveWriterProjectDataAsync('brief', briefObj);
+        showToast('💾 Brief 立项已手动保存！');
+      }
+    }
+
+    function saveCurrentWriterPart() {
+      if (currentWriterStep === 1) saveWriterPartManual('brief');
+      else if (currentWriterStep === 2) saveWriterProjectDataAsync('evidenceCards', writerData?.evidenceCards);
+      else if (currentWriterStep === 3) saveWriterProjectDataAsync('outline', writerData?.outline);
+      else if (currentWriterStep === 4) saveCurrentChapterDraft();
+      else if (currentWriterStep === 5) {
+        const fullContent = document.getElementById('wFinalScriptFullText').value;
+        saveWriterProjectDataAsync('finalScript', {
+          title: document.getElementById('wInputTitle').value,
+          content: fullContent,
+        });
+        showToast('💾 完整终稿已保存！');
+      }
+    }
+
+    async function syncWriterToProducerUI() {
+      const fullText = document.getElementById('wFinalScriptFullText').value.trim();
+      const scriptObj = writerData?.finalScript || fullText;
+
+      if (!fullText && !writerData?.finalScript) {
+        alert('当前没有可同步的终稿文案，请先在阶段 5 统稿或粘贴文案！');
+        return;
+      }
+
+      showToast('🚀 正在将定稿文案智能切分镜头 (4~8s) 并流转至制作台...');
+      try {
+        const res = await fetch('/api/writer/sync-to-producer?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            finalScript: writerData?.finalScript,
+            content: fullText,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showToast(\`🎉 成功同步！已自动切分为 \${data.totalScenes} 个镜头，正在进入制作台...\`);
+          switchWorkspaceTab('producer');
+          await loadProjects();
+          await loadWorkflow();
+        } else {
+          alert('流转制作台失败: ' + (data.error || '未知错误'));
+        }
+      } catch (err) {
+        alert('流转异常: ' + err.message);
+      }
+    }
+
+    function loadSampleMaterialToWriter() {
+      document.getElementById('wInputTitle').value = '富士山，日本象征，富士山为什么如此出名';
+      document.getElementById('wInputMaterials').value = \`【参考资料 1】：日本气象厅火山调查档案
+富士山标高 3776 米，为日本最高成层火山。地质演变经历小御岳、古富士（约10万年前）与新富士（约1万年前）三阶段。公元864年贞观大喷发喷出大量熔岩填平部分湖泊，形成青木原树海与富士五湖雏形。
+
+【参考资料 2】：神道与民间信仰史
+古代因狂暴喷发被视为神灵化身，建立浅间神社以镇平火山神怒。江户时期诞生“富士讲”，庶民阶层通过互助金制度组织群体登顶朝圣，并修建人造富士冢。
+
+【参考资料 3】：艺术与全球传播
+江户晚期葛饰北斋创作浮世绘《富岳三十六景》，大量使用普鲁士蓝（ベロ藍），随后通过万国博览会传入欧洲，对印象派画家及德彪西音乐创作产生深刻影响。
+
+【参考资料 4】：现代治理
+2013年登录世界文化遗产（信仰的对象与艺术的源泉）。近年面临游客拥堵、弹丸登山安全隐患，2024年吉田路线推行限流与通行费配额管理。\`;
+      document.getElementById('wMaterialWordCount').textContent = \`已输入 \${document.getElementById('wInputMaterials').value.length} 字资料\`;
+      showToast('💡 已成功填入富士山真实考证资料范例！');
+    }
+
+    function switchStep1SubTab(tab) {
+      const isCreate = tab === 'create';
+      const btnCreate = document.getElementById('wStep1SubTabCreateBtn');
+      const btnImport = document.getElementById('wStep1SubTabImportBtn');
+      const viewCreate = document.getElementById('wStep1SubViewCreate');
+      const viewImport = document.getElementById('wStep1SubViewImport');
+
+      if (btnCreate && btnImport && viewCreate && viewImport) {
+        btnCreate.className = isCreate
+          ? 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-purple-600 text-white shadow cursor-pointer'
+          : 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer';
+
+        btnImport.className = !isCreate
+          ? 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-violet-600 text-white shadow cursor-pointer'
+          : 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer';
+
+        viewCreate.classList.toggle('hidden', !isCreate);
+        viewImport.classList.toggle('hidden', isCreate);
+      }
+
+      if (!isCreate) {
+        loadStep1ScannedScripts();
+      }
+    }
+
+    function openWriterImportDirectly() {
+      setWriterStep(1);
+      switchStep1SubTab('import');
+      const el = document.getElementById('wPanelStep1');
+      if (el) el.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    let step1SelectedScriptText = '';
+    let step1ScannedScripts = [];
+
+    async function loadStep1ScannedScripts() {
+      const container = document.getElementById('wStep1ScannedList');
+      if (!container) return;
+      container.innerHTML =
+        '<div class="text-center py-6 text-gray-400 text-xs flex items-center justify-center gap-2"><span class="animate-spin">🔄</span> 正在检索 exports/ 目录下的可用文案...</div>';
+      try {
+        const res = await fetch('/api/scan-local-scripts');
+        const data = await res.json();
+        step1ScannedScripts = data.scripts || [];
+        if (step1ScannedScripts.length === 0) {
+          container.innerHTML =
+            '<div class="text-center py-6 text-gray-500 text-xs">exports/ 目录下未发现 .txt / .md / .json 文案文件。</div>';
+          return;
+        }
+
+        container.innerHTML = step1ScannedScripts
+          .map(
+            (s) => \`
+          <div class="p-3 rounded-xl bg-gray-900 border border-gray-800 hover:border-violet-500/50 transition flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div class="space-y-1 flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="text-xs font-bold text-white truncate max-w-md">\${s.title}</span>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded \${s.isFullScript ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30 font-bold' : 'bg-gray-800 text-gray-400'}">
+                  \${s.isFullScript ? '✨ 完整长片文案' : '📄 章节草稿'}
+                </span>
+                <span class="text-[10px] text-gray-400">\${s.wordCount} 字 · \${s.sizeKb} KB · \${s.ext}</span>
+              </div>
+              <div class="text-[11px] text-gray-400 line-clamp-1 font-mono">\${s.preview || s.filename}</div>
+            </div>
+            <button type="button" onclick="selectStep1Script('\${s.filename}')" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-500 text-white shrink-0 transition flex items-center gap-1 shadow cursor-pointer">
+              <span>📥 选择并切镜</span>
+            </button>
+          </div>
+        \`
+          )
+          .join('');
+      } catch (err) {
+        container.innerHTML = '<div class="text-center py-4 text-rose-400 text-xs">扫描失败: ' + err.message + '</div>';
+      }
+    }
+
+    async function selectStep1Script(filename) {
+      const script = step1ScannedScripts.find((s) => s.filename === filename);
+      if (!script) return;
+      showToast('正在读取《' + script.title + '》...');
+      try {
+        const res = await fetch('/api/get-export-script?filename=' + encodeURIComponent(filename));
+        const data = await res.json();
+        if (data.ok) {
+          step1SelectedScriptText = data.content;
+          document.getElementById('wStep1ImportProjId').value = data.suggestedProjectId || script.suggestedProjectId;
+          document.getElementById('wStep1ImportProjTitle').value = data.title || script.title;
+          document.getElementById('wStep1SelectedSummary').textContent = \`已选: \${data.title || script.title} (\${data.content.length} 字)\`;
+          document.getElementById('wStep1ImportConfigBox').classList.remove('hidden');
+          previewStep1ImportSegmentation();
+        } else {
+          alert('读取失败: ' + data.error);
+        }
+      } catch (e) {
+        alert('读取异常: ' + e.message);
+      }
+    }
+
+    async function previewStep1ImportSegmentation() {
+      if (!step1SelectedScriptText) return;
+      const targetSeconds = parseFloat(document.getElementById('wStep1ImportDuration').value) || 5.5;
+      const previewEl = document.getElementById('wStep1ImportPreviewCount');
+      previewEl.textContent = '⏳ 计算切镜分段中...';
+      try {
+        const res = await fetch('/api/preview-script-segmentation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content: step1SelectedScriptText, targetSecondsPerScene: targetSeconds }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          previewEl.textContent = \`⚡ 预估将切分为 \${data.totalScenes} 个镜头 (总长约 \${data.totalDurationMinutes} 分钟，平均 \${data.avgSecondsPerScene} 秒/镜)\`;
+        }
+      } catch (e) {
+        previewEl.textContent = '';
+      }
+    }
+
+    async function confirmStep1ImportToProducer() {
+      if (!step1SelectedScriptText) {
+        alert('请先选择要导入的文案！');
+        return;
+      }
+      const projectId = document.getElementById('wStep1ImportProjId').value.trim();
+      const title = document.getElementById('wStep1ImportProjTitle').value.trim();
+      const targetSeconds = parseFloat(document.getElementById('wStep1ImportDuration').value) || 5.5;
+      const btn = document.getElementById('btnStep1ImportExec');
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ 正在切镜并生成镜头清单...</span>';
+
+      try {
+        const res = await fetch('/api/import-script-project', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId,
+            title,
+            content: step1SelectedScriptText,
+            targetSecondsPerScene: targetSeconds,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          showToast(\`🎉 成功导入！已生成 \${data.totalScenes} 个镜头，正在进入制作台...\`);
+          activeProjectId = data.projectId;
+          localStorage.setItem('whyvideo_active_project', activeProjectId);
+          await loadProjects();
+          switchWorkspaceTab('producer');
+          await loadWorkflow();
+        } else {
+          alert('导入失败: ' + (data.error || '未知错误'));
+          btn.disabled = false;
+          btn.innerHTML = '<span>🚀 确认切镜并直接进入制作台</span>';
+        }
+      } catch (e) {
+        alert('导入异常: ' + e.message);
+        btn.disabled = false;
+        btn.innerHTML = '<span>🚀 确认切镜并直接进入制作台</span>';
+      }
+    }
+
     let scannedExportScripts = [];
     let importDebounceTimer = null;
 
@@ -4095,6 +5880,9 @@ function renderMainHtml() {
       window.history.pushState({}, '', url);
       loadProjects();
       loadWorkflow();
+      if (currentWorkspaceTab === 'writer') {
+        loadWriterProjectData(newId);
+      }
       showToast('🔀 已切换至工程：' + newId);
     }
 
@@ -5287,17 +7075,17 @@ function renderMainHtml() {
       } else if (type === 'gemini') {
         if (bEl) bEl.value = 'https://generativelanguage.googleapis.com/v1beta/openai';
         if (vEl) vEl.value = 'veo-2.0-generate-001';
-        if (tEl) tEl.value = 'gemini-1.5-flash';
+        if (tEl) tEl.value = 'gemini-flash-lite-latest';
         if (iEl) iEl.value = 'imagen-3.0-generate-002';
-        if (bgmEl) bgmEl.value = 'gemini-1.5-flash';
+        if (bgmEl) bgmEl.value = 'gemini-flash-lite-latest';
         showToast('🪐 已载入【Google AI Studio 官方 Gemini 全家桶】预设！');
       } else if (type === 'gemini-pro') {
         if (bEl) bEl.value = 'https://generativelanguage.googleapis.com/v1beta/openai';
         if (vEl) vEl.value = 'veo-2.0-generate-001';
-        if (tEl) tEl.value = 'gemini-1.5-pro';
+        if (tEl) tEl.value = 'gemini-flash-lite-latest';
         if (iEl) iEl.value = 'imagen-3.0-generate-002';
-        if (bgmEl) bgmEl.value = 'gemini-1.5-flash';
-        showToast('💎 已载入【Google Gemini 1.5 Pro 深度版】预设！');
+        if (bgmEl) bgmEl.value = 'gemini-flash-lite-latest';
+        showToast('💎 已载入【Google Gemini 官方深度通道】预设！');
       } else if (type === 'openrouter-fast') {
         if (bEl) bEl.value = 'https://openrouter.ai/api/v1';
         if (vEl) vEl.value = 'minimax/hailuo-3-max';
@@ -5504,6 +7292,9 @@ function renderMainHtml() {
 
     loadProjects().then(() => {
       loadWorkflow();
+      if (currentWorkspaceTab === 'writer') {
+        switchWorkspaceTab('writer');
+      }
     });
   </script>
 

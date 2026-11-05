@@ -404,8 +404,8 @@ ${JSON.stringify(context.scenesSummary.slice(0, 30), null, 2)}
     let cleanModel = model;
     if (baseUrl.includes('googleapis.com')) {
       cleanModel = cleanModel.replace(/^google\//, '');
-      if (cleanModel.includes('2.5')) {
-        cleanModel = cleanModel.replace('2.5', '1.5');
+      if (cleanModel.includes('2.5') || cleanModel.includes('1.5') || cleanModel === 'gemini-2.5-flash' || cleanModel === 'gemini-2.5-pro') {
+        cleanModel = 'gemini-flash-lite-latest';
       }
     }
 
@@ -433,8 +433,9 @@ ${JSON.stringify(context.scenesSummary.slice(0, 30), null, 2)}
       body: JSON.stringify(body)
     });
 
-    if (!resp.ok && resp.status === 404 && baseUrl.includes('googleapis.com')) {
-      body.model = 'gemini-1.5-flash';
+    if (!resp.ok && (resp.status === 404 || resp.status === 503) && baseUrl.includes('googleapis.com') && body.model !== 'gemini-flash-lite-latest') {
+      console.log(`[Gemini Adapter] 模型 ${body.model} 状态码 HTTP ${resp.status}，平滑切换至官方极速通道 gemini-flash-lite-latest...`);
+      body.model = 'gemini-flash-lite-latest';
       resp = await fetch(endpoint, {
         method: 'POST',
         headers,
