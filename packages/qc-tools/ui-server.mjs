@@ -1776,6 +1776,30 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
+    // 删除工程（基准工程保护）
+    if (req.method === 'POST' && pathname === '/api/delete-project') {
+      const body = await readBody(req);
+      const targetProject = String(body.projectId || '').trim();
+      if (!/^[\w-]+$/.test(targetProject)) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '工程 ID 无效' }));
+      }
+      if (targetProject === defaultProjectId) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '基准工程不可删除' }));
+      }
+      const targetDir = path.join(rootDir, 'projects', targetProject);
+      if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+      const projects = listProjects();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({
+        ok: true,
+        deletedProjectId: targetProject,
+        nextActiveProjectId: projects[0]?.id || defaultProjectId,
+        projects,
+      }));
+    }
+
     // 0.1 扫描本地 exports/ 文案库
     if (req.method === 'GET' && pathname === '/api/scan-local-scripts') {
       const scripts = scanLocalExportScripts();
@@ -3257,7 +3281,7 @@ const server = http.createServer(async (req, res) => {
 
     // 主页面渲染
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-    res.end(renderMainHtml());
+    res.end(renderMainHtml(queryProject));
   } catch (err) {
     console.error(err);
     res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -3282,7 +3306,14 @@ function startServer(portToTry) {
 }
 startServer(Number(PORT));
 
-function renderMainHtml() {
+function renderMainHtml(curProjectId = defaultProjectId) {
+  const serverProjects = listProjects();
+  const serverOptions = serverProjects.map((project) => {
+    const selected = project.id === curProjectId ? ' selected' : '';
+    const safeId = String(project.id).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const safeTitle = String(project.title || project.id).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    return `<option value="${safeId}"${selected}>${safeTitle} (${safeId})</option>`;
+  }).join('\n');
   return `<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -3306,27 +3337,20 @@ function renderMainHtml() {
   <div class="max-w-[1720px] mx-auto space-y-5">
 
     <!-- 顶部导航栏与工程选择 -->
-    <header class="flex flex-col lg:flex-row lg:items-center justify-between pb-4 border-b border-gray-800 gap-4">
-      <div>
+    <header class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-start gap-x-6 gap-y-3 pb-4 border-b border-gray-800">
+      <div class="min-w-0">
         <div class="flex flex-wrap items-center gap-3">
           <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
             WhyVideo Studio · AI 视频模型调度版
           </span>
           
-          <div class="flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-xl border border-amber-500/40 shadow-inner">
-            <span class="text-xs font-bold text-amber-300">📁 制作工程：</span>
-            <select id="projectSelect" onchange="onProjectChange(this.value)" class="bg-gray-950 text-white font-extrabold text-xs px-2 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400 cursor-pointer">
+          <div class="flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-xl border border-amber-500/40 shadow-inner relative z-20">
+            <span class="text-xs font-bold text-amber-300 shrink-0">📁 制作工程：</span>
+            <select id="projectSelect" onchange="onProjectSelectChange(this.value)" style="color-scheme: dark;" class="relative z-30 bg-gray-950 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400 cursor-pointer min-w-[200px] max-w-[320px]">
+              ${serverOptions}
             </select>
-          </div>
-
-          <!-- SPA 顶栏一键切换导航胶囊 (无需跳页，状态最顺滑) -->
-          <div class="inline-flex p-1 bg-gray-950/90 rounded-xl border border-purple-500/40 shadow-inner">
-            <button id="navTabWriter" type="button" onclick="switchWorkspaceTab('writer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
-              ✍️ 文案创作台 (Writer)
-            </button>
-            <button id="navTabProducer" type="button" onclick="switchWorkspaceTab('producer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow cursor-pointer">
-              🎬 视觉分镜台 (Producer)
-            </button>
+            <button id="btnConfirmProject" onclick="confirmSwitchProject()" class="px-3 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-gray-950 font-black text-xs shadow transition cursor-pointer shrink-0">确定</button>
+            <button id="btnDeleteProject" onclick="deleteCurrentProject()" class="px-2.5 py-1 rounded-lg bg-rose-950/70 hover:bg-rose-600 border border-rose-500/50 text-rose-300 hover:text-white text-xs font-bold transition cursor-pointer shrink-0" title="删除当前工程">🗑️ 删除</button>
           </div>
 
           <span id="projectStageBadge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
@@ -3339,8 +3363,21 @@ function renderMainHtml() {
         </h1>
       </div>
 
+      <div class="min-w-0 flex flex-col items-end gap-2 w-full">
+        <!-- 固定的共享导航行：切换工作台时位置不变 -->
+        <div class="inline-flex p-1 bg-gray-950/90 rounded-xl border border-purple-500/40 shadow-inner self-end">
+          <button id="navTabWriter" type="button" onclick="switchWorkspaceTab('writer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
+            ✍️ 文案创作台 (Writer)
+          </button>
+          <button id="navTabProducer" type="button" onclick="switchWorkspaceTab('producer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow cursor-pointer">
+            🎬 视觉分镜台 (Producer)
+          </button>
+        </div>
+
+        <!-- 两种工作台共用固定高度的操作区，避免下方内容随按钮换行跳动 -->
+        <div class="min-h-[80px] w-full flex items-start justify-end">
       <!-- 视觉分镜制作台快捷操作组 -->
-      <div id="producerHeaderActions" class="flex flex-wrap items-center gap-3">
+      <div id="producerHeaderActions" class="w-full flex flex-wrap content-start justify-end items-center gap-3">
         <!-- 核心新增：AI 视频与画面模型配置中心 -->
         <button onclick="toggleVisualModelModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
           🎬 AI 画面/视频模型指定
@@ -3366,7 +3403,7 @@ function renderMainHtml() {
       </div>
 
       <!-- 文案创作台快捷操作组 (初始隐藏，切换到 Writer 时激活) -->
-      <div id="writerHeaderActions" class="hidden flex items-center gap-3">
+      <div id="writerHeaderActions" class="hidden w-full flex flex-wrap content-start justify-end items-center gap-3">
         <button type="button" onclick="openWriterImportDirectly()" class="px-3.5 py-2 text-xs font-bold rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
           📥 导入已有文案 (exports/)
         </button>
@@ -3376,6 +3413,8 @@ function renderMainHtml() {
         <button type="button" onclick="syncWriterToProducerUI()" class="px-4 py-2 text-xs font-extrabold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 transition shadow-xl flex items-center gap-1.5 cursor-pointer">
           🚀 文案定稿 · 一键流转至制作台
         </button>
+      </div>
+        </div>
       </div>
     </header>
 
@@ -5872,8 +5911,48 @@ function renderMainHtml() {
       }
     }
 
+    let pendingSelectedProjectId = activeProjectId;
+
+    function onProjectSelectChange(newId) {
+      pendingSelectedProjectId = newId;
+    }
+
+    function confirmSwitchProject() {
+      if (!pendingSelectedProjectId || pendingSelectedProjectId === activeProjectId) return;
+      onProjectChange(pendingSelectedProjectId);
+    }
+
+    async function deleteCurrentProject() {
+      if (!activeProjectId || activeProjectId === 'why_nikko_heritage_road_001') {
+        showToast('基准工程不可删除');
+        return;
+      }
+      if (!window.confirm('确定删除当前工程及其本地文件吗？此操作无法撤销。')) return;
+      try {
+        const res = await fetch('/api/delete-project', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: activeProjectId }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || '删除失败');
+        activeProjectId = data.nextActiveProjectId;
+        pendingSelectedProjectId = activeProjectId;
+        const url = new URL(window.location);
+        url.searchParams.set('project', activeProjectId);
+        window.history.pushState({}, '', url);
+        await loadProjects();
+        await loadWorkflow();
+        if (currentWorkspaceTab === 'writer') await loadWriterProjectData(activeProjectId);
+        showToast('已删除工程：' + data.deletedProjectId);
+      } catch (e) {
+        showToast('删除失败：' + e.message);
+      }
+    }
+
     function onProjectChange(newId) {
       activeProjectId = newId;
+      pendingSelectedProjectId = newId;
       localStorage.setItem('whyvideo_active_project', newId);
       const url = new URL(window.location);
       url.searchParams.set('project', newId);
