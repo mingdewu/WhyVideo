@@ -75,6 +75,43 @@ AIRTABLE_BASE_ID=your_base_id_here
 
 ---
 
+## 🎨 视觉工作台与自动化质检服务
+
+### 1. 启动全功能视觉排版与 QC 质检工作台 (Port 4000)
+集分镜排版调优、素材拖拽即时检验、自然语言 AI 智能剪辑于一体的交互式工作台：
+```bash
+node packages/qc-tools/ui-server.mjs
+# 访问: http://localhost:4000
+```
+
+### 2. 启动长视频台本策划与工作流工作室 (Port 3200)
+```bash
+node packages/workflow-studio/server.mjs
+# 访问: http://localhost:3200
+```
+
+---
+
+## 🌟 最新更新日志 (今日工作内容)
+
+### 🎬 自然语言 AI 剪辑导演与 Remotion 动效引擎全面打通
+针对长视频镜头中用户自主上传的实拍视频与图片素材，构建了**广义、无固定模板束缚**的自然语言智能剪辑工作流：
+
+1. **常驻永久输入框 (第 6 列素材检验区)**：
+   - 彻底打破条件限制，无论未拖入素材、拖入静态图片还是动态视频，AI 指令输入框均**永久常驻**，随时接收针对镜头的任意口语要求，支持回车一键编译。
+2. **“先说人话，再调视频”的双重执行机制**：
+   - **Step 1（AI 剪辑总监人话反馈）**：大模型以专业视听剪辑师口吻阐释视听意图与剪辑理由（如色调营造、节奏把控、大字出现时机），并在卡片正上方以专属气泡展示 (`ai_speech_reply`)。
+   - **Step 2（Remotion 代码参数编译）**：大模型将自然语言深度解析并直接编译为底层结构化 Remotion 渲染参数 (`media_modifiers`)，实时同步至 `scene-manifest.json` 与 `render-props.json`。
+3. **Remotion 视听修饰与动效系统扩充**：
+   - **全面滤镜系统**：在 `BrollScene` 与 `PhotoMotionScene` 中支持亮度、对比度、饱和度、色相旋转 (`hue-rotate`)、反色 (`invert`)、复古胶片 (`sepia`) 与黑白冷调 (`grayscale`)。
+   - **运镜动力学**：支持慢速推拉镜 (`zoom_in` / `zoom_out`)、平移插值 (`translateX` / `translateY`) 及画面震撼微抖动 (`shake`)。
+   - **变速播放**：视频素材直接支持基于 `playbackRate` 的任意慢动作与快进。
+   - **新增动态艺术字层 (`TextOverlayLayer.tsx`)**：支持弹跳入场 (`pop_bounce`)、震颤冲击 (`shock_shake`)、左侧滑入 (`slide_from_left`)，完美呈现关键转折、数字大字与警示标签。
+4. **视觉排版纯化与大模型智能调优**：
+   - 彻底移除了第 5 列固化、死板的规则标签与硬编码预设，换为纯净的 **大模型 API 视觉排版自适应调优**，无缝支持 Google Gemini API 与本地 Antigravity 运行网关。
+
+---
+
 ## 📦 项目实战案例：`why_ryokan_small_dishes_001`
 * **视频题目**：《为什么日本温泉旅馆的晚餐常常是一小碟一小碟？》
 * **制作时长**：64.0 秒预览版（8 个镜头单元，含黑幕动态文字与数据卡片降级处理）

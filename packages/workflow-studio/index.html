@@ -349,6 +349,12 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
+      transition: all 0.2s ease;
+    }
+    .upload-zone.drag-over {
+      border-color: #38bdf8 !important;
+      background: rgba(56, 189, 248, 0.12) !important;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);
     }
     .upload-zone.missing {
       border-color: var(--accent-red);
@@ -361,6 +367,68 @@
       border-radius: 6px;
       border: 1px solid var(--border);
       background: #000;
+    }
+
+    /* AI Intent Quick Box */
+    .ai-intent-box {
+      margin-top: 8px;
+      padding: 10px 12px;
+      background: rgba(30, 41, 59, 0.7);
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .ai-intent-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      font-weight: 700;
+      color: #38bdf8;
+    }
+    .ai-intent-input-row {
+      display: flex;
+      gap: 6px;
+    }
+    .ai-intent-input {
+      flex: 1;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: #f8fafc;
+      outline: none;
+    }
+    .ai-intent-input:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 8px rgba(56, 189, 248, 0.3);
+    }
+    .ai-tag-btn {
+      background: rgba(51, 65, 85, 0.8);
+      color: #94a3b8;
+      border: 1px solid #475569;
+      border-radius: 4px;
+      padding: 2px 7px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .ai-tag-btn:hover {
+      background: #0284c7;
+      color: #fff;
+      border-color: #38bdf8;
+    }
+    .ai-active-modifiers {
+      font-size: 11px;
+      color: #34d399;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 4px 8px;
+      border-radius: 4px;
+      line-height: 1.4;
     }
 
     .status-pill {
@@ -677,11 +745,41 @@
             }
           }
 
+          // 格式化当前生效的 AI 动效/剪辑参数
+          let activeModifiersHtml = "";
+          if (scene.media_modifiers) {
+            const m = scene.media_modifiers;
+            const parts = [];
+            if (m.trim_start_sec !== undefined || m.trim_end_sec !== undefined) {
+              parts.push(`⏱️ 截取: ${m.trim_start_sec || 0}s ~ ${m.trim_end_sec || "末尾"}s`);
+            }
+            if (m.filters?.brightness) {
+              parts.push(`☀️ 亮度: ${m.filters.brightness}x`);
+            }
+            if (m.filters?.sepia) {
+              parts.push(`🎞️ 复古胶片`);
+            }
+            if (m.motion) {
+              parts.push(`🎥 运镜: ${m.motion.motion_type} (${m.motion.duration_sec || 3}s)`);
+            }
+            if (m.text_overlays && m.text_overlays.length > 0) {
+              parts.push(`💥 艺术字: "${m.text_overlays[0].text}" (${m.text_overlays[0].animation})`);
+            }
+            if (parts.length > 0) {
+              activeModifiersHtml = `<div class="ai-active-modifiers"><strong>✨ 本地已编译 Remotion 动效：</strong>${parts.join(" · ")}</div>`;
+            }
+          }
+
           tdContent.innerHTML = `
-            <div class="upload-zone ${!currentAsset ? "missing" : ""}">
+            <div
+              class="upload-zone ${!currentAsset ? "missing" : ""}"
+              ondragover="onZoneDragOver(event, this)"
+              ondragleave="onZoneDragLeave(event, this)"
+              ondrop="onZoneDrop(event, ${idx}, this)"
+            >
               <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
                 <label class="btn btn-primary btn-sm" style="cursor:pointer;">
-                  📤 上传本地视频/图片
+                  📤 上传/拖拽视频或图片
                   <input type="file" accept="image/*,video/*" style="display:none;" onchange="uploadAssetFile(${idx}, this.files[0])" />
                 </label>
                 <select class="cell-input" style="width:auto;min-width:210px;" onchange="onSelectExistingAsset(${idx}, this.value)">
@@ -689,11 +787,39 @@
                   ${assetOptions}
                 </select>
               </div>
+
               <div style="display:flex;gap:12px;align-items:center;">
                 ${previewMediaHtml}
-                <div style="font-size:12px;color:var(--text-muted);line-height:1.5;">
+                <div style="font-size:12px;color:var(--text-muted);line-height:1.5;flex:1;">
                   <div><strong>画面要求：</strong>${scene.visual_purpose}</div>
-                  <div style="margin-top:4px;color:#7dd3fc;">当前绑定：${scene.final_asset_id || "无 (待上传)"}</div>
+                  <div style="margin-top:4px;color:#7dd3fc;">当前绑定：${scene.final_asset_id || "无 (可直接在下方输入文字指令)"}</div>
+                  ${activeModifiersHtml}
+                </div>
+              </div>
+
+              <!-- AI 指令快捷操作框 -->
+              <div class="ai-intent-box">
+                <div class="ai-intent-header">
+                  <span>🤖 AI 剪辑与动效编译器 (输入自然语言 ➔ 本地 Remotion 执行)</span>
+                  <span style="color:#94a3b8;font-weight:normal;">支持：裁剪时间、画面滤镜、左侧弹出艺术字、纯文本图表流程</span>
+                </div>
+                <div class="ai-intent-input-row">
+                  <input
+                    type="text"
+                    id="aiIntentInput_${idx}"
+                    class="ai-intent-input"
+                    placeholder="例：剪辑8-15秒 / 变亮一点加艺术字'为什么会这样'从左侧弹出 / 制作一个三步流程图..."
+                    onkeydown="if(event.key==='Enter') applyAiIntent(${idx})"
+                  />
+                  <button class="btn btn-primary btn-sm" onclick="applyAiIntent(${idx})">执行编译</button>
+                </div>
+                <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                  <span style="font-size:11px;color:#64748b;">快捷预设:</span>
+                  <button class="ai-tag-btn" onclick="fillAiIntent(${idx}, '剪辑8-15秒')">✂️ 8-15秒</button>
+                  <button class="ai-tag-btn" onclick="fillAiIntent(${idx}, '图片缓慢放大持续3秒')">🔍 缓慢放大3秒</button>
+                  <button class="ai-tag-btn" onclick="fillAiIntent(${idx}, '视频变亮一点，加艺术字“为什么会这样呢”从左侧弹出震惊效果')">💥 变亮+弹出字</button>
+                  <button class="ai-tag-btn" onclick="fillAiIntent(${idx}, '画一个三步演进流程图')">⏳ 演进流程图</button>
+                  <button class="ai-tag-btn" onclick="fillAiIntent(${idx}, '分析核心指标制作数据对比卡片')">📊 数据看板</button>
                 </div>
               </div>
             </div>
@@ -809,6 +935,85 @@
         qcReport = data.qcReport;
         renderTable();
         showToast(`已生成 ${scene.scene_id} 的 PPT 标题主题并同步！`);
+      }
+    }
+
+    // 拖拽文件到镜头区域事件处理
+    function onZoneDragOver(e, el) {
+      e.preventDefault();
+      el.classList.add("drag-over");
+    }
+
+    function onZoneDragLeave(e, el) {
+      e.preventDefault();
+      el.classList.remove("drag-over");
+    }
+
+    async function onZoneDrop(e, idx, el) {
+      e.preventDefault();
+      el.classList.remove("drag-over");
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        const file = e.dataTransfer.files[0];
+        await uploadAssetFile(idx, file);
+        // 上传后聚焦到该行的 AI 意图输入框，方便用户立即输入剪辑指令
+        setTimeout(() => {
+          const input = document.getElementById(`aiIntentInput_${idx}`);
+          if (input) {
+            input.focus();
+            input.placeholder = `已就绪素材: ${file.name}，可输入剪辑秒数、调亮或弹字...`;
+          }
+        }, 300);
+      }
+    }
+
+    function fillAiIntent(idx, text) {
+      const input = document.getElementById(`aiIntentInput_${idx}`);
+      if (input) {
+        input.value = text;
+        input.focus();
+      }
+    }
+
+    async function applyAiIntent(idx) {
+      const scene = sceneManifest.scenes[idx];
+      const input = document.getElementById(`aiIntentInput_${idx}`);
+      const prompt = input ? input.value.trim() : "";
+      if (!prompt) {
+        alert("请输入针对该镜头的剪辑或动效要求！");
+        return;
+      }
+
+      const hasAsset = Boolean(scene.final_asset_id);
+      let assetType = "video";
+      if (hasAsset && assetIndex && Array.isArray(assetIndex.assets)) {
+        const found = assetIndex.assets.find((a) => a.asset_id === scene.final_asset_id);
+        if (found && found.type) assetType = found.type;
+      }
+
+      showToast(`🤖 AI 正在编译自然语言指令: "${prompt.slice(0, 16)}..."`);
+
+      try {
+        const res = await fetch(`/api/projects/${currentProjectId}/ai-intent`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sceneId: scene.scene_id,
+            prompt,
+            hasAsset,
+            assetType,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          sceneManifest = data.sceneManifest;
+          qcReport = data.qcReport;
+          renderTable();
+          showToast(`✨ 指令已编译为 Remotion 动效代码，并自动同步到渲染预览！`);
+        } else {
+          alert(`编译失败: ${data.error || "未知错误"}`);
+        }
+      } catch (err) {
+        alert(`网络异常: ${err.message}`);
       }
     }
 

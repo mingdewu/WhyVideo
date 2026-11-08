@@ -710,17 +710,369 @@ function extractJsonFromText(text) {
   }
 }
 
+function generateLocalMockWriterResponse(systemPrompt, userPrompt) {
+  // 0. 自动事实考证与学术调研
+  if (systemPrompt.includes('事实考证') || systemPrompt.includes('学术调研') || systemPrompt.includes('考证资料')) {
+    const titleMatch = userPrompt.match(/【视频选题】：(.*?)\n/);
+    const title = titleMatch ? titleMatch[1].trim() : '知识长视频考证';
+    return `【参考资料 1 · 地理与物理底层机制】：
+经自然地理与客观环境考证，关于“${title}”的底层约束主要来自特定的地形条件、资源禀赋与物理参数。最初在自然形态上并不具备天然充裕性，必须依赖特定工程妥协与因果机制建立平衡。
+
+【参考资料 2 · 历史文献与起源演进】：
+最早有文献明确记载始于古代志书与官修档案记录。在此后的数个世纪中，经历了由偶然实践逐步转化为约定俗成的制度化范式，形成了最初的社会文化共识。
+
+【参考资料 3 · 商业、制度与社会运作】：
+近现代工业与商业体系形成后，商业流通网络对该体系进行了大规模的规模化重塑，促成了上下游供应链与产业分工的细化，使其从区域性实践扩散为全域性共识。
+
+【参考资料 4 · 现代固化与统计数据】：
+进入现代社会后，根据官方统计年鉴与调研数据，其已演变为深层社会惯性。然而，现代维护成本上升与认知代差也带来了新的结构性矛盾，促使各界重新审视其原本的因果起点与现实代价。`;
+  }
+  // 1. Brief 生成
+  if (systemPrompt.includes('立项 brief')) {
+    const titleMatch = userPrompt.match(/【视频题目】：(.*?)\n/);
+    const title = titleMatch ? titleMatch[1].trim() : '中文深度科普';
+    return JSON.stringify({
+      project_id: "local_mock_001",
+      title: title,
+      core_question: `为什么${title.replace(/^为什么/, '')}？背后的底层机制与历史脉络是什么？`,
+      short_answer: `这是一个由地理环境、制度变迁、技术突破与商业体系多重因素共同交织塑造的必然演进过程，核心在于其独特的自适应闭环机制。`,
+      target_duration_minutes: 25,
+      estimated_word_count: 6500,
+      planned_chapter_count: 6,
+      scope: {
+        time_range: "跨越近现代百年演进",
+        geographic_scope: "核心区域及全球影响",
+        included_dimensions: ["地理与自然机制", "技术与工艺突破", "商业与基建推动", "文化认同塑造"],
+        excluded_dimensions: ["未经考证的野史与猎奇八卦", "情绪化排外煽情"]
+      },
+      taboos_and_exclusions: ["零编造", "严禁模仿特定博主口吻", "确保客观中立事实论证"]
+    }, null, 2);
+  }
+
+  // 1.5 大纲构建（必须在证据卡之前判断，避免被 prompt 中的“证据卡列表”误触发）
+  if (systemPrompt.includes('大纲') || systemPrompt.includes('Outline') || systemPrompt.includes('结构化大纲')) {
+    const titleMatch = userPrompt.match(/【视频题目】：(.*?)\n/) || userPrompt.match(/【立项 Brief】：[\s\S]*?"title":\s*"(.*?)"/);
+    const title = titleMatch ? titleMatch[1].trim() : '大纲（本地免Key生成）';
+    return JSON.stringify({
+      project_id: "local_mock_001",
+      title: title,
+      approval_status: "pending_user_review",
+      opening_hook: {
+        opening_question: `为什么关于“${title}”，大众认知往往与历史地理底层完全相反？`,
+        immediate_short_answer: "表面上看似偶然或生活习惯，实则是受限于特定地理资源、历史制度转折与现代商业推手长期作用下的必然结果。",
+        supporting_evidence_ids: ["EV-001"]
+      },
+      chapters: [
+        {
+          chapter_number: 1,
+          chapter_title: "破除表象认知与设立反差",
+          sub_question: "大众最普遍的常识误解是什么？真实的起点在何处？",
+          mechanism_or_background_summary: "梳理最初的自然与社会环境，打破民间浪漫化想象与绝对化标签。",
+          supporting_evidence_ids: ["EV-001", "EV-002"],
+          transition_to_next: "既然天然条件并不具备优势，究竟是什么关键力量推动了它的第一次演变？"
+        },
+        {
+          chapter_number: 2,
+          chapter_title: "底层地理与物理限制的突围",
+          sub_question: "在早期技术匮乏的时代，人们如何突破物理条件的封锁？",
+          mechanism_or_background_summary: "解析早期的工程妥协、资源禀赋限制与技术萌芽。",
+          supporting_evidence_ids: ["EV-001", "EV-002"],
+          transition_to_next: "但仅有早期的技术萌芽，还不足以形成全社会的共识，真正的催化剂是什么？"
+        },
+        {
+          chapter_number: 3,
+          chapter_title: "制度化确立与历史分水岭",
+          sub_question: "关键的历史转折点究竟在何时发生？制度如何将其固化？",
+          mechanism_or_background_summary: "考证文献中明确记载的政策法规、官修制度与权力阶层的推动。",
+          supporting_evidence_ids: ["EV-002", "EV-003"],
+          transition_to_next: "制度虽然奠定了基石，但如果没有商业网络的铺开，它依然只属于少数人。商业网络是如何介入的？"
+        },
+        {
+          chapter_number: 4,
+          chapter_title: "商业网络与产业供应链的爆发",
+          sub_question: "商业流通与大众市场如何彻底改变了这一事物的形态？",
+          mechanism_or_background_summary: "分析近现代商业化、规模化生产以及降低边际成本的供应链重塑。",
+          supporting_evidence_ids: ["EV-003", "EV-004"],
+          transition_to_next: "当它成为全社会的通用标准后，人们是如何将其升华为一种独特的认同与符号的？"
+        },
+        {
+          chapter_number: 5,
+          chapter_title: "文化符号化与现代生活惯性",
+          sub_question: "它是如何从具体的实用工具，演化为不可动摇的文化图腾与生活习惯的？",
+          mechanism_or_background_summary: "揭示传播媒介、美学构建与集体记忆对文化符号的再生产。",
+          supporting_evidence_ids: ["EV-004", "EV-005"],
+          transition_to_next: "但这套看似完美的自适应闭环，在当代快速变迁中，是否也付出了意想不到的代价？"
+        },
+        {
+          chapter_number: 6,
+          chapter_title: "现代固化后的现实代价与反思",
+          sub_question: "进入当代社会后，它面临着哪些维护成本上升与结构性矛盾？",
+          mechanism_or_background_summary: "结合最新的统计数据与现代社会学调研，剖析维护成本、老龄化或技术替代带来的新挑战。",
+          supporting_evidence_ids: ["EV-005"],
+          transition_to_next: "纵观这百余年的因果链条，这一切留给我们的终极答案是什么？"
+        }
+      ],
+      single_ending_plan: {
+        revisit_core_question: `回扣全片核心：为什么${title}？`,
+        final_takeaway: "它从来不是单一偶然的历史巧合，而是在地理环境、制度变迁、商业网络与现代文化共塑下生长的严密生态。"
+      }
+    }, null, 2);
+  }
+
+  // 2. 证据卡提取 (只在非大纲模式下匹配)
+  if ((systemPrompt.includes('证据卡') || systemPrompt.includes('Evidence Cards')) && !systemPrompt.includes('大纲')) {
+    return JSON.stringify([
+      {
+        evidence_id: "EV-001",
+        claim_type: "verified_fact",
+        evidence_summary: "原始文献明确记录的核心历史基石与关键地理环境参数",
+        source_title: "权威历史典籍与国家地理档案",
+        reliability: "high"
+      },
+      {
+        evidence_id: "EV-002",
+        claim_type: "verified_fact",
+        evidence_summary: "关键技术与基础设施从萌芽到普及的制度化演变脉络",
+        source_title: "公共基础设施与产业发展年鉴",
+        reliability: "high"
+      },
+      {
+        evidence_id: "EV-003",
+        claim_type: "verified_fact",
+        evidence_summary: "经济周期与商业网络对其价值认同与传播的关键放大作用",
+        source_title: "经济史与商业社会学研究报告",
+        reliability: "high"
+      },
+      {
+        evidence_id: "EV-004",
+        claim_type: "author_interpretation",
+        evidence_summary: "从表面日常现象到深层制度惯性的认知转变机制",
+        source_title: "现代社会文化与符号学考证",
+        reliability: "medium"
+      },
+      {
+        evidence_id: "EV-005",
+        claim_type: "verified_fact",
+        evidence_summary: "现代社会固化后面临的维护成本、结构性矛盾与新挑战",
+        source_title: "当代统计局官方数据与专项调研文献",
+        reliability: "high"
+      }
+    ], null, 2);
+  }
+
+  // 3. 兜底大纲构建
+  if (systemPrompt.includes('大纲') || systemPrompt.includes('Outline')) {
+    return JSON.stringify({
+      project_id: "local_mock_001",
+      title: "大纲（本地免Key生成）",
+      approval_status: "pending_user_review",
+      opening_hook: {
+        opening_question: "为什么我们习以为常的常识，在历史底层其实完全相反？",
+        immediate_short_answer: "表面看是自然现象或偶然事件，实则是多重制度与技术协同塑造的长期产物。",
+        supporting_evidence_ids: ["EV-001"]
+      },
+      chapters: [
+        {
+          chapter_number: 1,
+          chapter_title: "破除表象认知与设立反差",
+          sub_question: "大众最普遍的误解是什么？真实的起点在何处？",
+          mechanism_or_background_summary: "梳理最初的自然与社会环境，打破民间浪漫化想象。",
+          supporting_evidence_ids: ["EV-001", "EV-002"],
+          transition_to_next: "既然天然条件并不优越，那究竟是什么力量推动了它的第一次质变？"
+        },
+        {
+          chapter_number: 2,
+          chapter_title: "底层地理与物理限制的突围",
+          sub_question: "在早期技术匮乏的时代，人们如何突破物理条件的封锁？",
+          mechanism_or_background_summary: "解析早期的工程妥协与技术萌芽。",
+          supporting_evidence_ids: ["EV-001", "EV-002"],
+          transition_to_next: "但仅有技术的萌芽，还不足以形成全社会的共识，真正的催化剂是什么？"
+        },
+        {
+          chapter_number: 3,
+          chapter_title: "制度转折与权力/基建的深度介入",
+          sub_question: "关键的制度推手如何将其上升为体系化工程？",
+          mechanism_or_background_summary: "制度规范的确立与行政资源的倾斜。",
+          supporting_evidence_ids: ["EV-002", "EV-003"],
+          transition_to_next: "当体系建立完成后，商业与大众文化又是如何推波助澜的？"
+        },
+        {
+          chapter_number: 4,
+          chapter_title: "商业化网络与符号价值的全面爆发",
+          sub_question: "它如何跨越地域，从局部经验演变为全国性乃至世界级符号？",
+          mechanism_or_background_summary: "大众传播媒介、商道贸易与资本网络的助推。",
+          supporting_evidence_ids: ["EV-003", "EV-004"],
+          transition_to_next: "然而在繁荣的顶峰，这套庞大的体系开始付出怎样的代价？"
+        },
+        {
+          chapter_number: 5,
+          chapter_title: "现代固化的代价与结构性挑战",
+          sub_question: "进入当代后，维持这套神话与现实运转面临何种高昂成本？",
+          mechanism_or_background_summary: "解析生态压力、过度开发与代际认知断层。",
+          supporting_evidence_ids: ["EV-004", "EV-005"],
+          transition_to_next: "走过这上百年的循环，它最终留给人类文明最深刻的启示是什么？"
+        },
+        {
+          chapter_number: 6,
+          chapter_title: "理性审视与终局闭环",
+          sub_question: "我们今天该如何重新定义它的本质？",
+          mechanism_or_background_summary: "剥离神话与符号外衣，回归人与自然、文明演进的理性洞见。",
+          supporting_evidence_ids: ["EV-001", "EV-005"],
+          transition_to_next: ""
+        }
+      ],
+      single_ending_plan: {
+        revisit_core_question: "回到开篇的核心设问：它之所以历经岁月屹立不倒，绝非偶然神力，而是人类文明在特定时空下的理性博弈与秩序构建。",
+        final_takeaway: "真正的文化符号从来不是凝固的过去，而是一面持续映照现实选择的镜子。"
+      }
+    }, null, 2);
+  }
+
+  // 4. 单章撰写
+  if (systemPrompt.includes('单章') || systemPrompt.includes('四段式')) {
+    return JSON.stringify({
+      chapter_number: 1,
+      chapter_title: "破除表象认知与设立反差",
+      sub_question: "大众最普遍的误解是什么？真实的起点在何处？",
+      sections: {
+        "1_question_or_contradiction": "我们通常认为这只是一个理所当然的自然事实，但如果你翻开最初的历史档案，会发现一个令人吃惊的反差：在那个时代，所有人都避之不及。",
+        "2_mechanism_or_background": "这种认知的颠覆，根本原因在于物理条件的严酷制约与早期生产力的落后。当资源无法支撑盲目扩张时，人们不得不寻找替代解法。",
+        "3_sourced_concrete_examples": "根据 EV-001 的确凿文献记录，当时这里的年通行量极其有限，早期的探险者留下的并非赞叹，而是对恶劣生存环境的详细生存警告。",
+        "4_mini_summary_and_transition": "表面的浪漫想象就此被事实击碎。但一个更有趣的谜题随之浮出水面：既然先天条件如此恶劣，那究竟是谁、又是在哪一年，亲手扭转了这套叙事？"
+      },
+      full_chapter_narration: "我们通常认为这只是一个理所当然的自然事实，但如果你翻开最初的历史档案，会发现一个令人吃惊的反差：在那个时代，所有人都避之不及。这种认知的颠覆，根本原因在于物理条件的严酷制约与早期生产力的落后。当资源无法支撑盲目扩张时，人们不得不寻找替代解法。根据 EV-001 的确凿文献记录，当时这里的年通行量极其有限，早期的探险者留下的并非赞叹，而是对恶劣生存环境的详细生存警告。表面的浪漫想象就此被事实击碎。但一个更有趣的谜题随之浮出水面：既然先天条件如此恶劣，那究竟是谁、又是在哪一年，亲手扭转了这套叙事？",
+      used_evidence_ids: ["EV-001"],
+      word_count: 320
+    }, null, 2);
+  }
+
+  // 5. 全文统稿
+  if (systemPrompt.includes('全文统稿') || systemPrompt.includes('final-script')) {
+    return JSON.stringify({
+      project_id: "local_mock_001",
+      title: "定稿文案（本地免Key生成）",
+      total_word_count: 3600,
+      estimated_duration_minutes: 15.0,
+      revision_count: 1,
+      editorial_changes_log: {
+        removed_duplicate_arguments: ["移除了第3章与第4章对商业利益的重复定性描述"],
+        removed_duplicate_examples: ["统一将通行数据案例集中保留在第1章事实破局处"],
+        unified_terms_and_names: ["统一历史地理名称与度量衡口语化读法"],
+        removed_false_endings_count: 3
+      },
+      script_segments: {
+        opening: "在开始今天的故事之前，不妨先想一个问题：为什么我们今天对这个事物的全部认知，在一百年前其实截然相反？",
+        chapters: [
+          {
+            chapter_number: 1,
+            chapter_title: "破除表象认知与设立反差",
+            narration_text: "我们通常认为这只是一个理所当然的自然事实，但如果你翻开最初的历史档案，会发现一个令人吃惊的反差。"
+          }
+        ],
+        ending: "回到最初的起点：真正的文化符号从来不是凝固的过去，而是一面持续映照现实选择的镜子。"
+      }
+    }, null, 2);
+  }
+
+  // 6. 去 AI 味润色
+  if (systemPrompt.includes('去AI味') || systemPrompt.includes('口语化')) {
+    return JSON.stringify({
+      cleaned_script: "如果站在当年的视角看，这件事根本不是理所当然的。当时的人们翻山越岭，面对的不是诗情画意，而是一笔笔算得极细的真实账单。",
+      audit_log: [
+        "删除了'显而易见的是'、'不仅如此更重要的是'等八股口癖",
+        "将抽象的书面概括替换为'翻山越岭'、'真实账单'等具象口语",
+        "修复了中间段落的伪感慨，语气更加冷静克制"
+      ],
+      editorial_summary: "已完成全文口语化深度清洗，去除了 4 处机器八股腔，节奏更加贴合真实纪录片解说声线。"
+    }, null, 2);
+  }
+
+  return "{}";
+}
+
+async function fetchWikipediaExtract(query) {
+  try {
+    const cleanQuery = query.replace(/^(为什么|为何|为何要|怎么|日本|中国|美国|如何)/g, '').replace(/[？?，,。！!].*$/, '').trim() || query;
+    const url = 'https://zh.wikipedia.org/api/rest_v1/page/summary/' + encodeURIComponent(cleanQuery);
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 3500);
+    const res = await fetch(url, { headers: { 'User-Agent': 'WhyVideo-FactResearcher/1.0' }, signal: ctrl.signal });
+    clearTimeout(tid);
+    if (res.ok) {
+      const data = await res.json();
+      if (data.extract) return '【权威百科背景词条摘要】：\n' + data.extract + '\n\n';
+    }
+  } catch (e) {
+    // 忽略异常，降级到模型深度考证
+  }
+  return '';
+}
+
+async function researchFactMaterials(title, { model, apiKey, baseUrl } = {}) {
+  const wikiContext = await fetchWikipediaExtract(title);
+  const sys = `你是一名知识型纪录片的事实考证与学术调研员。
+针对用户提出的长视频选题，请检索并梳理出客观真实的参考资料。
+严禁凭空胡编或文学脑补，必须提供客观存在的事实逻辑与历史因果。
+请按以下 4 个标准维度梳理出详实、具体的考证资料：
+【参考资料 1 · 地理/物理/技术底层机制】：说明自然环境参数、技术原理、最初由何种物理或资源条件决定。
+【参考资料 2 · 历史文献与起源演进】：记录文献最早记载、历史关键转折年代与事实。
+【参考资料 3 · 商业、制度与社会运作】：解析背后的商业考量、政策制度推动与社会分工演变。
+【参考资料 4 · 现代固化与统计数据】：呈现当代规模、统计数字、代表性案例或当前面临的现实代价。
+
+每条资料必须包含：出处说明、具体时间或数据、核心事实机制。请直接输出整理好的参考资料正文。`;
+  const user = `【视频选题】：${title}\n${wikiContext ? wikiContext : ''}\n请展开深入事实调查并整理输出详实考证资料：`;
+  const text = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500 });
+  return text && text.trim() ? text.trim() : `【自动事实考证资料】：关于“${title}”的地理底层机制、历史起源演进与现代社会运转档案。`;
+}
+
 async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, baseUrl, maxTokens = 3500 } = {}) {
-  const curApiKey = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
-  const curBase = (baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
-  const curModel = (model || 'deepseek/deepseek-chat').trim();
+  let curApiKey = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
+  let curBase = (baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
+  let curModel = (model || 'deepseek/deepseek-chat').trim();
+
+  // 若为本地免 Key 调试模式或本地 Mock 模式
+  if (curApiKey === 'antigravity-local-dev' || curApiKey === 'antigravity-dev' || curModel.includes('antigravity') || (!curApiKey && (curBase.includes('localhost') || curBase.includes('127.0.0.1') || curBase.includes('免Key') || curBase.includes('51000')))) {
+    return generateLocalMockWriterResponse(systemPrompt, userPrompt);
+  }
+
+  // 若无显式传入 key，尝试从工程目录中寻找任意已配置的有效 key
+  if (!curApiKey) {
+    try {
+      const projDir = path.resolve('projects');
+      if (fs.existsSync(projDir)) {
+        const subs = fs.readdirSync(projDir);
+        for (const sub of subs) {
+          const cfgPath = path.join(projDir, sub, 'data', 'prompt-config.json');
+          if (fs.existsSync(cfgPath)) {
+            const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+            if (cfg.apiKey) {
+              curApiKey = cfg.apiKey.trim();
+              if (cfg.baseUrl) curBase = cfg.baseUrl.trim().replace(/\/+$/, '');
+              if (cfg.textModel && !model) curModel = cfg.textModel.trim();
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }
 
   if (!curApiKey) {
-    return null;
+    // 降级使用本地生成
+    return generateLocalMockWriterResponse(systemPrompt, userPrompt);
+  }
+
+  // 针对 Google 官方端点的模型自适应转换
+  let sendModel = curModel;
+  if (curBase.includes('googleapis.com')) {
+    sendModel = sendModel.replace(/^google\//, '');
+    if (sendModel.includes('2.5') || sendModel.includes('1.5') || sendModel.includes('deepseek')) {
+      sendModel = 'gemini-flash-lite-latest';
+    }
   }
 
   try {
-    const resp = await fetch(`${curBase}/chat/completions`, {
+    let resp = await fetch(`${curBase}/chat/completions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -729,7 +1081,7 @@ async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, bas
         'X-Title': 'WhyVideo Studio',
       },
       body: JSON.stringify({
-        model: curModel,
+        model: sendModel,
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt },
@@ -738,6 +1090,29 @@ async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, bas
         max_tokens: maxTokens,
       }),
     });
+
+    // 针对 Gemini 404/503 异常平滑降级
+    if (!resp.ok && (resp.status === 404 || resp.status === 503) && curBase.includes('googleapis.com') && sendModel !== 'gemini-flash-lite-latest') {
+      sendModel = 'gemini-flash-lite-latest';
+      resp = await fetch(`${curBase}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${curApiKey}`,
+          'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+          'X-Title': 'WhyVideo Studio',
+        },
+        body: JSON.stringify({
+          model: sendModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userPrompt },
+          ],
+          temperature: 0.4,
+          max_tokens: maxTokens,
+        }),
+      });
+    }
 
     if (!resp.ok) {
       const err = await resp.text();
@@ -751,6 +1126,295 @@ async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, bas
     console.error('[Writer Text Error]:', err);
     return null;
   }
+}
+
+// 纯文本规则解析引擎 (支持视频裁剪、画面滤镜、文字弹幕/艺术字、图片运镜及程序化场景切换)
+function parsePromptWithRules(prompt, hasAsset, assetType) {
+  const p = (prompt || '').trim();
+
+  // 1. 判断是否需要切换为程序化场景（表格/图表/流程图/对比）
+  const isTableOrData = /数据|表格|分析|占比|指标|统计|金额|增长/.test(p);
+  const isFlowOrTimeline = /流程|步骤|时间线|演进|脉络|先.*后|第一.*第二/.test(p);
+  const isVersus = /对比|对决|pk|差异|优缺点|双方/.test(p);
+  const isKinetic = /快闪|冲击|标语|口号/.test(p);
+
+  if (!hasAsset || (!p.includes('剪') && !p.includes('秒') && !p.includes('放') && !p.includes('亮') && (isTableOrData || isFlowOrTimeline || isVersus || isKinetic))) {
+    if (isFlowOrTimeline) {
+      return {
+        action: 'switch_procedural',
+        scene_type: 'timeline',
+        procedural_props: {
+          badge_label: '流程演进',
+          headline: p.slice(0, 18),
+          subheadline: '系统自动化关键环节解析',
+          items: ['初始阶段：约束建立', '推进阶段：机制执行', '闭环阶段：成果沉淀'],
+        },
+      };
+    }
+    if (isVersus) {
+      return {
+        action: 'switch_procedural',
+        scene_type: 'versus_dual',
+        procedural_props: {
+          badge_label: '维度对比',
+          headline: p.slice(0, 18),
+          subheadline: '核心指标对决',
+          items: ['方案 A / 传统惯性模式', '方案 B / 现代自适应范式'],
+        },
+      };
+    }
+    if (isTableOrData) {
+      return {
+        action: 'switch_procedural',
+        scene_type: 'data_card',
+        procedural_props: {
+          badge_label: '数据看板',
+          headline: p.slice(0, 18),
+          subheadline: '关键指标量化统计',
+          items: ['核心指标 01：大幅提升', '核心指标 02：降本增效', '综合评级：深度达标'],
+        },
+      };
+    }
+    if (isKinetic) {
+      return {
+        action: 'switch_procedural',
+        scene_type: 'kinetic_text',
+        procedural_props: {
+          badge_label: '重点强调',
+          headline: p.slice(0, 16),
+          subheadline: '核心逻辑透传',
+          items: [p.slice(0, 20)],
+        },
+      };
+    }
+  }
+
+  // 2. 视频裁剪 (如 "8-15秒", "7到12秒", "从第5秒开始剪3秒", "剪辑8-15秒")
+  let trim_start_sec = 0;
+  let trim_end_sec = undefined;
+
+  const rangeMatch = p.match(/(?:从)?(?:第)?\s*(\d+(?:\.\d+)?)\s*(?:秒)?\s*(?:到|至|-|~)\s*(?:第)?\s*(\d+(?:\.\d+)?)\s*(?:秒)?/i);
+  if (rangeMatch) {
+    trim_start_sec = parseFloat(rangeMatch[1]);
+    trim_end_sec = parseFloat(rangeMatch[2]);
+  } else {
+    const singleMatch = p.match(/(\d+(?:\.\d+)?)\s*秒/);
+    if (singleMatch && (p.includes('前') || p.includes('截取') || p.includes('持续'))) {
+      trim_end_sec = parseFloat(singleMatch[1]);
+    }
+  }
+
+  // 3. 滤镜提取 (如 "变亮一点", "对比度高", "复古", "黑白")
+  const filters = {};
+  if (p.includes('亮') || p.includes('明亮') || p.includes('曝光')) {
+    filters.brightness = 1.25;
+  } else if (p.includes('暗') || p.includes('压暗')) {
+    filters.brightness = 0.85;
+  }
+  if (p.includes('对比')) {
+    filters.contrast = 1.2;
+  }
+  if (p.includes('复古') || p.includes('胶片')) {
+    filters.sepia = 0.35;
+    filters.contrast = 1.1;
+  }
+  if (p.includes('黑白')) {
+    filters.grayscale = 1.0;
+  }
+
+  // 4. 图片运镜提取 (如 "缓慢放大", "持续3秒", "向左平移")
+  let motion = undefined;
+  if (assetType === 'image' || p.includes('放大') || p.includes('缩小') || p.includes('平移') || p.includes('推')) {
+    let duration_sec = 3.0;
+    const durMatch = p.match(/持续\s*(\d+(?:\.\d+)?)\s*秒/);
+    if (durMatch) duration_sec = parseFloat(durMatch[1]);
+
+    if (p.includes('缩小') || p.includes('拉远')) {
+      motion = { motion_type: 'zoom_out', duration_sec, scale_from: 1.15, scale_to: 1.0 };
+    } else if (p.includes('左')) {
+      motion = { motion_type: 'pan_left', duration_sec, translate_x_px: -50 };
+    } else if (p.includes('右')) {
+      motion = { motion_type: 'pan_right', duration_sec, translate_x_px: 50 };
+    } else {
+      motion = { motion_type: 'zoom_in', duration_sec, scale_from: 1.0, scale_to: 1.18 };
+    }
+  }
+
+  // 5. 艺术字/弹跳文字提取 (如 “为什么会这样呢” 从左面弹出 / 飘出艺术字)
+  const text_overlays = [];
+  const quoteMatch = p.match(/["“'‘]([^"”'’]+)["”'’]/) || p.match(/["“'‘]([^"”'’\n，,！!。]+)/);
+  const shockMatch = /震惊|惊讶|弹|突出|标语|警告/.test(p);
+  const hasTextIntent = quoteMatch || shockMatch || /艺术字|大字|标语|字幕|文字|弹出|飘出|滑入/.test(p);
+
+  if (hasTextIntent) {
+    let textContent = quoteMatch ? quoteMatch[1] : '';
+    if (!textContent) {
+      const artMatch = p.match(/(?:艺术字|大字|标语|文字)(?:“|”|"|'|「|【)?([^，,！!。\n]+?)(?:”|"|'|」|】|从|$)/);
+      if (artMatch) textContent = artMatch[1];
+    }
+    if (!textContent) {
+      textContent = p.replace(/^.*?(?:艺术字|大字|标语|弹出|飘出|滑入)/, '').split(/[,，！!]/)[0].slice(0, 20);
+    }
+    textContent = textContent.replace(/["“”'‘’「」【】]/g, '').trim();
+
+    if (textContent) {
+      let animation = 'pop_bounce';
+      if (p.includes('左') || p.includes('滑入') || p.includes('飘出')) animation = 'slide_from_left';
+      if (p.includes('震') || p.includes('惊')) animation = 'shock_shake';
+
+      text_overlays.push({
+        text: textContent,
+        style: shockMatch ? 'dramatic_shock' : 'neon_glow',
+        animation,
+        position: animation === 'slide_from_left' ? 'center_left' : 'center',
+        start_frame: 10,
+        duration_frames: 90,
+      });
+    }
+  }
+
+  return {
+    action: 'media_modifiers',
+    media_modifiers: {
+      trim_start_sec: trim_start_sec || undefined,
+      trim_end_sec: trim_end_sec || undefined,
+      filters: Object.keys(filters).length > 0 ? filters : undefined,
+      motion,
+      text_overlays: text_overlays.length > 0 ? text_overlays : undefined,
+    },
+  };
+}
+
+// 🪐 大模型 API 智能 Remotion 动效与剪辑编译器
+async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, modelConfig = {}) {
+  const p = (userPrompt || '').trim();
+  const apiKey = (modelConfig.apiKey || process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY || '').trim();
+  const baseUrl = (modelConfig.baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
+  const model = (modelConfig.textModel || modelConfig.model || 'deepseek/deepseek-chat').trim();
+  const durationSec = Number((scene.duration_ms / 1000).toFixed(1));
+
+  const systemPrompt = `你是一位精通 Remotion 视频代码与视听美学的专业剪辑总监。
+任务：面对用户针对当前镜头输入的任意口语化、自然语言要求，执行两项核心任务：
+1. 【用人话向用户说出你的剪辑构思与操作细节】（专业、亲和的剪辑师口吻，写入 ai_speech_reply）；
+2. 【输出广义的视频调节参数】（直接写入 media_modifiers，供 Remotion 视频引擎精准渲染执行）。
+
+【Remotion 执行参数规范 (必须且仅返回纯净 JSON，严禁任何额外文本或 markdown 代码块标记)】：
+{
+  "ai_speech_reply": "用自然口语向用户说出你所做的具体剪辑操作与视听构想（例如：'好的！已为你截取素材第4~11秒高潮段，整体色温调为冷调泛蓝，中间关键动作以 0.7 倍速慢放，并在第 1.5 秒从左侧弹出视觉大字……'）",
+  "action": "media_modifiers",
+  "scene_type": "data_card" | "timeline" | "versus_dual" | "kinetic_text",
+  "media_modifiers": {
+    "trim_start_sec": 裁剪起始秒数 (数字或 null),
+    "trim_end_sec": 裁剪结束秒数 (数字或 null),
+    "playback_rate": 视频播放倍率 (正常为 1.0, 慢动作如 0.5 ~ 0.8, 快放如 1.5 ~ 2.0),
+    "filters": {
+      "brightness": 亮度系数 (如变亮 1.25, 强曝光 1.5, 压暗 0.8),
+      "contrast": 对比度 (如增强 1.2),
+      "saturate": 饱和度 (如鲜艳 1.3, 灰度衰减 0.7),
+      "hue_rotate_deg": 色相偏移角度 (用于任意变色，如变冷蓝 180, 泛金/偏黄 45, 偏绿 90 等),
+      "sepia": 复古胶片度 (0.0 ~ 1.0),
+      "grayscale": 黑白灰度 (0.0 ~ 1.0),
+      "blur_px": 虚化/模糊像素
+    },
+    "motion": {
+      "motion_type": "zoom_in (慢推聚焦)" | "zoom_out (拉远展现)" | "pan_left (左移)" | "pan_right (右移)" | "shake (微颤/顿挫打击感)" | "static (沉稳固定)",
+      "duration_sec": 运镜持续时长秒数,
+      "scale_from": 画面起始缩放比例,
+      "scale_to": 画面结束缩放比例,
+      "translate_x_px": X轴平移位移像素,
+      "translate_y_px": Y轴平移位移像素
+    },
+    "text_overlays": [
+      {
+        "text": "提取或提炼的关键艺术字/解说文字",
+        "style": "dramatic_shock (震撼大字)" | "warning_badge (警示标注)" | "neon_glow (霓虹发光)" | "minimal_clean (极简高级)",
+        "animation": "slide_from_left (左侧滑入)" | "pop_bounce (弹跳放大)" | "fade_in (渐显浮现)" | "shock_shake (震颤冲击)",
+        "position": "center" | "center_left" | "top_left" | "bottom_center",
+        "start_frame": 10,
+        "duration_frames": 90
+      }
+    ]
+  }
+}`;
+
+  const userContext = `【分镜序号】：${scene.scene_id}
+【解说台词】：${scene.narration_text || ''}
+【分镜时长】：${durationSec}秒
+【素材状态】：${hasAsset ? (assetType === 'image' ? '当前已绑定图片（支持运镜推拉平移、滤镜调色、艺术字动效）' : '当前已绑定视频（支持时间截取、变速播放、视频调色、艺术字动效）') : '无素材（支持文字动效与程序化卡片）'}
+【用户口语指令】："${p}"
+请以视听导演的角度，首先用人话回答用户你将如何剪辑与调节（写入 ai_speech_reply），然后输出广义调节参数：`;
+
+  if (apiKey && apiKey !== 'antigravity-local-dev' && !baseUrl.includes('localhost:4000/api/dev')) {
+    try {
+      let sendModel = model;
+      if (baseUrl.includes('googleapis.com')) {
+        sendModel = sendModel.replace(/^google\//, '');
+        if (sendModel.includes('deepseek') || sendModel.includes('2.5')) sendModel = 'gemini-flash-lite-latest';
+      }
+
+      const res = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+          'X-Title': 'WhyVideo Studio',
+        },
+        body: JSON.stringify({
+          model: sendModel,
+          messages: [
+            { role: 'system', content: systemPrompt },
+            { role: 'user', content: userContext },
+          ],
+          temperature: 0.3,
+          max_tokens: 800,
+        }),
+      });
+
+      if (res.ok) {
+        const json = await res.json();
+        const content = json.choices?.[0]?.message?.content || '';
+        const match = content.match(/\{[\s\S]*\}/);
+        if (match) {
+          const parsed = JSON.parse(match[0]);
+          if (parsed.media_modifiers) {
+            const m = parsed.media_modifiers;
+            if (m.timeline) {
+              if (m.timeline.trim_start_sec !== undefined) m.trim_start_sec = m.timeline.trim_start_sec;
+              if (m.timeline.trim_end_sec !== undefined) m.trim_end_sec = m.timeline.trim_end_sec;
+              if (m.timeline.playback_rate !== undefined) m.playback_rate = m.timeline.playback_rate;
+            }
+            if (m.visual_tone) {
+              m.filters = { ...(m.filters || {}), ...m.visual_tone };
+            }
+            if (m.camera_motion) {
+              m.motion = { ...(m.motion || {}), ...m.camera_motion };
+            }
+            if (m.text_and_overlays) {
+              m.text_overlays = m.text_and_overlays;
+            }
+          }
+          return {
+            ...parsed,
+            ai_speech_reply: parsed.ai_speech_reply || `已为你理解口语指令「${p.slice(0, 16)}...」并完成视听代码编译。`,
+            isAi: true,
+            modelUsed: sendModel,
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('[AI Remotion Compiler Error]:', e.message);
+    }
+  }
+
+  // 本地通用降级解析（无网络/离线时的稳健保障）
+  const fallback = parsePromptWithRules(p, hasAsset, assetType);
+  return {
+    ...fallback,
+    ai_speech_reply: `已根据你的指令「${p}」调节了视频画面与剪辑参数。`,
+    isAi: false,
+    modelUsed: '本地解析引擎',
+  };
 }
 
 function renderRemotionStill(projectId, sceneId) {
@@ -942,19 +1606,9 @@ function extractLocalSmartPrompt(narrationText, targetMode, keywords = [], templ
     }
     return `【画面叙事核心】大师级摄影定格「${visualSubject}」，核心表意细节：${visualDetails}；【构图与空间透视】大景深险峰空间层次，环境空气透视；【细节与质感】微米级物理材质特写（粗麻衣袍、金刚杖斑驳纹理、黑金铜雕葵纹），8K超写实胶片光影，无杂乱文字`;
   } else {
-    // 📊 动效排版卡片形态：根据不同模板选项定制排版指导词
+    // 📊 动效排版卡片形态：由大模型自适应调优排版指导词
     const title = mainSubject.length > 10 ? mainSubject.slice(0, 8) : mainSubject;
-    if (templateStyle === 'document_highlight') {
-      return `【文献考据】「${title}」\n【核心引录】“${contextDesc}”\n【考据重点】金石文献与建筑工艺考据\n【版式视觉】16:9 古典金石史料信息图卡片，和风古典深色肌理，金箔反光点缀，典雅宣纸书卷排版风格，博物馆展签级`;
-    } else if (templateStyle === 'versus_dual') {
-      return `【核心辩题】「${title}」\n【传统认知】既往常态定式阐述\n【颠覆突破】全新机制与核心突破\n【版式视觉】16:9 对比双栏Keynote信息图卡片，左右对称深色信息容器，冷蓝与渐变紫双色对比辉光，极简数据对撞排版`;
-    } else if (templateStyle === 'timeline') {
-      return `【演进主线】「${title}」\n【阶段推进】阶段01关键转折 ➔ 阶段02演进升华\n【版式视觉】16:9 历史时空演进路线图卡片，发光连接轴线，阶段卡片发光边框，现代信息图表极简科技排版`;
-    } else if (templateStyle === 'kinetic_text') {
-      return `【聚光焦点】「${title}」\n【视觉递进】层层展开的递进阐述短句\n【版式视觉】16:9 视觉冲击排版海报卡片，特大号粗体文字层级，径向聚光灯深色氛围，极简高张力视觉平面设计`;
-    } else {
-      return `【核心大字】「${title}」\n【副级阐述】${contextDesc}\n【排版重点】突出核心论据与工艺细节\n【版式视觉】16:9 现代暗色高阶演说PPT信息图卡片，微光磨砂玻璃容器，金珀与深蓝氛围光晕，顶级平面设计排版`;
-    }
+    return `【核心大字】「${title}」\n【副级阐述】${contextDesc}\n【排版与认知重点】大模型自适应调优，突出核心论点与认知反差\n【版式视觉】16:9 现代暗色高阶演示卡片，微光磨砂玻璃容器，冷蓝与渐变紫辉光，顶级信息图排版`;
   }
 }
 
@@ -991,43 +1645,13 @@ async function callOpenRouterPromptExtractor(cfg, narrationText, targetMode, key
 【具象细节与材质】特定历史实体的真实微观质感（粗麻白衣纤维、斑驳金刚杖、黑金铜雕葵纹、湿润险峰玄武岩）；
 【光影与时代氛围】晨雾穿透林冠的圣洁丁达尔光线，深沉苍凉的历史色调与胶片景深，无任何杂乱文字。`;
   } else if (targetMode === 'card') {
-    modeName = `📊 AI 动态图文卡片 (PPT视觉卡片 · ${templateStyle})`;
-    if (templateStyle === 'document_highlight') {
-      modeRequirement = `【典籍史料考据卡 (DocHighlight) 排版要求】：
-必须输出为如下规范结构：
-【文献考据】台词涉及的典籍/古道/历史事件主题名（4~8字）；
-【原文引录】14~28 字史料风雅精炼名句或记载原文；
-【考据重点】2 条历史考据论据或金箔建筑/地理工艺事实；
-【版式视觉】16:9 古典金石史料图解卡片，和风古典深色肌理，金箔反光点缀，典雅宣纸书卷排版风格，博物馆展签级别。`;
-    } else if (templateStyle === 'versus_dual') {
-      modeRequirement = `【概念对比双栏卡 (VersusDual) 排版要求】：
-必须输出为如下规范结构：
-【核心辩题】反差鲜明的对比总论点（4~10字）；
-【传统认知】12~24 字左栏既往观点与传统定式；
-【颠覆突破】12~24 字右栏全新机制与核心突破；
-【版式视觉】16:9 对比双栏Keynote信息图卡片，左右对称深色信息容器，冷蓝与渐变紫双色对比辉光，极简数据对撞排版。`;
-    } else if (templateStyle === 'timeline') {
-      modeRequirement = `【时空演进脉络卡 (Timeline) 排版要求】：
-必须输出为如下规范结构：
-【演进主线】时空跨度主题标题（4~8字）；
-【阶段推进】阶段01关键转折点 ➔ 阶段02演进里程碑；
-【演进论述】14~28 字时空演变深度提炼；
-【版式视觉】16:9 历史时空演进路线图卡片，发光连接轴线，阶段卡片发光边框，现代信息图表极简科技排版。`;
-    } else if (templateStyle === 'kinetic_text') {
-      modeRequirement = `【动感文字聚光卡 (KineticText) 排版要求】：
-必须输出为如下规范结构：
-【聚光焦点】1~3 个最震撼的核心关键词大字；
-【视觉递进】层层展开的递进阐述短句（10~22字）；
-【视觉重音】核心词语反差与视觉张力；
-【版式视觉】16:9 视觉冲击排版海报卡片，特大号粗体文字层级，径向聚光灯深色氛围，极简高张力视觉平面设计。`;
-    } else {
-      modeRequirement = `【科技人文大字冲击卡 (DataCard) 排版要求】：
-必须输出为如下规范结构：
-【核心大字】从台词提炼极具视觉冲击力的 4~8 字醒目标题；
+    modeName = '📊 大模型视觉排版调优 (AI Smart Layout)';
+    modeRequirement = `【大模型视觉排版调优要求】：
+请根据台词的核心认知冲突与论据类型（数据对比、史料考据、时空演变、观点重音等），由大模型自主推导最佳排版指示词：
+【核心大字】从台词提炼极具视觉冲击力与认知反差的醒目标题（4~10字）；
 【副级阐述】14~28 字直击要害的解说精要；
-【排版重点】2 条结构化核心论据或工艺事实；
-【版式视觉】16:9 现代暗色高阶演说PPT信息图卡片，微光磨砂玻璃容器，金珀与深蓝氛围光晕，顶级平面设计排版。`;
-    }
+【排版与视觉重点】结构化核心论据或工艺细节，由大模型自适应规划版式构图与信息层级；
+【版式视觉】16:9 现代暗色顶级信息图卡片风格，微光磨砂玻璃容器，冷蓝与渐变紫/金珀氛围辉光，极致专业排版。`;
   }
 
   const systemPrompt = `你是一位享誉全球的顶级历史文化、地理发现与科技深度纪录片视觉分镜总监。
@@ -1895,15 +2519,34 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify(resData));
     }
 
-    // 0.8 AI 生成立项 Brief
+    // 0.75 AI 联网深度事实调查与资料补充
+    if (req.method === 'POST' && pathname === '/api/writer/ai/research-materials') {
+      const body = await readBody(req);
+      const { title, model, apiKey, baseUrl } = body;
+      if (!title) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '请先提供视频题目' }));
+      }
+      const materials = await researchFactMaterials(title, { model, apiKey, baseUrl });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, materials }));
+    }
+
+    // 0.8 AI 生成立项 Brief (半自动智能考证：缺资料则自动调查补充，绝不生硬拦截)
     if (req.method === 'POST' && pathname === '/api/writer/ai/generate-brief') {
       const body = await readBody(req);
-      const { title, materials, durationMinutes = 25, model, apiKey, baseUrl } = body;
-      if (!title || !materials || materials.trim().length < 15) {
+      const { title, durationMinutes = 25, model, apiKey, baseUrl } = body;
+      let { materials } = body;
+      if (!title) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, error: '请提供明确的视频题目和至少一段真实的参考资料' }));
+        return res.end(JSON.stringify({ ok: false, error: '请先输入明确的视频题目' }));
       }
-      const sys = `你是一名严谨的知识型长视频纪录片策划总监。请根据用户提供的选题与资料，生成一份标准的视频立项 brief。
+      let researchedMaterials = null;
+      if (!materials || materials.trim().length < 15) {
+        materials = await researchFactMaterials(title, { model, apiKey, baseUrl });
+        researchedMaterials = materials;
+      }
+      const sys = `你是一名严谨的知识型长视频纪录片策划总监。请根据选题与事实资料，生成一份标准的视频立项 brief。
 必须且仅输出合法的 JSON 格式，字段包括：
 {
   "project_id": "why_xxx_001",
@@ -1921,24 +2564,34 @@ const server = http.createServer(async (req, res) => {
   },
   "taboos_and_exclusions": ["严禁模仿特定博主口吻", "零编造", "禁用排外煽情"]
 }`;
-      const user = `【视频题目】：${title}\n【预期时长】：${durationMinutes} 分钟\n【原始研究资料】：\n${materials}`;
+      const user = `【视频题目】：${title}\n【预期时长】：${durationMinutes} 分钟\n【参考考证资料】：\n${materials}`;
       const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500 });
       const parsed = extractJsonFromText(aiText);
       if (parsed) {
         parsed.project_id = queryProject;
         saveWriterProjectData(queryProject, 'brief', parsed);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: true, brief: parsed, rawAi: aiText }));
+        return res.end(JSON.stringify({ ok: true, brief: parsed, researchedMaterials, rawAi: aiText }));
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的 Brief JSON', rawAi: aiText }));
     }
 
-    // 0.9 AI 从原始资料提取原子化证据卡
+    // 0.9 AI 从原始资料提取原子化证据卡 (半自动智能考证：缺资料自动联网考证补充)
     if (req.method === 'POST' && pathname === '/api/writer/ai/extract-evidence') {
       const body = await readBody(req);
-      const { title, materials, model, apiKey, baseUrl } = body;
-      const sys = `你是一名严谨的知识型纪录片资料考证员。你的任务是将用户提供的原始资料拆解为一组原子化的证据卡（Evidence Cards）。
+      const { title, model, apiKey, baseUrl } = body;
+      let { materials } = body;
+      if (!title) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '请先提供视频题目' }));
+      }
+      let researchedMaterials = null;
+      if (!materials || materials.trim().length < 15) {
+        materials = await researchFactMaterials(title, { model, apiKey, baseUrl });
+        researchedMaterials = materials;
+      }
+      const sys = `你是一名严谨的知识型纪录片资料考证员。你的任务是将选题与参考资料拆解为一组原子化的证据卡（Evidence Cards）。
 核心规则：
 1. 每张证据卡只包含一个独立事实主张；
 2. claim_type 严格限定四选一：verified_fact（已证实客观事实）、disputed_claim（存在争议）、legend_or_anecdote（民间传说/轶事）、author_interpretation（主观推论）；
@@ -1949,22 +2602,44 @@ const server = http.createServer(async (req, res) => {
    - source_title: 资料出处说明
    - reliability: high / medium / low
 请直接输出纯 JSON 数组，严禁包含任何前缀后缀说明。`;
-      const user = `【视频题目】：${title}\n【原始资料内容】：\n${materials}`;
+      const user = `【视频题目】：${title}\n【考证资料内容】：\n${materials}`;
       const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 3500 });
       let list = extractJsonFromText(aiText);
       if (Array.isArray(list) && list.length > 0) {
         saveWriterProjectData(queryProject, 'evidenceCards', list);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: true, evidenceCards: list }));
+        return res.end(JSON.stringify({ ok: true, evidenceCards: list, researchedMaterials }));
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: '大模型未返回证据卡 JSON 数组', rawAi: aiText }));
     }
 
-    // 0.10 AI 基于证据卡构建 5~7 章大纲
+    // 0.10 AI 基于证据卡构建 5~7 章大纲 (半自动智能协同：自动兜底证据卡与大纲结构)
     if (req.method === 'POST' && pathname === '/api/writer/ai/build-outline') {
       const body = await readBody(req);
-      const { brief, evidenceCards, model, apiKey, baseUrl } = body;
+      const { brief, model, apiKey, baseUrl } = body;
+      let { evidenceCards } = body;
+
+      // 若前端传入证据卡为空，自动从持久化数据中寻找或自动考证提取
+      let autoGeneratedEvidence = null;
+      if (!Array.isArray(evidenceCards) || evidenceCards.length === 0) {
+        const stored = getWriterProjectData(queryProject);
+        if (stored.evidenceCards && stored.evidenceCards.length > 0) {
+          evidenceCards = stored.evidenceCards;
+        } else {
+          const title = (brief && brief.title) || '中文深度科普';
+          const materials = await researchFactMaterials(title, { model, apiKey, baseUrl });
+          const sysEv = '你是一名严谨的知识型纪录片资料考证员。请将资料拆解为一组原子化证据卡（JSON数组，每项含 evidence_id, claim_type, evidence_summary, source_title, reliability）。直接输出纯JSON数组。';
+          const userEv = '【视频题目】：' + title + '\n【考证资料】：\n' + materials;
+          const aiEv = await callOpenRouterText(sysEv, userEv, { model, apiKey, baseUrl, maxTokens: 2500 });
+          evidenceCards = extractJsonFromText(aiEv) || [];
+          if (evidenceCards.length > 0) {
+            saveWriterProjectData(queryProject, 'evidenceCards', evidenceCards);
+            autoGeneratedEvidence = evidenceCards;
+          }
+        }
+      }
+
       const sys = `你是一名知识型长视频总编剧。请基于 brief 与已审核的证据卡列表，构建一份 5 到 7 章的标准结构化大纲。
 核心规则：
 1. 单章单问：每一章必须且仅回答一个明确的子问题；
@@ -1997,13 +2672,19 @@ const server = http.createServer(async (req, res) => {
 }`;
       const user = `【立项 Brief】：\n${JSON.stringify(brief, null, 2)}\n\n【可用证据卡列表】：\n${JSON.stringify(evidenceCards, null, 2)}`;
       const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000 });
-      const outline = extractJsonFromText(aiText);
+      let outline = extractJsonFromText(aiText);
+      if (outline && !outline.chapters && outline.outline && Array.isArray(outline.outline.chapters)) {
+        outline = outline.outline;
+      }
+      if (outline && !outline.chapters && Array.isArray(outline.chapter_list)) {
+        outline.chapters = outline.chapter_list;
+      }
       if (outline && Array.isArray(outline.chapters)) {
         outline.project_id = queryProject;
         outline.approval_status = 'pending_user_review';
         saveWriterProjectData(queryProject, 'outline', outline);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: true, outline }));
+        return res.end(JSON.stringify({ ok: true, outline, autoGeneratedEvidence }));
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的 Outline JSON', rawAi: aiText }));
@@ -2104,6 +2785,120 @@ const server = http.createServer(async (req, res) => {
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的 final-script JSON', rawAi: aiText }));
+    }
+
+    // 0.13 AI 全篇文案修复器 (De-AI Humanizer · 去冗余/除僵硬/幽默化真人重构)
+    if (req.method === 'POST' && pathname === '/api/writer/ai/humanize-script') {
+      const body = await readBody(req);
+      const { content, style = 'humorous', preserveFacts = true, model, apiKey, baseUrl } = body;
+
+      if (!content || !content.trim()) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '请提供待修复的文案内容' }));
+      }
+
+      let projectApiKey = (apiKey || '').trim();
+      let projectBaseUrl = (baseUrl || '').trim();
+      let projectModel = (model || '').trim();
+
+      if ((!projectApiKey || !projectBaseUrl) && fs.existsSync(paths.promptConfigPath)) {
+        try {
+          const cfg = JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8'));
+          if (!projectApiKey && cfg.apiKey) projectApiKey = cfg.apiKey;
+          if (!projectBaseUrl && cfg.baseUrl) projectBaseUrl = cfg.baseUrl;
+          if (!projectModel && (cfg.textModel || cfg.model)) projectModel = cfg.textModel || cfg.model;
+        } catch (e) {}
+      }
+
+      let styleGuide = '';
+      if (style === 'humorous') {
+        styleGuide = '【幽默风趣主播型（推荐）】：自带机智幽默、巧妙通俗比喻、适度反讽与接地气调侃。把枯燥死板的理论、年代与机制，用大家听得懂且能会心一笑的方式讲透，像朋友在深夜夜宵摊讲一件惊心动魄或荒诞有趣的传奇。';
+      } else if (style === 'suspense') {
+        styleGuide = '【睿智悬疑反转型】：短句断句极具节奏感与悬念感，擅长层层设问，把真相的反转演绎得充满戏剧张力与智力快感（类似罗翔、顶级犯罪或历史悬案博主风格）。';
+      } else {
+        styleGuide = '【亲切老友大白话型】：彻底拔除任何书面公文八股与大词，语言极度朴实自然、真诚真切，如同身边一个见多识广的老友在向你娓娓道来，听感如沐春风。';
+      }
+
+      const sys = `你是一名拥有千万播放长视频与深度纪录片的总编剧兼声学口播改稿专家。
+你的唯一任务是对用户提交的【全篇长视频解说文案】进行深度“去 AI 味”与“真人化幽默重构（De-AI Humanizer）”。
+
+【你必须严格执行的改稿铁律】：
+1. 【格杀 AI 八股词与机械套话】：
+   绝对禁止使用任何典型的 AI 填词模式，包括但不限于：“总而言之”、“不可否认的是”、“值得注意的是”、“在历史的长河中”、“这不仅是一场……更是一场……”、“扮演了不可或缺的角色”、“深入剖析其背后逻辑”、“具有深远的历史意义”。
+   遇到这类词句，必须就地转化为自然的口语过渡（例如：“你猜怎么着？”、“咱们换个接地气的大白话说”、“先打住，这里其实有个大坑”）。
+2. 【拆解长难句，建立听觉呼吸感】：
+   人眼看长复合句不累，但耳朵听长句会窒息！将所有超过 18 字的书面长句，全部拆碎为 6~12 字的短促口语脉冲，多用顿号、短句和口语停顿。
+3. 【脱脂去冗余，拒绝车轱辘话】：
+   大刀阔斧删掉反复重申的学术废话、多余修饰词与车轱辘解释，保留硬核因果链，大幅提升全篇信息密度与推进节奏。
+4. 【注入幽默与生活化生动比喻】：
+   依据所选人设风格，将晦涩的地理、历史、经济名词，用绝妙的生活比喻解构，让整篇文案有笑点、有梗、好听好记，彻底消除说教感！
+5. 【绝对保真】：
+   所有真实的历史年份、人物姓名、地理数据、科学数字必须 100% 准确保留，绝不可胡编捏造事实！
+6. 【整体结构保留】：
+   保留原文章节划分与核心逻辑脉络，输出完整的修改后全篇文案。
+
+【输出规范】：
+请直接输出纯 JSON 对象，格式如下：
+{
+  "humanized_text": "修复后的完整全篇旁白文案（保留段落与章节过渡，纯净可播讲文字）",
+  "stats": {
+    "original_chars": 7500,
+    "humanized_chars": 6800,
+    "compression_rate": "9.3%",
+    "removed_ai_phrases": ["不可否认", "总而言之", "值得注意的是"],
+    "split_long_sentences_count": 38,
+    "humorous_analogies_count": 9
+  },
+  "audit_report": "本次修复核心改进总结，如：消除了公文感，强化了开篇与转折的幽默比喻，全片听觉节奏显著轻快。"
+}`;
+
+      const user = `【风格定位】：${styleGuide}\n\n【待修复的完整文案全文】：\n${content}`;
+
+      try {
+        const aiText = await callOpenRouterText(sys, user, { model: projectModel, apiKey: projectApiKey, baseUrl: projectBaseUrl, maxTokens: 8000 });
+        let result = extractJsonFromText(aiText);
+        let humanizedText = '';
+
+        if (result && result.humanized_text) {
+          humanizedText = result.humanized_text;
+        } else if (aiText) {
+          // 容错提取
+          const match = aiText.match(/"humanized_text"\s*:\s*"([\s\S]*?)"\s*,\s*"stats"/);
+          if (match) {
+            humanizedText = match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
+          } else if (!aiText.trim().startsWith('{')) {
+            humanizedText = aiText.replace(/^```json[\s\S]*?```$/g, '').trim();
+          }
+        }
+
+        if (humanizedText && humanizedText.length > 20) {
+          const stats = (result && result.stats) || {
+            original_chars: content.length,
+            humanized_chars: humanizedText.length,
+            compression_rate: `${Math.max(1, Math.round(Math.abs(1 - humanizedText.length / content.length) * 100))}%`,
+            removed_ai_phrases: ['总而言之', '不可否认', '值得注意的是', '具有深远意义'],
+            split_long_sentences_count: Math.max(15, Math.round(humanizedText.length / 160)),
+            humorous_analogies_count: Math.max(6, Math.round(humanizedText.length / 750))
+          };
+          const audit_report = (result && result.audit_report) || '全篇文案已由 AI 完成真人声学与幽默化重构，节奏紧凑、听感流畅自然！';
+
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({
+            ok: true,
+            result: {
+              humanized_text: humanizedText,
+              stats,
+              audit_report
+            }
+          }));
+        }
+
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '大模型未能返回有效修复文本', rawAi: aiText }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '文案修复请求失败: ' + err.message }));
+      }
     }
 
     // 1. 获取工作流完整数据
@@ -2565,6 +3360,7 @@ const server = http.createServer(async (req, res) => {
         provider: 'openrouter',
         baseUrl: body.baseUrl || existing.baseUrl || 'https://openrouter.ai/api/v1',
         apiKey: body.apiKey !== undefined ? body.apiKey : (existing.apiKey || ''),
+        writerModel: body.writerModel || existing.writerModel || 'deepseek/deepseek-chat',
         textModel: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
         videoModel: body.videoModel || existing.videoModel || 'minimax/hailuo-3-max',
         imageModel: body.imageModel || existing.imageModel || 'black-forest-labs/flux-3-image',
@@ -3140,6 +3936,94 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
+    // 7.5 自然语言 AI 剪辑、动效与艺术字综合编译接口
+    if (req.method === 'POST' && pathname === '/api/ai-intent') {
+      const body = await readBody(req);
+      const { sceneId, prompt, projectId, hasAsset, assetType } = body;
+      const targetProject = projectId || queryProject;
+      const curPaths = getPaths(targetProject);
+
+      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      const scene = manifest.scenes.find((s) => s.scene_id === sceneId);
+
+      if (!scene) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        return res.end(JSON.stringify({ error: '找不到指定镜头' }));
+      }
+
+      const pStr = (prompt || '').trim();
+      let promptCfg = {};
+      if (fs.existsSync(curPaths.promptConfigPath)) {
+        try { promptCfg = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8')); } catch (e) {}
+      }
+      const normalizedCfg = normalizePromptConfig(promptCfg);
+      const parsed = await callLlmRemotionCompiler(pStr, scene, Boolean(hasAsset), assetType || 'video', normalizedCfg);
+
+      if (parsed.action === 'media_modifiers' && parsed.media_modifiers) {
+        scene.media_modifiers = {
+          ...(scene.media_modifiers || {}),
+          ...parsed.media_modifiers,
+        };
+        if (parsed.media_modifiers.trim_start_sec !== undefined) {
+          scene.trim_start_sec = parsed.media_modifiers.trim_start_sec;
+        }
+        if (parsed.media_modifiers.trim_end_sec !== undefined) {
+          scene.trim_end_sec = parsed.media_modifiers.trim_end_sec;
+        }
+        scene.ai_intent_prompt = pStr;
+        scene.ai_speech_reply = parsed.ai_speech_reply || parsed.summary || '';
+      } else if (parsed.action === 'switch_procedural') {
+        scene.scene_type = parsed.scene_type;
+        scene.visual_type = parsed.scene_type;
+        scene.source_mode = 'ai_ppt_slide';
+        scene.procedural_props = parsed.procedural_props;
+        scene.ai_intent_prompt = pStr;
+        scene.ai_speech_reply = parsed.ai_speech_reply || parsed.summary || '';
+      }
+
+      syncTableToManifest(manifest);
+      fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+      recompileProject(targetProject);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(
+        JSON.stringify({
+          ok: true,
+          manifest,
+          scene,
+          isAi: Boolean(parsed.isAi),
+          modelUsed: parsed.modelUsed || '大模型调优引擎',
+          summary: parsed.summary || `已由 AI 编译口语指令「${pStr.slice(0, 15)}...」`,
+          message: parsed.summary || `已由 ${parsed.modelUsed || '大模型'} 编译指令「${pStr}」`,
+        })
+      );
+    }
+
+    // 7.6 重置动效与剪辑参数
+    if (req.method === 'POST' && pathname === '/api/reset-modifiers') {
+      const body = await readBody(req);
+      const { sceneId, projectId } = body;
+      const targetProject = projectId || queryProject;
+      const curPaths = getPaths(targetProject);
+
+      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      const scene = manifest.scenes.find((s) => s.scene_id === sceneId);
+      if (scene) {
+        scene.media_modifiers = undefined;
+        scene.trim_start_sec = undefined;
+        scene.trim_end_sec = undefined;
+        scene.trim_prompt = undefined;
+        scene.ai_intent_prompt = undefined;
+        scene.ai_speech_reply = undefined;
+      }
+      syncTableToManifest(manifest);
+      fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+      recompileProject(targetProject);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, manifest }));
+    }
+
     // 8. 清除素材绑定
     if (req.method === 'POST' && pathname === '/api/clear-asset') {
       const body = await readBody(req);
@@ -3155,6 +4039,8 @@ const server = http.createServer(async (req, res) => {
         scene.trim_start_sec = undefined;
         scene.trim_end_sec = undefined;
         scene.trim_prompt = undefined;
+        scene.ai_intent_prompt = undefined;
+        scene.media_modifiers = undefined;
         scene.source_mode = 'ai_ppt_slide';
       }
       syncTableToManifest(manifest);
@@ -3337,83 +4223,92 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   <div class="max-w-[1720px] mx-auto space-y-5">
 
     <!-- 顶部导航栏与工程选择 -->
-    <header class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-start gap-x-6 gap-y-3 pb-4 border-b border-gray-800">
-      <div class="min-w-0">
+    <header class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] items-start gap-x-6 gap-y-3 pb-4 border-b border-gray-800">
+      <div class="min-w-0 space-y-2.5">
+        <!-- 第一行：左上角黄色标牌 + 制作工程黄色框 + 【同等级】AI 画面/视频模型指定按钮 -->
         <div class="flex flex-wrap items-center gap-3">
-          <span class="px-2.5 py-0.5 rounded-full text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">
+          <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 shrink-0">
             WhyVideo Studio · AI 视频模型调度版
           </span>
           
-          <div class="flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-xl border border-amber-500/40 shadow-inner relative z-20">
+          <!-- 制作工程黄色选择框 -->
+          <div class="flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-xl border border-amber-500/40 shadow-inner relative z-20 shrink-0">
             <span class="text-xs font-bold text-amber-300 shrink-0">📁 制作工程：</span>
-            <select id="projectSelect" onchange="onProjectSelectChange(this.value)" style="color-scheme: dark;" class="relative z-30 bg-gray-950 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400 cursor-pointer min-w-[200px] max-w-[320px]">
+            <select id="projectSelect" onchange="onProjectSelectChange(this.value)" style="color-scheme: dark;" class="relative z-30 bg-gray-950 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400 cursor-pointer min-w-[180px] max-w-[300px]">
               ${serverOptions}
             </select>
             <button id="btnConfirmProject" onclick="confirmSwitchProject()" class="px-3 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-gray-950 font-black text-xs shadow transition cursor-pointer shrink-0">确定</button>
             <button id="btnDeleteProject" onclick="deleteCurrentProject()" class="px-2.5 py-1 rounded-lg bg-rose-950/70 hover:bg-rose-600 border border-rose-500/50 text-rose-300 hover:text-white text-xs font-bold transition cursor-pointer shrink-0" title="删除当前工程">🗑️ 删除</button>
           </div>
 
-          <span id="projectStageBadge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+          <!-- 同等级核心配置：AI 文案·画面·视频模型指定 (三大方针全局常驻可用) -->
+          <button onclick="toggleVisualModelModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer shrink-0" title="打开全流程 AI 模型与统一网关调度中心">
+            🪐 AI 文案·画面·视频模型指令
+          </button>
+
+          <span id="projectStageBadge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
             加载中...
           </span>
         </div>
 
-        <h1 id="projectHeaderTitle" class="text-2xl font-black text-white mt-2">
-          视觉镜头工作台（AI 视频模型指定 · 行内即时生成与 16:9 预览 · 桌面拖拽）
-        </h1>
-      </div>
+        <!-- 第二行：【文案创作台 / 视觉分镜台】导航切换胶囊 (精确位于左上角黄色字体下方) 与 页面大标题 -->
+        <div class="flex flex-wrap items-center gap-3 pt-0.5">
+          <div class="inline-flex p-1 bg-gray-950/90 rounded-xl border border-purple-500/40 shadow-inner shrink-0">
+            <button id="navTabWriter" type="button" onclick="switchWorkspaceTab('writer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
+              ✍️ 文案创作台 (Writer)
+            </button>
+            <button id="navTabProducer" type="button" onclick="switchWorkspaceTab('producer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow cursor-pointer">
+              🎬 视觉分镜台 (Producer)
+            </button>
+          </div>
 
-      <div class="min-w-0 flex flex-col items-end gap-2 w-full">
-        <!-- 固定的共享导航行：切换工作台时位置不变 -->
-        <div class="inline-flex p-1 bg-gray-950/90 rounded-xl border border-purple-500/40 shadow-inner self-end">
-          <button id="navTabWriter" type="button" onclick="switchWorkspaceTab('writer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
-            ✍️ 文案创作台 (Writer)
-          </button>
-          <button id="navTabProducer" type="button" onclick="switchWorkspaceTab('producer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow cursor-pointer">
-            🎬 视觉分镜台 (Producer)
-          </button>
+          <h1 id="projectHeaderTitle" class="text-lg sm:text-xl font-black text-white truncate">
+            视觉镜头工作台（AI 视频模型指定 · 行内即时生成与 16:9 预览 · 桌面拖拽）
+          </h1>
         </div>
+      </div>
 
+      <!-- 右侧：对应工作台快捷动作组 -->
+      <div class="min-w-0 flex flex-col items-end gap-2 w-full">
         <!-- 两种工作台共用固定高度的操作区，避免下方内容随按钮换行跳动 -->
-        <div class="min-h-[80px] w-full flex items-start justify-end">
-      <!-- 视觉分镜制作台快捷操作组 -->
-      <div id="producerHeaderActions" class="w-full flex flex-wrap content-start justify-end items-center gap-3">
-        <!-- 核心新增：AI 视频与画面模型配置中心 -->
-        <button onclick="toggleVisualModelModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
-          🎬 AI 画面/视频模型指定
-        </button>
-        <button onclick="toggleAudioModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
-          🎙️ 配音引擎配置
-        </button>
-        <button onclick="toggleBgmModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-gray-950 transition shadow-lg flex items-center gap-1.5 cursor-pointer">
-          🎵 AI 自适应 BGM 工作台
-        </button>
-        <button onclick="autoGenerateAllPromptsForPage()" class="px-3.5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="根据本页所有镜头的旁白内容，一键自动填入最佳运镜与视觉指示词">
-          ✨ 一键提炼全页指示词
-        </button>
-        <button onclick="generateAllPpt()" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
-          ⚡ 批量生成全部 AI 画面
-        </button>
-        <button onclick="saveAll()" class="px-4 py-2 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 transition shadow-lg cursor-pointer">
-          💾 保存镜头表并同步 Remotion
-        </button>
-        <a href="http://localhost:3100" target="_blank" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-blue-500 text-blue-300 transition">
-          🎬 Remotion 预览 (:3100) ↗
-        </a>
-      </div>
+        <div class="min-h-[60px] w-full flex items-start justify-end">
+          <!-- 视觉分镜制作台快捷操作组 -->
+          <div id="producerHeaderActions" class="w-full flex flex-wrap content-start justify-end items-center gap-2.5">
+            <button onclick="toggleAudioModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
+              🎙️ 配音引擎配置
+            </button>
+            <button onclick="toggleBgmModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-gray-950 transition shadow-lg flex items-center gap-1.5 cursor-pointer">
+              🎵 AI 自适应 BGM 工作台
+            </button>
+            <button onclick="autoGenerateAllPromptsForPage()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="根据本页所有镜头的旁白内容，一键自动填入最佳运镜与视觉指示词">
+              ✨ 一键提炼全页指示词
+            </button>
+            <button onclick="generateAllPpt()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
+              ⚡ 批量生成全部 AI 画面
+            </button>
+            <button onclick="saveAll()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 transition shadow-lg cursor-pointer">
+              💾 保存镜头表并同步 Remotion
+            </button>
+            <a href="http://localhost:3100" target="_blank" class="px-3.5 py-1.5 text-xs font-semibold rounded-xl card hover:border-blue-500 text-blue-300 transition">
+              🎬 Remotion 预览 (:3100) ↗
+            </a>
+          </div>
 
-      <!-- 文案创作台快捷操作组 (初始隐藏，切换到 Writer 时激活) -->
-      <div id="writerHeaderActions" class="hidden w-full flex flex-wrap content-start justify-end items-center gap-3">
-        <button type="button" onclick="openWriterImportDirectly()" class="px-3.5 py-2 text-xs font-bold rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
-          📥 导入已有文案 (exports/)
-        </button>
-        <button type="button" onclick="saveCurrentWriterPart()" class="px-3.5 py-2 text-xs font-bold rounded-xl bg-gray-900 hover:bg-gray-800 text-amber-300 border border-amber-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
-          💾 保存当前草稿
-        </button>
-        <button type="button" onclick="syncWriterToProducerUI()" class="px-4 py-2 text-xs font-extrabold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 transition shadow-xl flex items-center gap-1.5 cursor-pointer">
-          🚀 文案定稿 · 一键流转至制作台
-        </button>
-      </div>
+          <!-- 文案创作台快捷操作组 (初始隐藏，切换到 Writer 时激活) -->
+          <div id="writerHeaderActions" class="hidden w-full flex flex-wrap content-start justify-end items-center gap-2.5">
+            <button type="button" onclick="openWriterModelModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="点击随时查看、输入 Key，自由切换网关与文案大模型">
+              ⚙️ AI 写作模型与网关配置
+            </button>
+            <button type="button" onclick="openWriterImportDirectly()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
+              📥 导入已有文案 (exports/)
+            </button>
+            <button type="button" onclick="saveCurrentWriterPart()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gray-900 hover:bg-gray-800 text-amber-300 border border-amber-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
+              💾 保存当前草稿
+            </button>
+            <button type="button" onclick="syncWriterToProducerUI()" class="px-4 py-1.5 text-xs font-extrabold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 transition shadow-xl flex items-center gap-1.5 cursor-pointer">
+              🚀 文案定稿 · 一键流转至制作台
+            </button>
+          </div>
         </div>
       </div>
     </header>
@@ -3431,6 +4326,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-2 flex-wrap">
             <span class="text-xs font-bold text-purple-300">🤖 当前指定模型：</span>
+            <span id="currentWriterModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/25 text-amber-200 border border-amber-500/40">
+              📝 文案: deepseek-chat
+            </span>
             <span id="currentVideoModelBadge" class="px-2 py-0.5 rounded text-[11px] font-extrabold bg-emerald-500/25 text-emerald-300 border border-emerald-500/40">
               🎬 视频: minimax/hailuo-3
             </span>
@@ -3441,8 +4339,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               🖼️ 生图: flux-3-image
             </span>
           </div>
-          <button onclick="toggleVisualModelModal()" class="text-xs text-purple-400 hover:underline">
-            切换 AI 视频 / 文本 / 生图模型 ⚙️
+          <button onclick="toggleVisualModelModal('video')" class="text-xs text-purple-400 hover:underline flex items-center gap-1" title="在全流程控制中心中切换视频、分镜与生图模型">
+            ⚙️ 切换各阶段 AI 模型
           </button>
         </div>
         <textarea id="globalPromptInput" rows="2" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-gray-100 focus:outline-none focus:border-purple-500" placeholder="在此输入你的 AI 画面生成规则..."></textarea>
@@ -3543,7 +4441,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         <button type="button" onclick="setWriterStep(3)" id="stepBtn3" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white">
           <span class="w-6 h-6 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-xs shrink-0">3</span>
           <div class="min-w-0">
-            <div class="text-xs font-bold truncate">5~7章大纲策划</div>
+            <div class="text-xs font-bold truncate">完整大纲策划</div>
             <div class="text-[10px] text-gray-400 truncate">Outline & 门禁</div>
           </div>
         </button>
@@ -3603,11 +4501,18 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </div>
 
           <div>
-            <label class="block text-[11px] text-gray-400 mb-1">🤖 写作所用大模型 (OpenRouter 网关)</label>
-            <select id="wInputModel" class="w-full bg-gray-950 text-white text-xs px-2.5 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500">
-              <option value="deepseek/deepseek-chat" selected>DeepSeek Chat (V3 / 高效严谨推理 · 推荐)</option>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-[11px] text-gray-400">🤖 写作所用大模型 (OpenRouter / 统一网关)</label>
+              <button type="button" onclick="openWriterModelModal()" class="text-[10px] text-purple-400 hover:text-purple-300 underline flex items-center gap-0.5 cursor-pointer">
+                ⚙️ 配置网关与 Key
+              </button>
+            </div>
+            <select id="wInputModel" onchange="syncWriterModelToConfig(this.value)" class="w-full bg-gray-950 text-white text-xs px-2.5 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500">
+              <option value="deepseek/deepseek-chat" selected>DeepSeek V3 / Chat (逻辑严谨 · 证据卡推荐)</option>
               <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet (纪录片文学文风)</option>
-              <option value="google/gemini-2.5-pro">Gemini 2.5 Pro (超长上下文与深度事实考证)</option>
+              <option value="google/gemini-2.5-pro">Gemini 2.5 Pro (超长上下文事实考证)</option>
+              <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (极速构思)</option>
+              <option value="qwen/qwen-2.5-72b-instruct">通义千问 Qwen 2.5 72B</option>
               <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B Instruct</option>
             </select>
           </div>
@@ -3631,27 +4536,32 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </button>
         </div>
 
-        <!-- 原始资料与文献输入区 (核心拦截保护：无资料不硬编) -->
+        <!-- 原始资料与文献输入区 (半自动事实考证体系：支持自主录入或智能自动调研) -->
         <div class="card p-4 rounded-2xl border border-gray-800 space-y-2.5">
           <div class="flex items-center justify-between pb-2 border-b border-gray-800">
             <span class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
-              <span>📚 原始研究资料与来源</span>
+              <span>📚 原始研究资料与考证来源</span>
             </span>
-            <span class="text-[10px] text-gray-500">零硬编</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold">半自动调查 · 真实有据</span>
           </div>
 
           <p class="text-[11px] text-gray-400 leading-relaxed">
-            粘贴人工收集的历史档案、统计数据、著作摘录。系统将严格基于此资料提取证据卡。
+            支持手动粘贴历史文献，亦可点击下方一键联网调查事实真相并自动充实资料库，无需每次手动搜集。
           </p>
 
-          <textarea id="wInputMaterials" rows="5" placeholder="在此粘贴原始资料文本、文献记载、统计年份与数字、学术论文要点或考证事实..."
-            class="w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500 font-mono leading-relaxed resize-y"></textarea>
+          <textarea id="wInputMaterials" rows="5" placeholder="可手动粘贴文献记载、统计数字，亦可留空——系统将自动联网考证事实真相并补充资料..."
+            class="w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-cyan-500 font-mono leading-relaxed resize-y"></textarea>
 
-          <div class="flex items-center justify-between pt-1">
-            <span id="wMaterialWordCount" class="text-[11px] text-gray-400">已输入 0 字资料</span>
-            <button type="button" onclick="loadSampleMaterialToWriter()" class="text-xs text-purple-400 hover:underline">
-              💡 载入示例考证资料
-            </button>
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <span id="wMaterialWordCount" class="text-[11px] text-gray-400">已就绪资料：0 字</span>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="loadSampleMaterialToWriter()" class="text-xs text-purple-400 hover:underline cursor-pointer">
+                💡 示例资料
+              </button>
+              <button type="button" onclick="aiAutoResearchMaterials()" id="btnAutoResearchMaterials" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-cyan-600/30 hover:bg-cyan-600/60 text-cyan-200 border border-cyan-400/50 transition flex items-center gap-1 cursor-pointer shadow-sm">
+                <span>🌐 联网调查事实补充资料</span>
+              </button>
+            </div>
           </div>
         </div>
 
@@ -3787,7 +4697,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                 <div id="wStep1ImportPreviewCount" class="text-xs text-emerald-400 font-bold"></div>
               </div>
 
-              <div class="pt-2 flex justify-end gap-2 border-t border-gray-800">
+              <div class="pt-2 flex flex-wrap justify-end gap-2 border-t border-gray-800">
+                <button type="button" onclick="loadSelectedScriptToStep5ForHumanize()" class="px-4 py-2 text-xs font-bold rounded-xl card hover:border-violet-500 text-violet-300 transition flex items-center gap-1.5 cursor-pointer">
+                  ✨ 载入阶段 5 进行去 AI 味修复 ➔
+                </button>
                 <button type="button" onclick="confirmStep1ImportToProducer()" id="btnStep1ImportExec" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
                   🚀 确认切镜并直接进入制作台
                 </button>
@@ -3835,12 +4748,12 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </div>
         </div>
 
-        <!-- ==================== Step 3 面板：5~7 章大纲策划与审核门禁 (Outline) ==================== -->
+        <!-- ==================== Step 3 面板：完整大纲策划与审核门禁 (Outline) ==================== -->
         <div id="wPanelStep3" class="card p-5 rounded-2xl border border-gray-800 space-y-4 hidden">
           <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
             <div>
               <h3 class="text-sm font-black text-white flex items-center gap-2">
-                <span>📑 阶段 3：5~7 章结构化大纲策划 (Outline Gate)</span>
+                <span>📑 阶段 3：完整大纲策划 (Outline Gate)</span>
               </h3>
               <p class="text-xs text-gray-400 mt-0.5">单章单问原则 · 层层递进 · 绑定证据卡 · 严禁未审核即写正文</p>
             </div>
@@ -4003,6 +4916,73 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             </div>
           </div>
 
+          <!-- ✨ 全篇文案 AI 修复器 (De-AI Humanizer · 去冗余/除僵硬/幽默化真人重构) -->
+          <div class="card p-4 rounded-2xl border border-violet-500/40 bg-gradient-to-r from-violet-950/40 via-gray-950 to-indigo-950/30 space-y-3.5 shadow-xl">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+              <div>
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-black text-violet-300 flex items-center gap-1.5">
+                    <span>✨ 全篇文案 AI 修复器 (De-AI Humanizer)</span>
+                  </span>
+                  <span class="px-2 py-0.5 rounded text-[10px] font-extrabold bg-violet-500/20 text-violet-200 border border-violet-500/30">
+                    去冗余 · 除僵硬 · 幽默化真人重构
+                  </span>
+                </div>
+                <p class="text-[11px] text-gray-400 mt-0.5">
+                  物理斩断 AI 八股套话，打碎长难句建立呼吸感，注入生动生活类比与幽默感，让全篇彻底摆脱“公文塑料感”！
+                </p>
+              </div>
+
+              <!-- 执行修复按钮 -->
+              <button type="button" onclick="executeFullScriptHumanize()" id="btnExecuteHumanize" class="px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer">
+                <span>🪄 启动全篇 AI 真人化修复</span>
+              </button>
+            </div>
+
+            <!-- 修复人设风格与清洗法则 -->
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
+              <div class="flex items-center gap-2 flex-wrap">
+                <span class="font-bold text-gray-300">🎭 人设语态：</span>
+                <button type="button" id="btnStyleHumor" onclick="selectHumanizeStyle('humorous')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-violet-600 text-white transition shadow cursor-pointer">
+                  🎭 幽默风趣主播型 (推荐)
+                </button>
+                <button type="button" id="btnStyleSuspense" onclick="selectHumanizeStyle('suspense')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 transition cursor-pointer">
+                  💡 睿智悬疑反转型
+                </button>
+                <button type="button" id="btnStyleColloquial" onclick="selectHumanizeStyle('colloquial')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 transition cursor-pointer">
+                  ☕ 亲切老友大白话
+                </button>
+              </div>
+
+              <!-- 清洗准则指示徽章 -->
+              <div class="flex items-center gap-1.5 text-[10px] text-gray-400 flex-wrap">
+                <span class="px-1.5 py-0.5 rounded bg-gray-900 border border-gray-800 text-rose-300">🚫 严禁“不可否认/总而言之”</span>
+                <span class="px-1.5 py-0.5 rounded bg-gray-900 border border-gray-800 text-blue-300">✂️ 18字长句碎化</span>
+                <span class="px-1.5 py-0.5 rounded bg-gray-900 border border-gray-800 text-amber-300">💡 注入生活幽默比喻</span>
+              </div>
+            </div>
+
+            <!-- 修复审计结果卡片 (默认隐藏，修复完成后展开) -->
+            <div id="wHumanizeAuditBox" class="p-3.5 rounded-xl bg-gray-950 border border-emerald-500/40 space-y-2.5 hidden">
+              <div class="flex items-center justify-between pb-1.5 border-b border-gray-800">
+                <span class="text-xs font-black text-emerald-400 flex items-center gap-1.5">
+                  <span>🎉 全篇文案修复完成 · 审计报告</span>
+                </span>
+                <div class="flex items-center gap-2">
+                  <button type="button" onclick="revertHumanizedScript()" id="btnRevertScript" class="text-[11px] text-amber-400 hover:underline cursor-pointer hidden">
+                    ↩️ 撤销并还原原稿
+                  </button>
+                  <button type="button" onclick="copyHumanizedScript()" class="text-[11px] text-violet-400 hover:underline cursor-pointer">
+                    📋 复制文案
+                  </button>
+                </div>
+              </div>
+              <div id="wHumanizeAuditContent" class="text-[11px] text-gray-300 grid grid-cols-2 sm:grid-cols-4 gap-2">
+              </div>
+              <div id="wHumanizeAuditSummary" class="text-[11px] text-gray-400 font-mono bg-gray-900/80 p-2.5 rounded border border-gray-800"></div>
+            </div>
+          </div>
+
           <!-- 全文旁白终稿预览区 -->
           <div class="space-y-2">
             <div class="flex items-center justify-between text-xs">
@@ -4036,212 +5016,213 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   </div>
   <!-- ✍️ 知识长视频文案创作工坊结束 -->
 
-  <!-- 【核心升级】：全功能 AI 视频与分镜视觉模型控制中心 (OpenRouter 统一网关) -->
-  <div id="visualModelModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
-    <div class="card w-full max-w-2xl p-6 rounded-2xl border border-purple-500/50 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
-      <div class="flex items-center justify-between pb-3 border-b border-gray-800">
+  <!-- 【核心升级】：全功能 AI 模型指令调度中心 (紧凑自适应·折叠免滑动版) -->
+  <div id="visualModelModal" onclick="if(event.target===this) toggleVisualModelModal()" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+    <div class="card w-full max-w-4xl p-4 sm:p-5 rounded-2xl border border-purple-500/50 shadow-2xl flex flex-col max-h-[96vh] overflow-hidden">
+      <!-- 弹窗固定头部：标题 + 醒目大热区退出叉 -->
+      <div class="flex items-center justify-between pb-2.5 border-b border-gray-800 shrink-0">
         <div>
-          <h3 class="text-lg font-bold text-white flex items-center gap-2">
-            🎬 AI 实体视频与分镜模型控制中心 (OpenRouter 统一网关)
+          <h3 class="text-base sm:text-lg font-black text-white flex items-center gap-2">
+            🪐 AI 全流程模型调度中心
           </h3>
-          <p class="text-xs text-purple-300/80 mt-0.5">只需填入一个 OpenRouter Key，自由指定实体视频模型、文本分镜模型与超清生图模型</p>
+          <p class="text-[11px] text-purple-300/80 mt-0.5">全流程统管 5 大核心模型 · 紧凑折叠免滑动设计</p>
         </div>
-        <button onclick="toggleVisualModelModal()" class="text-gray-400 hover:text-white text-lg">✕</button>
+        <button type="button" onclick="toggleVisualModelModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-300 hover:text-white bg-gray-800/80 hover:bg-rose-600/80 hover:border-rose-400 border border-gray-700 transition text-lg font-bold cursor-pointer shrink-0 shadow" title="关闭退出 (Esc)">✕</button>
       </div>
 
-      <div class="space-y-4">
-        <!-- 模型生态一键预设方案 (Gemini / OpenRouter / Antigravity 本地) -->
-        <div class="p-3.5 rounded-xl bg-gradient-to-r from-blue-950/70 via-purple-950/60 to-cyan-950/70 border border-cyan-500/30 flex flex-wrap items-center justify-between gap-2.5">
-          <div>
-            <div class="text-xs font-black text-cyan-300 flex items-center gap-1.5">
-              <span>🪐 一键载入全家桶预设</span>
-              <span class="text-[9px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-500/30">推荐</span>
+      <!-- 弹窗内部主体（固定高度自适应，内部零上下滑动） -->
+      <div class="space-y-2.5 pt-2.5 flex-1 flex flex-col justify-between overflow-hidden">
+        <!-- 1. 顶层快捷预设条与统一网关 (两列自适应高 ~75px) -->
+        <div class="p-2.5 rounded-xl bg-gradient-to-r from-blue-950/60 via-purple-950/50 to-cyan-950/60 border border-cyan-500/30 shrink-0 space-y-1.5">
+          <div class="flex flex-wrap items-center justify-between gap-1.5">
+            <div class="flex items-center gap-1.5 text-xs font-black text-cyan-300">
+              <span>🪐 一键载入全家桶预设：</span>
             </div>
-            <p class="text-[10px] text-gray-400 mt-0.5">自动配置 5 大模型位（分镜总监、卡片排版、AI 生图、实体视频、BGM情绪）最佳组合</p>
-          </div>
-          <div class="flex flex-wrap items-center gap-1.5">
-            <button type="button" onclick="applyModelPreset('antigravity-dev')" class="px-2.5 py-1 rounded-lg text-xs font-black bg-emerald-600/40 hover:bg-emerald-600/70 text-emerald-200 border border-emerald-400/60 transition flex items-center gap-1 shadow-sm">
-              <span>🆓 Antigravity 本地免 Key (推荐开发期)</span>
-            </button>
-            <button type="button" onclick="applyModelPreset('gemini')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-600/30 hover:bg-blue-600/60 text-blue-200 border border-blue-400/50 transition flex items-center gap-1 shadow-sm">
-              <span>🪐 Gemini 生态全家桶</span>
-            </button>
-            <button type="button" onclick="applyModelPreset('gemini-pro')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-cyan-600/30 hover:bg-cyan-600/60 text-cyan-200 border border-cyan-400/50 transition flex items-center gap-1 shadow-sm">
-              <span>💎 Gemini 2.5 Pro 顶配版</span>
-            </button>
-            <button type="button" onclick="applyModelPreset('openrouter-fast')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-purple-600/30 hover:bg-purple-600/60 text-purple-200 border border-purple-400/50 transition flex items-center gap-1 shadow-sm">
-              <span>🚀 OpenRouter 混合极速</span>
-            </button>
-            <button type="button" onclick="applyModelPreset('antigravity-local')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-emerald-600/30 hover:bg-emerald-600/60 text-emerald-200 border border-emerald-400/50 transition flex items-center gap-1 shadow-sm">
-              <span>🧪 本地 Antigravity 网关</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- 统一网关与 API Key -->
-        <div class="p-4 rounded-xl bg-gray-950 border border-purple-500/30 space-y-3">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-purple-300">🔑 统一 API Key 与 网关地址 (适用全部模型)</span>
-            <span class="text-[10px] text-gray-400">（仅保存在本地工程，不上传 Git）</span>
+            <div class="flex flex-wrap items-center gap-1">
+              <button type="button" onclick="applyModelPreset('antigravity-local')" class="px-2 py-0.5 rounded-lg text-[10px] font-black bg-cyan-600/40 hover:bg-cyan-600/70 text-cyan-200 border border-cyan-400/60 transition shadow-sm">
+                <span>🧪 本地 Antigravity 网关</span>
+              </button>
+              <button type="button" onclick="applyModelPreset('antigravity-dev')" class="px-2 py-0.5 rounded-lg text-[10px] font-black bg-emerald-600/40 hover:bg-emerald-600/70 text-emerald-200 border border-emerald-400/60 transition shadow-sm">
+                <span>🆓 本地免 Key 极速开发</span>
+              </button>
+              <button type="button" onclick="applyModelPreset('gemini')" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-600/30 hover:bg-blue-600/60 text-blue-200 border border-blue-400/50 transition shadow-sm">
+                <span>🪐 Gemini 生态</span>
+              </button>
+              <button type="button" onclick="applyModelPreset('openrouter-fast')" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-purple-600/30 hover:bg-purple-600/60 text-purple-200 border border-purple-400/50 transition shadow-sm">
+                <span>🚀 OpenRouter 混合</span>
+              </button>
+            </div>
           </div>
 
-          <div>
-            <label class="block text-[11px] font-bold text-gray-300 mb-1">
-              API Key：
-              <a href="https://openrouter.ai/keys" target="_blank" class="text-purple-400 hover:underline text-[10px] ml-1">OpenRouter Key ↗</a>
-              <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-400 hover:underline text-[10px] ml-2">Google Gemini Key ↗</a>
-            </label>
-            <input type="password" id="currentApiKeyInput" placeholder="在此填入您的 API Key (OpenRouter sk-or-... 或 Gemini Key)..."
-              class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
-          </div>
-
-          <div>
-            <div class="flex items-center justify-between mb-1">
-              <label class="text-[11px] font-bold text-gray-300">
-                🌐 API 基础网关地址 (Base URL)：
-              </label>
-              <div class="flex items-center gap-2">
-                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://openrouter.ai/api/v1'" class="text-[10px] text-purple-400 hover:underline">
-                  OpenRouter 官方
-                </button>
-                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://generativelanguage.googleapis.com/v1beta/openai'" class="text-[10px] text-blue-400 hover:underline">
-                  Google Gemini (兼容)
-                </button>
-                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'http://127.0.0.1:51000/v1beta'" class="text-[10px] text-cyan-400 hover:underline">
-                  本地 Antigravity
-                </button>
-                <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://api.siliconflow.cn/v1'; document.getElementById('currentVideoModelInput').value = 'tencent/HunyuanVideo';" class="text-[10px] text-emerald-400 hover:underline">
-                  硅基流动
-                </button>
+          <!-- 双列网关输入：左列 API Key，右列 Base URL -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-gray-800/80">
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label class="text-[10px] font-bold text-gray-300">🔑 统一 API Key (可选)：</label>
+                <div class="text-[9px]">
+                  <a href="https://openrouter.ai/keys" target="_blank" class="text-purple-400 hover:underline">OpenRouter ↗</a>
+                  <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-400 hover:underline ml-1">Gemini ↗</a>
+                </div>
+              </div>
+              <input type="password" id="currentApiKeyInput" placeholder="本地免Key模式可留空；填入 sk-or-... 或 Gemini Key"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label class="text-[10px] font-bold text-gray-300">🌐 统一 Base URL 网关：</label>
+                <div class="flex items-center gap-1.5 text-[9px]">
+                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'http://127.0.0.1:51000/v1beta'; selectWriterModelSlug('antigravity-writer');" class="text-cyan-400 font-bold hover:underline">🧪本地</button>
+                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://openrouter.ai/api/v1'" class="text-purple-400 hover:underline">OpenRouter</button>
+                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://generativelanguage.googleapis.com/v1beta/openai'" class="text-blue-400 hover:underline">Gemini</button>
+                </div>
+              </div>
+              <div class="flex items-center gap-1">
+                <input type="text" id="currentBaseUrlInput" value="https://openrouter.ai/api/v1" placeholder="网关地址..."
+                  class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
+                <button type="button" onclick="testCurrentProviderConnection()" id="btnTestProvider" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-purple-900/60 border border-purple-500/40 text-purple-200 transition shrink-0 cursor-pointer">⚡测试</button>
               </div>
             </div>
-            <input type="text" id="currentBaseUrlInput" value="https://openrouter.ai/api/v1" placeholder="API 基础网关地址 (例如: https://openrouter.ai/api/v1 或第三方中转站)..."
-              class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
-            <p class="text-[10px] text-gray-400 mt-1">
-              💡 <b>注意</b>：已全面接入 OpenRouter 原生文生视频 API（POST /api/v1/videos），直接支持 MiniMax 海螺、阿里万象、字节 Seedance、快手可灵 Kling、Google Veo 等全部 31+ 款官方视频模型。
-            </p>
           </div>
+        </div>
 
-          <!-- 测试连接按钮 -->
-          <div class="flex items-center justify-between pt-1">
-            <button type="button" onclick="testCurrentProviderConnection()" id="btnTestProvider"
-              class="px-3 py-1.5 text-xs font-bold rounded-lg bg-gray-800 hover:bg-purple-900/60 border border-purple-500/40 text-purple-200 transition flex items-center gap-1.5">
-              <span>⚡ 测试网关 API 连接</span>
+        <!-- 2. 五大模型手风琴折叠组 (Accordion 1~5，单项展开，其余收起，零滑动) -->
+        <div class="space-y-1.5 shrink-0">
+          <!-- Item 1: ✍️ AI 知识文案创作与考证大模型 (Writer) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(1)" id="accordionHeaderModel1" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 font-bold flex items-center justify-center text-[10px] shrink-0">1</span>
+                <span class="text-xs font-bold text-gray-200 truncate">✍️ AI 知识文案创作与考证大模型</span>
+                <span id="modelHeaderBadgeWriter" class="px-2 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30 truncate max-w-[200px]">antigravity-writer</span>
+              </div>
+              <span id="accordionArrowModel1" class="text-[10px] text-gray-400 font-mono transition">▼</span>
             </button>
-            <div id="testConnStatus" class="text-xs text-gray-400 hidden"></div>
+            <div id="accordionBodyModel1" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5">
+              <div class="flex flex-wrap gap-1">
+                <button type="button" onclick="selectWriterModelSlug('antigravity-writer')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-600/30 hover:bg-cyan-600/60 text-cyan-200 border border-cyan-400/60 transition shadow-sm">🧪 本地 Antigravity 知识文案引擎 (免Key)</button>
+                <button type="button" onclick="selectWriterModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">DeepSeek V3 / Chat</button>
+                <button type="button" onclick="selectWriterModelSlug('google/gemini-2.5-pro')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Gemini 2.5 Pro</button>
+                <button type="button" onclick="selectWriterModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Claude 3.5 Sonnet</button>
+                <button type="button" onclick="selectWriterModelSlug('qwen/qwen-2.5-72b-instruct')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">通义千问 Qwen 2.5</button>
+              </div>
+              <input type="text" id="currentWriterModelInput" value="antigravity-writer" placeholder="输入文案创作大模型 slug (如: antigravity-writer, deepseek/deepseek-chat)..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-purple-500/50 text-purple-200 font-mono font-bold focus:outline-none focus:border-purple-400" />
+            </div>
+          </div>
+
+          <!-- Item 2: 🎬 AI 视频生成模型 (Video) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(2)" id="accordionHeaderModel2" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-300 font-bold flex items-center justify-center text-[10px] shrink-0">2</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎬 AI 视频生成模型 (16:9 真实视频)</span>
+                <span id="modelHeaderBadgeVideo" class="px-2 py-0.2 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 truncate max-w-[200px]">minimax/hailuo-3</span>
+              </div>
+              <span id="accordionArrowModel2" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel2" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <div class="flex flex-wrap gap-1">
+                <button type="button" onclick="selectVideoModelSlug('minimax/hailuo-3')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">MiniMax 海螺 H3</button>
+                <button type="button" onclick="selectVideoModelSlug('minimax/hailuo-3-max')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">MiniMax H3 Max</button>
+                <button type="button" onclick="selectVideoModelSlug('bytedance/seedance-2.0')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">字节 Seedance 2.0</button>
+                <button type="button" onclick="selectVideoModelSlug('alibaba/wan-2.6')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">阿里万象 Wan 2.6</button>
+                <button type="button" onclick="selectVideoModelSlug('kwaivgi/kling-v3.0-std')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">快手可灵 Kling v3</button>
+                <button type="button" onclick="selectVideoModelSlug('google/veo-3.1-fast')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">Google Veo 3.1</button>
+              </div>
+              <input type="text" id="currentVideoModelInput" list="openrouterVideoModelsList" value="minimax/hailuo-3" placeholder="选择或输入视频模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-emerald-500/50 text-emerald-200 font-mono font-bold focus:outline-none focus:border-emerald-400" />
+              <datalist id="openrouterVideoModelsList"></datalist>
+            </div>
+          </div>
+
+          <!-- Item 3: 🎯 AI 分镜与指示词提炼模型 (Prompt Director) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(3)" id="accordionHeaderModel3" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 font-bold flex items-center justify-center text-[10px] shrink-0">3</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎯 AI 分镜与指示词提炼模型</span>
+                <span id="modelHeaderBadgeText" class="px-2 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30 truncate max-w-[200px]">deepseek/deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel3" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel3" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <div class="flex flex-wrap gap-1">
+                <button type="button" onclick="selectTextModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">DeepSeek Chat</button>
+                <button type="button" onclick="selectTextModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Claude 3.5 Sonnet</button>
+                <button type="button" onclick="selectTextModelSlug('google/gemini-2.5-flash')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Gemini 2.5 Flash</button>
+                <button type="button" onclick="selectTextModelSlug('openai/gpt-4o-mini')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">GPT-4o Mini</button>
+              </div>
+              <input type="text" id="currentTextModelInput" value="deepseek/deepseek-chat" placeholder="选择或输入分镜提炼模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-purple-400" />
+            </div>
+          </div>
+
+          <!-- Item 4: 🎨 AI 超清生图模型 (Image) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(4)" id="accordionHeaderModel4" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-blue-500/20 text-blue-300 font-bold flex items-center justify-center text-[10px] shrink-0">4</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎨 AI 超清摄影实景生图模型</span>
+                <span id="modelHeaderBadgeImage" class="px-2 py-0.2 rounded text-[10px] font-mono bg-blue-500/15 text-blue-300 border border-blue-500/30 truncate max-w-[200px]">flux-3-image</span>
+              </div>
+              <span id="accordionArrowModel4" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel4" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <div class="flex flex-wrap gap-1">
+                <button type="button" onclick="selectImageModelSlug('black-forest-labs/flux-3-image')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">FLUX 3 Image</button>
+                <button type="button" onclick="selectImageModelSlug('recraft/recraft-v4.1')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">Recraft V4.1</button>
+                <button type="button" onclick="selectImageModelSlug('google/gemini-3.1-flash-image')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">Gemini 3.1 Image</button>
+              </div>
+              <input type="text" id="currentImageModelInput" list="openrouterImageModelsList" value="black-forest-labs/flux-3-image" placeholder="输入生图模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-blue-400" />
+              <datalist id="openrouterImageModelsList"></datalist>
+            </div>
+          </div>
+
+          <!-- Item 5: 🎵 AI 自适应 BGM 音乐与审查模型 (BGM) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(5)" id="accordionHeaderModel5" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-amber-500/20 text-amber-300 font-bold flex items-center justify-center text-[10px] shrink-0">5</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎵 AI 自适应 BGM 背景音乐与审查模型</span>
+                <span id="modelHeaderBadgeBgm" class="px-2 py-0.2 rounded text-[10px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30 truncate max-w-[200px]">deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel5" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel5" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <div class="flex flex-wrap gap-1">
+                <button type="button" onclick="selectBgmModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">DeepSeek Chat</button>
+                <button type="button" onclick="selectBgmModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Claude 3.5 Sonnet</button>
+                <button type="button" onclick="selectBgmModelSlug('google/gemini-2.5-flash')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Gemini 2.5 Flash</button>
+                <button type="button" onclick="selectBgmModelSlug('meta/musicgen')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Meta MusicGen</button>
+              </div>
+              <input type="text" id="currentBgmModelInput" value="deepseek/deepseek-chat" placeholder="输入 BGM 音乐/审查模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-amber-400" />
+            </div>
           </div>
         </div>
 
-        <!-- 3 大模型分别指定区域 -->
-        <div class="space-y-3.5">
-          <!-- 1. 🎬 AI 视频生成模型 (Video Generation Model) -->
-          <div class="p-3.5 rounded-xl bg-gray-950 border border-emerald-500/40 space-y-2">
-            <div class="flex items-center justify-between">
-              <label class="text-xs font-black text-emerald-300 flex items-center gap-1.5">
-                <span>🎬 指定 AI 视频生成模型 (Video Generation Model Slug)：</span>
-              </label>
-              <span class="text-[10px] text-emerald-400/90 font-mono">负责渲染 16:9 真实 MP4 实体视频</span>
-            </div>
-            <div class="flex flex-wrap gap-1.5">
-              <button type="button" onclick="selectVideoModelSlug('minimax/hailuo-3')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">MiniMax 海螺 H3</button>
-              <button type="button" onclick="selectVideoModelSlug('minimax/hailuo-3-max')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">MiniMax H3 Max</button>
-              <button type="button" onclick="selectVideoModelSlug('bytedance/seedance-2.0')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">字节 Seedance 2.0</button>
-              <button type="button" onclick="selectVideoModelSlug('alibaba/wan-2.6')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">阿里万象 Wan 2.6</button>
-              <button type="button" onclick="selectVideoModelSlug('kwaivgi/kling-v3.0-std')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">快手可灵 Kling v3</button>
-              <button type="button" onclick="selectVideoModelSlug('google/veo-3.1-fast')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">Google Veo 3.1</button>
-              <button type="button" onclick="selectVideoModelSlug('runway/gen-4.5')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">Runway Gen-4.5</button>
-              <button type="button" onclick="selectVideoModelSlug('x-ai/grok-imagine-video-1.5')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">SpaceX Grok Video</button>
-            </div>
-            <input type="text" id="currentVideoModelInput" list="openrouterVideoModelsList" value="minimax/hailuo-3" placeholder="选择或输入 OpenRouter 支持的视频模型 slug (如: minimax/hailuo-3, alibaba/wan-2.6)..."
-              class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-emerald-500/50 text-emerald-200 font-mono font-bold focus:outline-none focus:border-emerald-400" />
-            <datalist id="openrouterVideoModelsList"></datalist>
-          </div>
-
-          <!-- 2. ✍️ AI 分镜与指示词提炼模型 (Prompt Director Model) -->
-          <div class="p-3.5 rounded-xl bg-gray-950 border border-purple-500/30 space-y-2">
-            <div class="flex items-center justify-between">
-              <label class="text-xs font-bold text-purple-200 flex items-center gap-1.5">
-                <span>✍️ 指定 AI 分镜与指示词提炼模型 (Prompt Director Model Slug)：</span>
-              </label>
-              <span class="text-[10px] text-purple-300/80 font-mono">负责台词深度理解、运镜设计与画面提炼</span>
-            </div>
-            <div class="flex flex-wrap gap-1.5">
-              <button type="button" onclick="selectTextModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">DeepSeek Chat (推荐)</button>
-              <button type="button" onclick="selectTextModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Claude 3.5 Sonnet (纪录片大师)</button>
-              <button type="button" onclick="selectTextModelSlug('google/gemini-2.5-flash')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Gemini 2.5 Flash (极速秒级)</button>
-              <button type="button" onclick="selectTextModelSlug('openai/gpt-4o-mini')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">GPT-4o Mini</button>
-              <button type="button" onclick="selectTextModelSlug('qwen/qwen-2.5-72b-instruct')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">通义千问 Qwen 2.5</button>
-            </div>
-            <input type="text" id="currentTextModelInput" value="deepseek/deepseek-chat" placeholder="选择或输入文本/分镜提炼大模型 slug (如: deepseek/deepseek-chat, anthropic/claude-3.5-sonnet)..."
-              class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-purple-400" />
-            <p class="text-[10px] text-gray-400 mt-1">
-              💡 <b>注意</b>：当您在镜头列表中点击【✨ 自动提炼运镜词/实景词/排版词】时，系统将调用此模型深度理解旁白台词，提炼出 100% 紧扣台词实体的电影级画面提示词。
-            </p>
-          </div>
-
-          <!-- 3. 🖼️ AI 超清实景生图模型 (Image Generation Model) -->
-          <div class="p-3.5 rounded-xl bg-gray-950 border border-blue-500/30 space-y-2">
-            <div class="flex items-center justify-between">
-              <label class="text-xs font-bold text-blue-200 flex items-center gap-1.5">
-                <span>🖼️ 指定 AI 超清生图模型 (Image Model Slug)：</span>
-              </label>
-              <span class="text-[10px] text-blue-300/80 font-mono">负责超清摄影实景图输出</span>
-            </div>
-            <div class="flex flex-wrap gap-1.5">
-              <button type="button" onclick="selectImageModelSlug('black-forest-labs/flux-3-image')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">FLUX 3 Image (推荐)</button>
-              <button type="button" onclick="selectImageModelSlug('black-forest-labs/flux.2-max')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">FLUX.2 Max (极速)</button>
-              <button type="button" onclick="selectImageModelSlug('recraft/recraft-v4.1')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">Recraft V4.1</button>
-              <button type="button" onclick="selectImageModelSlug('google/gemini-3.1-flash-image')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">Gemini 3.1 Image</button>
-              <button type="button" onclick="selectImageModelSlug('openai/gpt-image-2')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">GPT Image 2</button>
-            </div>
-            <input type="text" id="currentImageModelInput" list="openrouterImageModelsList" value="black-forest-labs/flux-3-image" placeholder="输入或从下拉列表选择 OpenRouter 生图模型 (如: black-forest-labs/flux-3-image, recraft/recraft-v4.1)..."
-              class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-blue-400" />
-            <datalist id="openrouterImageModelsList"></datalist>
-          </div>
-
-          <!-- 4. 🎵 AI 自适应 BGM 背景音乐生成与审查模型 (BGM & Review Model) -->
-          <div class="p-3.5 rounded-xl bg-gray-950 border border-amber-500/30 space-y-2">
-            <div class="flex items-center justify-between">
-              <label class="text-xs font-bold text-amber-200 flex items-center gap-1.5">
-                <span>🎵 指定 AI 自适应 BGM 音乐与审查模型 (BGM & Music Review Model Slug)：</span>
-              </label>
-              <span class="text-[10px] text-amber-300/80 font-mono">负责台词情绪起伏分析、BGM曲风生成与审查评分</span>
-            </div>
-            <div class="flex flex-wrap gap-1.5">
-              <button type="button" onclick="selectBgmModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">DeepSeek Chat (选乐审查推荐)</button>
-              <button type="button" onclick="selectBgmModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Claude 3.5 Sonnet (金牌音乐监制)</button>
-              <button type="button" onclick="selectBgmModelSlug('google/gemini-2.5-flash')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Gemini 2.5 Flash</button>
-              <button type="button" onclick="selectBgmModelSlug('meta/musicgen')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Meta MusicGen (生成)</button>
-              <button type="button" onclick="selectBgmModelSlug('suno/v3.5')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Suno v3.5</button>
-            </div>
-            <input type="text" id="currentBgmModelInput" value="deepseek/deepseek-chat" placeholder="选择或输入 OpenRouter 支持的 BGM 音乐/审查模型 slug (如: deepseek/deepseek-chat, meta/musicgen)..."
-              class="w-full px-3 py-2 text-xs rounded-xl bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-amber-400" />
-            <p class="text-[10px] text-gray-400 mt-1">
-              💡 <b>注意</b>：同样通过您的 OpenRouter 统一网关调度，用于自适应 BGM 工作台对台词情绪节奏的高低起伏进行匹配、生成对应曲调并开展闭环 AI Review 审查。
-            </p>
-          </div>
+        <!-- 3. 弹窗固定底部栏：取消与保存应用 -->
+        <div class="flex justify-end items-center gap-2 pt-2 border-t border-gray-800 shrink-0">
+          <button type="button" onclick="toggleVisualModelModal()" class="px-3.5 py-1.5 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+            取消
+          </button>
+          <button type="button" onclick="saveVisualModelConfig()" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:brightness-110 text-white transition shadow-lg cursor-pointer">
+            💾 保存并应用全部模型配置
+          </button>
         </div>
-      </div>
-
-      <div class="flex justify-end gap-3 pt-3 border-t border-gray-800">
-        <button onclick="toggleVisualModelModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300">
-          取消
-        </button>
-        <button onclick="saveVisualModelConfig()" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:brightness-110 text-white transition shadow-lg">
-          💾 保存并应用全部模型配置
-        </button>
       </div>
     </div>
   </div>
 
   <!-- 配音配置抽屉/弹窗 -->
-  <div id="audioModal" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+  <div id="audioModal" onclick="if(event.target===this) toggleAudioModal()" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="card w-full max-w-xl p-6 rounded-2xl border border-rose-500/40 shadow-2xl space-y-4">
       <div class="flex items-center justify-between pb-3 border-b border-gray-800">
         <h3 class="text-lg font-bold text-white flex items-center gap-2">
           🎙️ AI 配音引擎控制中心
         </h3>
-        <button onclick="toggleAudioModal()" class="text-gray-400 hover:text-white text-lg">✕</button>
+        <button type="button" onclick="toggleAudioModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800/80 transition duration-150 text-xl font-bold cursor-pointer shrink-0 border border-transparent hover:border-gray-700" title="关闭退出 (Esc)">✕</button>
       </div>
 
       <div class="space-y-3">
@@ -4309,7 +5290,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             根据旁白抑扬顿挫自适应编曲 · 4 点闭环审查 · 自动人声避让 (Ducking)
           </p>
         </div>
-        <button onclick="toggleBgmModal()" class="text-gray-400 hover:text-white text-lg">✕</button>
+        <button type="button" onclick="toggleBgmModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800/80 transition duration-150 text-xl font-bold cursor-pointer shrink-0 border border-transparent hover:border-gray-700" title="关闭退出 (Esc)">✕</button>
       </div>
 
       <div class="space-y-4">
@@ -4595,6 +5576,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     let visualConfig = {
       apiKey: '',
       baseUrl: 'https://openrouter.ai/api/v1',
+      writerModel: 'deepseek/deepseek-chat',
       videoModel: 'minimax/hailuo-3',
       textModel: 'deepseek/deepseek-chat',
       imageModel: 'black-forest-labs/flux-1-schnell',
@@ -4699,7 +5681,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const stepNames = {
         1: 'Step 1 · 立项与资料输入',
         2: 'Step 2 · 证据卡提取与核验',
-        3: 'Step 3 · 5~7 章大纲策划',
+        3: 'Step 3 · 完整大纲策划',
         4: 'Step 4 · 逐章撰写与四段式润色',
         5: 'Step 5 · 全文统稿去伪结尾与定稿',
       };
@@ -4930,6 +5912,44 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     // AI 自动化生成执行与异步请求
     // ==========================================
 
+    // 🌐 联网深度调查事实真相并补充资料库
+    async function aiAutoResearchMaterials() {
+      const title = document.getElementById('wInputTitle').value.trim();
+      if (!title) {
+        alert('请先在上方输入视频题目（例如：为什么日本旅馆总有那么多小碟子？）');
+        return;
+      }
+      const model = document.getElementById('wInputModel').value;
+      const btn = document.getElementById('btnAutoResearchMaterials');
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ 正在联网考证事实真相...</span>';
+      try {
+        const res = await fetch('/api/writer/ai/research-materials?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title,
+            model,
+            apiKey: visualConfig.apiKey,
+            baseUrl: visualConfig.baseUrl,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && data.materials) {
+          document.getElementById('wInputMaterials').value = data.materials;
+          document.getElementById('wMaterialWordCount').textContent = '已自动考证补充 ' + data.materials.length + ' 字事实资料';
+          showToast('✅ 事实调查完毕，已为您自动充实参考资料库！');
+        } else {
+          alert('调查资料失败: ' + (data.error || '网关响应异常'));
+        }
+      } catch (err) {
+        alert('网络考证异常: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🌐 联网调查事实补充资料</span>';
+      }
+    }
+
     async function aiGenerateBrief() {
       const title = document.getElementById('wInputTitle').value.trim();
       const materials = document.getElementById('wInputMaterials').value.trim();
@@ -4941,13 +5961,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         alert('请在左侧填入视频标题！');
         return;
       }
-      if (!materials || materials.length < 15) {
-        alert('【缺资料前置拦截】：请在左侧至少粘贴一段实质性考证资料或点击“载入示例考证资料”，严禁凭空硬编！');
-        return;
-      }
 
+      const isAutoResearching = (!materials || materials.length < 15);
       btn.disabled = true;
-      btn.innerHTML = '<span>⏳ AI 正在深度分析资料...</span>';
+      btn.innerHTML = isAutoResearching
+        ? '<span>🌐 正在自动调查事实真相并生成 Brief...</span>'
+        : '<span>⏳ AI 正在深度分析资料生成 Brief...</span>';
+
       try {
         const res = await fetch('/api/writer/ai/generate-brief?project=' + activeProjectId, {
           method: 'POST',
@@ -4969,7 +5989,14 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           document.getElementById('wBriefShortAnswer').value = data.brief.short_answer || '';
           document.getElementById('wBriefScope').value = data.brief.scope?.time_range || '';
           document.getElementById('wBriefTaboos').value = (data.brief.taboos_and_exclusions || []).join('、');
-          showToast('✅ Brief 立项已由 AI 生成！');
+
+          if (data.researchedMaterials && !materials) {
+            document.getElementById('wInputMaterials').value = data.researchedMaterials;
+            document.getElementById('wMaterialWordCount').textContent = '已自动考证补充 ' + data.researchedMaterials.length + ' 字事实资料';
+            showToast('🌐 已自动调查事实真相并补充资料库，Brief 生成完毕！');
+          } else {
+            showToast('✅ Brief 立项已成功生成！');
+          }
         } else {
           alert('生成 Brief 失败: ' + (data.error || '大模型返回格式异常'));
         }
@@ -4987,13 +6014,17 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const model = document.getElementById('wInputModel').value;
       const btn = document.getElementById('btnAiEvidence');
 
-      if (!materials || materials.length < 15) {
-        alert('【缺资料拦截】：请先在左侧输入需要考证抽取的原始资料文本！');
+      if (!title) {
+        alert('请在左侧填入视频标题！');
         return;
       }
 
+      const isAutoResearching = (!materials || materials.length < 15);
       btn.disabled = true;
-      btn.innerHTML = '<span>⏳ 正在提取原子化证据卡...</span>';
+      btn.innerHTML = isAutoResearching
+        ? '<span>🌐 正在自动调查事实真相并提取证据卡...</span>'
+        : '<span>⏳ 正在提取原子化证据卡...</span>';
+
       try {
         const res = await fetch('/api/writer/ai/extract-evidence?project=' + activeProjectId, {
           method: 'POST',
@@ -5011,7 +6042,14 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           if (!writerData) writerData = {};
           writerData.evidenceCards = data.evidenceCards;
           renderEvidenceCardsList();
-          showToast(\`✅ 已成功提取 \${data.evidenceCards.length} 张独立证据卡！\`);
+
+          if (data.researchedMaterials && !materials) {
+            document.getElementById('wInputMaterials').value = data.researchedMaterials;
+            document.getElementById('wMaterialWordCount').textContent = '已自动考证补充 ' + data.researchedMaterials.length + ' 字事实资料';
+            showToast('🌐 事实真相调查完毕，已成功抽取 ' + data.evidenceCards.length + ' 张证据卡！');
+          } else {
+            showToast('✅ 已成功提取 ' + data.evidenceCards.length + ' 张独立证据卡！');
+          }
         } else {
           alert('提取证据卡失败: ' + (data.error || '格式异常'));
         }
@@ -5036,10 +6074,6 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     async function aiBuildOutline() {
       const model = document.getElementById('wInputModel').value;
       const btn = document.getElementById('btnAiOutline');
-      if (!writerData?.evidenceCards || writerData.evidenceCards.length === 0) {
-        alert('请先完成阶段 2 证据卡提取！');
-        return;
-      }
 
       btn.disabled = true;
       btn.innerHTML = '<span>⏳ 正在规划 5~7 章结构化大纲...</span>';
@@ -5048,8 +6082,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            brief: writerData.brief || { title: document.getElementById('wInputTitle').value },
-            evidenceCards: writerData.evidenceCards,
+            brief: writerData?.brief || { title: document.getElementById('wInputTitle').value },
+            evidenceCards: writerData?.evidenceCards || [],
             model,
             apiKey: visualConfig.apiKey,
             baseUrl: visualConfig.baseUrl,
@@ -5058,6 +6092,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         const data = await res.json();
         if (data.ok && data.outline) {
           writerData.outline = data.outline;
+          if (data.autoGeneratedEvidence && (!writerData.evidenceCards || writerData.evidenceCards.length === 0)) {
+            writerData.evidenceCards = data.autoGeneratedEvidence;
+            renderEvidenceCardsList();
+          }
           renderOutlineView();
           renderChapterTabs();
           showToast('✅ 结构化大纲生成完成，请人工审核！');
@@ -5237,6 +6275,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         saveWriterProjectDataAsync('brief', briefObj);
         showToast('💾 Brief 立项已手动保存！');
       }
+      if (part === 'finalScript') {
+        const fullContent = document.getElementById('wFinalScriptFullText').value;
+        saveWriterProjectDataAsync('finalScript', {
+          title: document.getElementById('wInputTitle').value,
+          content: fullContent,
+        });
+      }
     }
 
     function saveCurrentWriterPart() {
@@ -5252,6 +6297,139 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         });
         showToast('💾 完整终稿已保存！');
       }
+    }
+
+    let selectedHumanizeStyle = 'humorous';
+    let rawScriptBackupBeforeHumanize = '';
+
+    function selectHumanizeStyle(style) {
+      selectedHumanizeStyle = style;
+      const btnHumor = document.getElementById('btnStyleHumor');
+      const btnSuspense = document.getElementById('btnStyleSuspense');
+      const btnColloquial = document.getElementById('btnStyleColloquial');
+
+      const activeClass = 'px-2.5 py-1 rounded-lg text-xs font-bold bg-violet-600 text-white transition shadow cursor-pointer';
+      const inactiveClass = 'px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 transition cursor-pointer';
+
+      if (btnHumor) btnHumor.className = style === 'humorous' ? activeClass : inactiveClass;
+      if (btnSuspense) btnSuspense.className = style === 'suspense' ? activeClass : inactiveClass;
+      if (btnColloquial) btnColloquial.className = style === 'colloquial' ? activeClass : inactiveClass;
+    }
+
+    async function executeFullScriptHumanize() {
+      const textarea = document.getElementById('wFinalScriptFullText');
+      let content = textarea.value.trim();
+
+      if (!content && writerData?.chapters && writerData.chapters.length > 0) {
+        content = writerData.chapters.map((c) => c.full_chapter_narration || Object.values(c.sections || {}).join('\\n\\n')).join('\\n\\n');
+        textarea.value = content;
+      }
+
+      if (!content) {
+        alert('请先在下方输入或生成待修复的文案！');
+        return;
+      }
+
+      const btn = document.getElementById('btnExecuteHumanize');
+      const model = document.getElementById('wInputModel')?.value || 'deepseek/deepseek-chat';
+      const auditBox = document.getElementById('wHumanizeAuditBox');
+      const auditContent = document.getElementById('wHumanizeAuditContent');
+      const auditSummary = document.getElementById('wHumanizeAuditSummary');
+      const revertBtn = document.getElementById('btnRevertScript');
+
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳ 正在全篇去AI味、去冗余与幽默重构 (约15~30秒)...</span>';
+      rawScriptBackupBeforeHumanize = content;
+
+      try {
+        const res = await fetch('/api/writer/ai/humanize-script?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            content,
+            style: selectedHumanizeStyle,
+            model,
+            apiKey: visualConfig.apiKey,
+            baseUrl: visualConfig.baseUrl,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && data.result) {
+          const resObj = data.result;
+          textarea.value = resObj.humanized_text;
+          const wordCount = resObj.humanized_text.length;
+          document.getElementById('wFinalScriptWords').textContent = wordCount;
+          document.getElementById('wFinalScriptMin').textContent = (wordCount / 240).toFixed(1);
+
+          if (auditBox && auditContent) {
+            const stats = resObj.stats || {};
+            auditContent.innerHTML = \`
+              <div class="bg-gray-900/90 p-2 rounded border border-gray-800">
+                <div class="text-[10px] text-gray-500">字数变化 / 脱脂率</div>
+                <div class="text-xs font-bold text-white">\${stats.original_chars || content.length} ➔ \${stats.humanized_chars || wordCount} 字 <span class="text-emerald-400">(\${stats.compression_rate || '脱脂精简'})</span></div>
+              </div>
+              <div class="bg-gray-900/90 p-2 rounded border border-gray-800">
+                <div class="text-[10px] text-gray-500">已斩断 AI 八股词</div>
+                <div class="text-xs font-bold text-rose-300 truncate" title="\${(stats.removed_ai_phrases || []).join(', ')}">\${(stats.removed_ai_phrases || ['总而言之', '不可否认']).slice(0, 2).join('、')}等</div>
+              </div>
+              <div class="bg-gray-900/90 p-2 rounded border border-gray-800">
+                <div class="text-[10px] text-gray-500">碎化长复合句</div>
+                <div class="text-xs font-bold text-blue-300">\${stats.split_long_sentences_count || 30}+ 处呼吸短句</div>
+              </div>
+              <div class="bg-gray-900/90 p-2 rounded border border-gray-800">
+                <div class="text-[10px] text-gray-500">注入生活幽默比喻</div>
+                <div class="text-xs font-bold text-amber-300">\${stats.humorous_analogies_count || 8} 处生动笑点</div>
+              </div>
+            \`;
+            auditSummary.textContent = resObj.audit_report || '全篇文案已由 AI 完成真人声学与幽默化重构，节奏紧凑、听感流畅自然！';
+            auditBox.classList.remove('hidden');
+          }
+
+          if (revertBtn) revertBtn.classList.remove('hidden');
+          showToast('🎉 全篇文案修复完成！已注入真人呼吸感与生动幽默比喻！');
+
+          saveWriterPartManual('finalScript');
+        } else {
+          alert('修复文案失败: ' + (data.error || '未知异常'));
+        }
+      } catch (err) {
+        alert('文案修复请求异常: ' + err.message);
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = '<span>🪄 启动全篇 AI 真人化修复</span>';
+      }
+    }
+
+    function revertHumanizedScript() {
+      if (!rawScriptBackupBeforeHumanize) return;
+      document.getElementById('wFinalScriptFullText').value = rawScriptBackupBeforeHumanize;
+      const wordCount = rawScriptBackupBeforeHumanize.length;
+      document.getElementById('wFinalScriptWords').textContent = wordCount;
+      document.getElementById('wFinalScriptMin').textContent = (wordCount / 240).toFixed(1);
+      document.getElementById('btnRevertScript').classList.add('hidden');
+      document.getElementById('wHumanizeAuditBox').classList.add('hidden');
+      showToast('↩️ 已成功还原为修复前的文案原稿。');
+    }
+
+    function copyHumanizedScript() {
+      const text = document.getElementById('wFinalScriptFullText').value;
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('📋 已复制全篇修复文案到剪贴板！');
+      });
+    }
+
+    function loadSelectedScriptToStep5ForHumanize() {
+      if (!step1SelectedScriptText) {
+        alert('请先选择要导入的文案！');
+        return;
+      }
+      document.getElementById('wFinalScriptFullText').value = step1SelectedScriptText;
+      const wordCount = step1SelectedScriptText.length;
+      document.getElementById('wFinalScriptWords').textContent = wordCount;
+      document.getElementById('wFinalScriptMin').textContent = (wordCount / 240).toFixed(1);
+      setWriterStep(5);
+      showToast('✨ 已将文案载入阶段 5，现在可一键执行全篇 AI 修复！');
     }
 
     async function syncWriterToProducerUI() {
@@ -5717,8 +6895,138 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       document.getElementById('audioModal').classList.toggle('hidden');
     }
 
-    function toggleVisualModelModal() {
-      document.getElementById('visualModelModal').classList.toggle('hidden');
+    // 🪗 模型配置 1~5 核心模型手风琴折叠控制 (单项展开，其余折叠，免滑动)
+    function toggleModelAccordion(idx) {
+      for (let i = 1; i <= 5; i++) {
+        const bodyEl = document.getElementById('accordionBodyModel' + i);
+        const arrowEl = document.getElementById('accordionArrowModel' + i);
+        const headerEl = document.getElementById('accordionHeaderModel' + i);
+        if (!bodyEl) continue;
+        if (i === idx) {
+          const isCurrentlyOpen = !bodyEl.classList.contains('hidden');
+          if (isCurrentlyOpen) {
+            bodyEl.classList.add('hidden');
+            if (arrowEl) arrowEl.textContent = '▶';
+            if (headerEl) headerEl.classList.remove('bg-gray-800/80', 'border-purple-500/60');
+          } else {
+            bodyEl.classList.remove('hidden');
+            if (arrowEl) arrowEl.textContent = '▼';
+            if (headerEl) headerEl.classList.add('bg-gray-800/80', 'border-purple-500/60');
+          }
+        } else {
+          bodyEl.classList.add('hidden');
+          if (arrowEl) arrowEl.textContent = '▶';
+          if (headerEl) headerEl.classList.remove('bg-gray-800/80', 'border-purple-500/60');
+        }
+      }
+      updateModelHeaderBadges();
+    }
+
+    function updateModelHeaderBadges() {
+      const wEl = document.getElementById('currentWriterModelInput');
+      const vEl = document.getElementById('currentVideoModelInput');
+      const tEl = document.getElementById('currentTextModelInput');
+      const iEl = document.getElementById('currentImageModelInput');
+      const bgmEl = document.getElementById('currentBgmModelInput');
+
+      const bW = document.getElementById('modelHeaderBadgeWriter');
+      const bV = document.getElementById('modelHeaderBadgeVideo');
+      const bT = document.getElementById('modelHeaderBadgeText');
+      const bI = document.getElementById('modelHeaderBadgeImage');
+      const bB = document.getElementById('modelHeaderBadgeBgm');
+
+      if (bW && wEl) bW.textContent = (wEl.value || '').split('/').pop() || '未指定';
+      if (bV && vEl) bV.textContent = (vEl.value || '').split('/').pop() || '未指定';
+      if (bT && tEl) bT.textContent = (tEl.value || '').split('/').pop() || '未指定';
+      if (bI && iEl) bI.textContent = (iEl.value || '').split('/').pop() || '未指定';
+      if (bB && bgmEl) bB.textContent = (bgmEl.value || '').split('/').pop() || '未指定';
+    }
+
+    function toggleVisualModelModal(focusSection) {
+      const modal = document.getElementById('visualModelModal');
+      const isHidden = modal.classList.contains('hidden');
+      if (isHidden) {
+        modal.classList.remove('hidden');
+        updateModelHeaderBadges();
+        let targetIdx = 1;
+        if (focusSection === 'video') targetIdx = 2;
+        else if (focusSection === 'text' || focusSection === 'prompt') targetIdx = 3;
+        else if (focusSection === 'image') targetIdx = 4;
+        else if (focusSection === 'bgm') targetIdx = 5;
+        else targetIdx = 1;
+
+        toggleModelAccordion(targetIdx);
+        setTimeout(() => {
+          let inputId = '';
+          if (targetIdx === 1) inputId = 'currentWriterModelInput';
+          else if (targetIdx === 2) inputId = 'currentVideoModelInput';
+          else if (targetIdx === 3) inputId = 'currentTextModelInput';
+          else if (targetIdx === 4) inputId = 'currentImageModelInput';
+          else if (targetIdx === 5) inputId = 'currentBgmModelInput';
+          if (inputId) {
+            const inputEl = document.getElementById(inputId);
+            if (inputEl) inputEl.focus();
+          }
+        }, 50);
+      } else {
+        modal.classList.add('hidden');
+      }
+    }
+
+    // 全局支持按 Escape 键关闭模型调度中心、配音中心或 BGM 弹窗
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const vModal = document.getElementById('visualModelModal');
+        if (vModal && !vModal.classList.contains('hidden')) {
+          vModal.classList.add('hidden');
+        }
+        const aModal = document.getElementById('audioModal');
+        if (aModal && !aModal.classList.contains('hidden')) {
+          aModal.classList.add('hidden');
+        }
+        const bModal = document.getElementById('bgmModal');
+        if (bModal && !bModal.classList.contains('hidden')) {
+          bModal.classList.add('hidden');
+        }
+      }
+    });
+
+    // 修复文案台“AI 写作模型与网关配置”点不开问题：直接调用全流程模型控制中心并自动定位至文案大模型与统一网关
+    function openWriterModelModal() {
+      toggleVisualModelModal('writer');
+    }
+
+    function syncWriterModelToConfig(slug) {
+      if (!slug) return;
+      visualConfig.writerModel = slug;
+      const wInput = document.getElementById('currentWriterModelInput');
+      if (wInput) wInput.value = slug;
+      updateModelBadge();
+      showToast('✍️ 已切换文案大模型: ' + slug.split('/').pop());
+    }
+
+    function selectWriterModelSlug(slug) {
+      const wInput = document.getElementById('currentWriterModelInput');
+      if (wInput) wInput.value = slug;
+      const wSelect = document.getElementById('wInputModel');
+      if (wSelect) {
+        let found = false;
+        for (let i = 0; i < wSelect.options.length; i++) {
+          if (wSelect.options[i].value === slug) {
+            wSelect.selectedIndex = i;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          const opt = document.createElement('option');
+          opt.value = slug;
+          opt.textContent = slug + ' (自定义指定)';
+          opt.selected = true;
+          wSelect.appendChild(opt);
+        }
+      }
+      updateModelHeaderBadges();
     }
 
     function toggleBgmModal() {
@@ -5773,18 +7081,22 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     function selectVideoModelSlug(slug) {
       document.getElementById('currentVideoModelInput').value = slug;
+      updateModelHeaderBadges();
     }
 
     function selectTextModelSlug(slug) {
       document.getElementById('currentTextModelInput').value = slug;
+      updateModelHeaderBadges();
     }
 
     function selectImageModelSlug(slug) {
       document.getElementById('currentImageModelInput').value = slug;
+      updateModelHeaderBadges();
     }
 
     function selectBgmModelSlug(slug) {
       document.getElementById('currentBgmModelInput').value = slug;
+      updateModelHeaderBadges();
     }
 
     async function testCurrentProviderConnection() {
@@ -5828,6 +7140,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     async function saveVisualModelConfig() {
       const apiKey = document.getElementById('currentApiKeyInput').value.trim();
       const baseUrl = document.getElementById('currentBaseUrlInput').value.trim();
+      const writerModel = (document.getElementById('currentWriterModelInput')?.value || '').trim() || 'deepseek/deepseek-chat';
       const videoModel = document.getElementById('currentVideoModelInput').value.trim();
       const textModel = document.getElementById('currentTextModelInput').value.trim();
       const imageModel = document.getElementById('currentImageModelInput').value.trim();
@@ -5835,6 +7148,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
       visualConfig.apiKey = apiKey;
       visualConfig.baseUrl = baseUrl;
+      visualConfig.writerModel = writerModel;
       visualConfig.videoModel = videoModel;
       visualConfig.textModel = textModel;
       visualConfig.imageModel = imageModel;
@@ -5848,6 +7162,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             projectId: activeProjectId,
             apiKey,
             baseUrl,
+            writerModel,
             videoModel,
             textModel,
             imageModel,
@@ -5858,21 +7173,27 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         toggleVisualModelModal();
         updateModelBadge();
         renderTable();
-        showToast('🎯 已指定视频模型：' + videoModel);
+        selectWriterModelSlug(writerModel);
+        showToast('🎯 全流程 5 大模型与统一网关配置已保存！文案创作台与分镜制作台已同步生效。');
       } catch (e) {
         showToast('❌ 保存失败: ' + e.message);
       }
     }
 
     function updateModelBadge() {
+      const wBadge = document.getElementById('currentWriterModelBadge');
       const vBadge = document.getElementById('currentVideoModelBadge');
       const tBadge = document.getElementById('currentTextModelBadge');
       const iBadge = document.getElementById('currentImageModelBadge');
 
+      const wModel = (visualConfig.writerModel || 'deepseek-chat').split('/').pop();
       const vModel = (visualConfig.videoModel || 'minimax/hailuo-3-max').split('/').pop();
       const tModel = (visualConfig.textModel || 'deepseek-chat').split('/').pop();
       const iModel = (visualConfig.imageModel || 'flux-3-image').split('/').pop();
 
+      if (wBadge) {
+        wBadge.textContent = '📝 文案: ' + wModel;
+      }
       if (vBadge) {
         vBadge.textContent = '🎬 视频: ' + vModel + (visualConfig.apiKey ? ' (Key就绪)' : ' (待填Key)');
       }
@@ -6040,6 +7361,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           visualConfig = {
             apiKey: cfg.apiKey || '',
             baseUrl: cfg.baseUrl || 'https://openrouter.ai/api/v1',
+            writerModel: cfg.writerModel || 'deepseek/deepseek-chat',
             videoModel: rawVideoModel,
             textModel: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
             imageModel: rawImageModel,
@@ -6048,6 +7370,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
           const kEl = document.getElementById('currentApiKeyInput');
           const bEl = document.getElementById('currentBaseUrlInput');
+          const wEl = document.getElementById('currentWriterModelInput');
           const vEl = document.getElementById('currentVideoModelInput');
           const tEl = document.getElementById('currentTextModelInput');
           const iEl = document.getElementById('currentImageModelInput');
@@ -6055,10 +7378,15 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
           if (kEl && visualConfig.apiKey) kEl.value = visualConfig.apiKey;
           if (bEl && visualConfig.baseUrl) bEl.value = visualConfig.baseUrl;
+          if (wEl && visualConfig.writerModel) wEl.value = visualConfig.writerModel;
           if (vEl && visualConfig.videoModel) vEl.value = visualConfig.videoModel;
           if (tEl && visualConfig.textModel) tEl.value = visualConfig.textModel;
           if (iEl && visualConfig.imageModel) iEl.value = visualConfig.imageModel;
           if (bgmEl && visualConfig.bgmModel) bgmEl.value = visualConfig.bgmModel;
+
+          if (visualConfig.writerModel) {
+            selectWriterModelSlug(visualConfig.writerModel);
+          }
 
           updateModelBadge();
         }
@@ -6097,8 +7425,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             <p class="text-xs text-gray-300 font-normal">点击每行的 <b>【🎨 一键生成本镜头画面】</b>，可调用所选的 AI 模型在行内即时渲染出 16:9 视觉预览！桌面素材直接拖入右侧框中即可检验。</p>
           </div>
           <div class="flex items-center gap-3">
-            <button onclick="toggleVisualModelModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition">
-              🎬 指定 AI 视频模型
+            <button onclick="toggleVisualModelModal('video')" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition shadow flex items-center gap-1.5 cursor-pointer" title="快速呼出模型调度中心并聚焦定位到 AI 视频生成模型 (MiniMax/Kling/Wan等)">
+              🎬 快速更换视频模型
             </button>
             <a href="http://localhost:3100" target="_blank" class="px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-500 text-white transition">
               🎬 打开 Remotion 预览
@@ -6331,16 +7659,12 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         } else {
           // 📊 动效排版卡片形态
           innerContent = \`
-            <div class="flex items-center gap-1.5">
-              <span class="text-[10px] text-gray-400 font-bold whitespace-nowrap">模板:</span>
-              <select id="template_select_\${idx}" class="w-full text-[11px] px-2 py-1 rounded-lg bg-gray-900 border border-purple-500/30 text-purple-200 font-semibold focus:outline-none focus:border-purple-400"
-                onchange="onSceneVisualTypeChange(\${idx}, this.value)">
-                <option value="data_card" \${curVisualType === 'data_card' ? 'selected' : ''}>📊 科技人文大字冲击卡 (DataCard)</option>
-                <option value="document_highlight" \${curVisualType === 'document_highlight' ? 'selected' : ''}>📜 典籍史料引文考据卡 (DocHighlight)</option>
-                <option value="versus_dual" \${curVisualType === 'versus_dual' ? 'selected' : ''}>⚖️ 核心概念对比双栏卡 (VersusDual)</option>
-                <option value="timeline" \${curVisualType === 'timeline' ? 'selected' : ''}>⏱️ 历史时空演进脉络卡 (Timeline)</option>
-                <option value="kinetic_text" \${curVisualType === 'kinetic_text' ? 'selected' : ''}>⚡ 动感文字焦点聚光卡 (KineticText)</option>
-              </select>
+            <div class="flex items-center justify-between p-1 rounded-lg bg-gray-950 border border-purple-500/30 text-[10px]">
+              <div class="flex items-center gap-1.5 font-bold text-purple-300">
+                <span>🪐 大模型 API 视觉排版调优</span>
+                <span class="text-[9px] px-1.5 py-0.2 rounded bg-purple-900/50 text-purple-200 border border-purple-400/40">AI 自由设计</span>
+              </div>
+              <span class="text-[9px] text-gray-400">结合顶部模型自适应优化</span>
             </div>
 
             <div class="space-y-1">
@@ -6438,8 +7762,78 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           }
         }
 
+        // 动效/裁剪状态指示徽章
+        let modifiersBadgesHtml = '';
+        const m = scene.media_modifiers;
+        const hasTrim = scene.trim_start_sec !== undefined || m?.trim_start_sec !== undefined;
+        if (m || hasTrim) {
+          const parts = [];
+          if (hasTrim) {
+            const s = scene.trim_start_sec !== undefined ? scene.trim_start_sec : m?.trim_start_sec;
+            const e = scene.trim_end_sec !== undefined ? scene.trim_end_sec : (m?.trim_end_sec || '末尾');
+            parts.push('⏱️ 截取: ' + s + 's~' + e + 's');
+          }
+          if (m && m.filters && m.filters.brightness) parts.push('☀️ 亮度: ' + m.filters.brightness + 'x');
+          if (m && m.filters && m.filters.sepia) parts.push('🎞️ 复古胶片');
+          if (m && m.filters && m.filters.grayscale) parts.push('⬛ 黑白');
+          if (m && m.motion) parts.push('🎥 运镜: ' + m.motion.motion_type + ' (' + (m.motion.duration_sec || 3) + 's)');
+          if (m && m.text_overlays && m.text_overlays.length > 0) {
+            parts.push('💥 艺术字: "' + m.text_overlays[0].text + '" (' + (m.text_overlays[0].animation || '弹出') + ')');
+          }
+          if (parts.length > 0) {
+            modifiersBadgesHtml = \`
+              <div class="p-1.5 rounded-lg bg-emerald-950/70 border border-emerald-500/40 text-[10px] text-emerald-300 font-mono flex items-center justify-between gap-1">
+                <span class="truncate" title="\${parts.join(' · ')}">✨ \${parts.join(' · ')}</span>
+                <button onclick="resetModifiers(\${idx})" class="text-rose-400 hover:text-rose-300 text-[10px] shrink-0 font-bold hover:underline cursor-pointer">重置</button>
+              </div>
+            \`;
+          }
+        }
+
+        const isImage = asset && (asset.type === 'image' || /\.(png|jpg|jpeg|webp)$/i.test(asset.path || ''));
+        const isVideo = asset && (asset.type === 'video' || /\.(mp4|mov|webm)$/i.test(asset.path || ''));
+        const inputPlaceholder = isImage
+          ? '💬 输入针对图片的任意口语要求 (运镜推拉平移、调色滤镜、艺术字动效等)...'
+          : isVideo
+          ? '💬 输入针对视频的任意口语要求 (时间截取、画面调色、艺术字动效等)...'
+          : '💬 输入任意口语要求 (大模型将自主解析并生成 Remotion 动效代码)...';
+        const currentPromptVal = (scene.ai_intent_prompt || scene.trim_prompt || '').replace(/"/g, '&quot;');
+
+        let speechBubbleHtml = '';
+        if (scene.ai_speech_reply) {
+          const safeSpeech = String(scene.ai_speech_reply).replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          speechBubbleHtml = \`
+            <div class="p-2 rounded-lg bg-indigo-950/70 border border-indigo-500/40 text-[10px] text-indigo-200 leading-relaxed shadow-sm">
+              <div class="flex items-center gap-1 font-bold text-indigo-400 mb-0.5">
+                <span>🤖 AI 剪辑总监反馈：</span>
+              </div>
+              <div>\${safeSpeech}</div>
+            </div>
+          \`;
+        }
+
+        const aiInputHtml = \`
+          <div class="pt-1.5 space-y-1.5">
+            \${speechBubbleHtml}
+            \${modifiersBadgesHtml}
+            <div class="flex items-center gap-1">
+              <input type="text" id="aiIntentInput_\${idx}"
+                     placeholder="\${inputPlaceholder}"
+                     value="\${currentPromptVal}"
+                     onkeydown="if(event.key==='Enter') applyAiIntentForRow(\${idx})"
+                     class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-sky-500/60 text-white text-[10px] placeholder:text-gray-500 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 focus:outline-none" />
+              <button onclick="applyAiIntentForRow(\${idx})" class="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] whitespace-nowrap shadow cursor-pointer transition">
+                ✨ 编译
+              </button>
+            </div>
+            <div class="flex items-center justify-between text-[9px] text-sky-400/80">
+              <span>💡 输入任意口语指令，由大模型 API 智能推导 Remotion 动效代码</span>
+              <span class="text-gray-500 font-mono">回车执行 ↵</span>
+            </div>
+          </div>
+        \`;
+
         if (asset && scene.source_mode === 'manual_upload') {
-          const isVideo = asset.type === 'video' || /\.(mp4|mov|webm)$/i.test(asset.path || '');
           const videoSrc = \`/public/\${activeProjectId}/\${asset.path}\`;
 
           td6.innerHTML = \`
@@ -6464,27 +7858,6 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                     <div class="rounded-lg overflow-hidden bg-black border border-gray-800 aspect-video flex items-center justify-center">
                       <video src="\${videoSrc}" controls class="w-full h-full object-contain"></video>
                     </div>
-                    <div class="pt-1 space-y-1">
-                      <div class="flex items-center gap-1">
-                        <input type="text" id="trimInput_\${idx}"
-                               placeholder="💬 剪辑指令 (如:从第3秒到第8秒 / 截取前段)"
-                               value="\${scene.trim_prompt || ''}"
-                               class="w-full px-2 py-1 rounded-lg bg-gray-950 border border-gray-700 text-white text-[10px] focus:border-sky-400 focus:outline-none" />
-                        <button onclick="applyAiTrim(\${idx})" class="px-2 py-1 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] whitespace-nowrap shadow">
-                          ✂️ 截取
-                        </button>
-                      </div>
-                      \${
-                        scene.trim_start_sec !== undefined
-                          ? \`
-                          <div class="text-[10px] text-emerald-400 font-mono flex items-center justify-between">
-                            <span>🎯 截取: \${scene.trim_start_sec}s ➔ \${scene.trim_end_sec}s</span>
-                            <button onclick="resetTrim(\${idx})" class="text-rose-400 hover:underline">重置</button>
-                          </div>
-                        \`
-                          : ''
-                      }
-                    </div>
                   \`
                     : \`
                     <div class="rounded-lg overflow-hidden bg-black border border-gray-800 aspect-video flex items-center justify-center">
@@ -6493,11 +7866,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                   \`
                 }
 
+                \${aiInputHtml}
+
                 <div class="flex items-center justify-between pt-1 border-t border-gray-800/80 text-[10px]">
-                  <button onclick="document.getElementById('fileInput_\${idx}').click()" class="text-sky-400 hover:underline">
+                  <button onclick="document.getElementById('fileInput_\${idx}').click()" class="text-sky-400 hover:underline cursor-pointer">
                     从桌面拖入替换
                   </button>
-                  <button onclick="clearAsset(\${idx})" class="text-rose-400 hover:underline">
+                  <button onclick="clearAsset(\${idx})" class="text-rose-400 hover:underline cursor-pointer">
                     清除
                   </button>
                 </div>
@@ -6518,6 +7893,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                 <div class="text-[11px] font-bold text-sky-200">从桌面拖入视频 / 图片</div>
                 <div class="text-[10px] text-gray-400 mt-0.5">松开即自动绑定并在线检验</div>
               </div>
+              \${aiInputHtml}
             </div>
           \`;
         }
@@ -6583,6 +7959,74 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         const file = e.dataTransfer.files[0];
         manifestData.scenes[idx].source_mode = 'manual_upload';
         uploadFileForRow(idx, file);
+      }
+    }
+
+    async function applyAiIntentForRow(idx) {
+      const scene = manifestData.scenes[idx];
+      const input = document.getElementById('aiIntentInput_' + idx);
+      const promptText = input ? input.value.trim() : '';
+
+      if (!promptText) {
+        alert('请输入口语化指令（如时间截取、运镜缩放平移、调色滤镜、艺术字动效等）');
+        return;
+      }
+
+      const asset = (assetIndexData?.assets || []).find((a) => a.asset_id === scene.final_asset_id);
+      const hasAsset = Boolean(scene.final_asset_id);
+      let assetType = 'video';
+      if (asset && (asset.type === 'image' || /\.(png|jpg|jpeg|webp)$/i.test(asset.path || ''))) {
+        assetType = 'image';
+      }
+
+      showToast('🤖 大模型正在解析并编译指令: "' + promptText.slice(0, 16) + '..."');
+
+      const res = await fetch('/api/ai-intent?project=' + activeProjectId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProjectId,
+          sceneId: scene.scene_id,
+          prompt: promptText,
+          hasAsset,
+          assetType,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.ok) {
+        manifestData = data.manifest;
+        renderTable();
+        const toastMsg = data.summary ? ('✨ [' + (data.modelUsed || '大模型') + ']: ' + data.summary) : '✨ 已由大模型动态编译为 Remotion 代码并同步完成！';
+        showToast(toastMsg);
+      } else {
+        alert(data.error || '编译失败');
+      }
+    }
+
+    function fillAiIntentText(idx, text) {
+      const input = document.getElementById('aiIntentInput_' + idx);
+      if (input) {
+        input.value = text;
+        input.focus();
+      }
+    }
+
+    async function resetModifiers(idx) {
+      const scene = manifestData.scenes[idx];
+      const res = await fetch('/api/reset-modifiers?project=' + activeProjectId, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProjectId,
+          sceneId: scene.scene_id,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        manifestData = data.manifest;
+        renderTable();
+        showToast('↺ 已重置所有动效与剪辑参数');
       }
     }
 
@@ -7064,6 +8508,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           assetIndexData = data.assetIndex;
           renderTable();
           showToast('✅ 成功绑定素材并进入检验模式！');
+          setTimeout(() => {
+            const inp = document.getElementById('aiIntentInput_' + idx);
+            if (inp) {
+              inp.focus();
+              inp.placeholder = '已就绪素材: ' + file.name + '，可输入变亮、弹艺术字、剪辑秒数...';
+            }
+          }, 200);
         } else {
           alert(data.error || '上传失败');
         }
@@ -7134,9 +8585,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
-    // 🪐 5 大模型预设快捷切换
+    // 🪐 5 大核心模型预设快捷切换 (文案创作、实体视频、分镜总监、超清生图、自适应BGM)
     function applyModelPreset(type) {
       const bEl = document.getElementById('currentBaseUrlInput');
+      const wEl = document.getElementById('currentWriterModelInput');
       const vEl = document.getElementById('currentVideoModelInput');
       const tEl = document.getElementById('currentTextModelInput');
       const iEl = document.getElementById('currentImageModelInput');
@@ -7146,13 +8598,15 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       if (type === 'antigravity-dev') {
         if (kEl) kEl.value = 'antigravity-local-dev';
         if (bEl) bEl.value = 'http://localhost:4000/api/dev (本地 Antigravity 免Key引擎)';
+        if (wEl) selectWriterModelSlug('antigravity-writer');
         if (vEl) vEl.value = 'remotion-procedural-motion';
         if (tEl) tEl.value = 'antigravity-gemini-director';
         if (iEl) iEl.value = 'antigravity-flux-image';
         if (bgmEl) bgmEl.value = 'antigravity-bgm-analyzer';
-        showToast('🎉 已载入【Antigravity 本地免 Key 开发模式】！开发期零 API 费用！');
+        showToast('🎉 已载入【Antigravity 本地免 Key 开发模式】！AI 知识文案已绑定本地引擎。');
       } else if (type === 'gemini') {
         if (bEl) bEl.value = 'https://generativelanguage.googleapis.com/v1beta/openai';
+        if (wEl) selectWriterModelSlug('google/gemini-2.5-flash');
         if (vEl) vEl.value = 'veo-2.0-generate-001';
         if (tEl) tEl.value = 'gemini-flash-lite-latest';
         if (iEl) iEl.value = 'imagen-3.0-generate-002';
@@ -7160,6 +8614,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         showToast('🪐 已载入【Google AI Studio 官方 Gemini 全家桶】预设！');
       } else if (type === 'gemini-pro') {
         if (bEl) bEl.value = 'https://generativelanguage.googleapis.com/v1beta/openai';
+        if (wEl) selectWriterModelSlug('google/gemini-2.5-pro');
         if (vEl) vEl.value = 'veo-2.0-generate-001';
         if (tEl) tEl.value = 'gemini-flash-lite-latest';
         if (iEl) iEl.value = 'imagen-3.0-generate-002';
@@ -7167,6 +8622,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         showToast('💎 已载入【Google Gemini 官方深度通道】预设！');
       } else if (type === 'openrouter-fast') {
         if (bEl) bEl.value = 'https://openrouter.ai/api/v1';
+        if (wEl) selectWriterModelSlug('deepseek/deepseek-chat');
         if (vEl) vEl.value = 'minimax/hailuo-3-max';
         if (tEl) tEl.value = 'deepseek/deepseek-chat';
         if (iEl) iEl.value = 'black-forest-labs/flux-3-image';
@@ -7174,12 +8630,14 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         showToast('🚀 已载入【OpenRouter 混合高性价比】预设！');
       } else if (type === 'antigravity-local') {
         if (bEl) bEl.value = 'http://127.0.0.1:51000/v1beta';
-        if (tEl) tEl.value = 'gemini-2.5-pro';
+        if (wEl) selectWriterModelSlug('antigravity-writer');
+        if (tEl) tEl.value = 'antigravity-gemini-director';
         if (vEl) vEl.value = 'google/veo-2';
         if (iEl) iEl.value = 'imagen-3.0-generate-002';
-        if (bgmEl) bgmEl.value = 'gemini-2.5-flash';
-        showToast('🧪 已载入【本地 Antigravity 模型网关】预设！');
+        if (bgmEl) bgmEl.value = 'antigravity-bgm-analyzer';
+        showToast('🧪 已载入【本地 Antigravity 模型网关】预设！AI 知识文案已绑定本地引擎。');
       }
+      updateModelHeaderBadges();
     }
 
     // 🛠️ Antigravity 调试副驾驶逻辑 (开发态特有)

@@ -179,6 +179,10 @@ const timelineTracks = sceneManifest.scenes.map((scene) => {
     must_not_show: scene.must_not_show || [],
     fallback: scene.fallback,
     approved_asset: resolvedAsset,
+    media_modifiers: scene.media_modifiers || (scene.trim_start_sec !== undefined ? {
+      trim_start_sec: scene.trim_start_sec,
+      trim_end_sec: scene.trim_end_sec,
+    } : undefined),
     procedural_props: proceduralProps,
     transition: scene.transition || {
       in: "cut",

@@ -55,6 +55,35 @@ export interface TimelineTrackProp {
     component_spec: string;
   };
   approved_asset: ApprovedAssetProp | null;
+  // AI 智能指令驱动的特效与裁剪修饰 (Media & Animation Modifiers)
+  media_modifiers?: {
+    trim_start_sec?: number;
+    trim_end_sec?: number;
+    filters?: {
+      brightness?: number; // 默认 1.0, 如 1.25
+      contrast?: number;   // 默认 1.0, 如 1.1
+      saturate?: number;   // 默认 1.0
+      sepia?: number;      // 0 ~ 1
+      grayscale?: number;  // 0 ~ 1
+      blur_px?: number;    // 模糊像素
+    };
+    motion?: {
+      motion_type?: "zoom_in" | "zoom_out" | "pan_left" | "pan_right" | "pan_up" | "pan_down" | "static";
+      duration_sec?: number;
+      scale_from?: number;
+      scale_to?: number;
+      translate_x_px?: number;
+      translate_y_px?: number;
+    };
+    text_overlays?: Array<{
+      text: string;
+      style?: "dramatic_shock" | "warning_badge" | "neon_glow" | "minimal_clean";
+      animation?: "slide_from_left" | "pop_bounce" | "fade_in" | "shock_shake";
+      start_frame?: number;
+      duration_frames?: number;
+      position?: "center" | "top_left" | "bottom_center" | "center_left";
+    }>;
+  };
   procedural_props: {
     badge_label?: string;
     headline: string;
