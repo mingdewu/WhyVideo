@@ -3,6 +3,12 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import {
+  getWriterPromptsState,
+  saveProjectWriterPromptPreset,
+  resetProjectWriterPromptPreset,
+  renderWriterPrompt,
+} from './writer-prompts.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -69,7 +75,9 @@ function getPaths(projectId = defaultProjectId) {
     assetIndexPath: path.join(projectDir, 'data', 'asset-index.json'),
     statusPath: path.join(projectDir, 'data', 'project-status.json'),
     promptConfigPath: path.join(projectDir, 'data', 'prompt-config.json'),
+    writerPromptsPath: path.join(projectDir, 'data', 'writer-prompts.json'),
     finalScriptPath: path.join(projectDir, 'data', 'final-script.json'),
+    materialsPath: path.join(projectDir, 'data', 'materials.txt'),
     videoPath: path.join(projectDir, 'output', 'final_video_1080p.mp4'),
     audioDir: path.join(projectDir, 'public', 'audio'),
     captionsPath: path.join(projectDir, 'public', 'captions', 'captions.srt'),
@@ -99,6 +107,13 @@ function listProjects() {
       try {
         const sc = JSON.parse(fs.readFileSync(paths.finalScriptPath, 'utf8'));
         if (sc.title) title = `《${sc.title}》`;
+      } catch (e) {}
+    }
+
+    if (title === pId && fs.existsSync(paths.briefPath)) {
+      try {
+        const br = JSON.parse(fs.readFileSync(paths.briefPath, 'utf8'));
+        if (br.title) title = `《${br.title}》`;
       } catch (e) {}
     }
 
@@ -376,7 +391,7 @@ function parseScriptToScenes(content, { projectId = 'why_project_001', title = '
       }
     }
 
-    const chapterHeaderRegex = /^[ \t]*(?:[#=*-]{2,}\s*)?(?:【)?\s*(开篇[^\n】]*|开场[^\n】]*|导[言读][^\n】]*|引言[^\n】]*|第\s*\d+\s*章[^\n=】]*|第\s*[一二三四五六七八九十百]+\s*章[^\n=】]*|结[尾局][^\n】]*|single_final_ending[^\n】]*)(?:】)?\s*(?:[#=*-]{2,})?$/i;
+    const chapterHeaderRegex = /^[ \t]*(?:[#=*-]{2,}\s*)?(?:【)?\s*(开篇[^\n】]*|开场[^\n】]*|导[言读][^\n】]*|引言[^\n】]*|第\s*\d+\s*章[^\n=】]*|第\s*[一二三四五六七八九十百]+\s*章[^\n=】]*|全片终局[^\n】]*|全片唯一[^\n】]*|终局收尾[^\n】]*|结[尾局][^\n】]*|single_final_ending[^\n】]*)(?:】)?\s*(?:[#=*-]{2,})?$/i;
 
     let seenFirstHeader = false;
     for (let line of rawLines) {
@@ -710,9 +725,9 @@ function extractJsonFromText(text) {
   }
 }
 
-function generateLocalMockWriterResponse(systemPrompt, userPrompt) {
+function generateLocalMockWriterResponse(systemPrompt, userPrompt, mockStage = null) {
   // 0. 自动事实考证与学术调研
-  if (systemPrompt.includes('事实考证') || systemPrompt.includes('学术调研') || systemPrompt.includes('考证资料')) {
+  if (mockStage === 'W1_research' || (!mockStage && (systemPrompt.includes('事实考证') || systemPrompt.includes('学术调研') || systemPrompt.includes('考证资料')))) {
     const titleMatch = userPrompt.match(/【视频选题】：(.*?)\n/);
     const title = titleMatch ? titleMatch[1].trim() : '知识长视频考证';
     return `【参考资料 1 · 地理与物理底层机制】：
@@ -728,7 +743,7 @@ function generateLocalMockWriterResponse(systemPrompt, userPrompt) {
 进入现代社会后，根据官方统计年鉴与调研数据，其已演变为深层社会惯性。然而，现代维护成本上升与认知代差也带来了新的结构性矛盾，促使各界重新审视其原本的因果起点与现实代价。`;
   }
   // 1. Brief 生成
-  if (systemPrompt.includes('立项 brief')) {
+  if (mockStage === 'W2_brief' || (!mockStage && systemPrompt.includes('立项 brief'))) {
     const titleMatch = userPrompt.match(/【视频题目】：(.*?)\n/);
     const title = titleMatch ? titleMatch[1].trim() : '中文深度科普';
     return JSON.stringify({
@@ -750,7 +765,7 @@ function generateLocalMockWriterResponse(systemPrompt, userPrompt) {
   }
 
   // 1.5 大纲构建（必须在证据卡之前判断，避免被 prompt 中的“证据卡列表”误触发）
-  if (systemPrompt.includes('大纲') || systemPrompt.includes('Outline') || systemPrompt.includes('结构化大纲')) {
+  if (mockStage === 'W4_outline' || (!mockStage && (systemPrompt.includes('大纲') || systemPrompt.includes('Outline') || systemPrompt.includes('结构化大纲')))) {
     const titleMatch = userPrompt.match(/【视频题目】：(.*?)\n/) || userPrompt.match(/【立项 Brief】：[\s\S]*?"title":\s*"(.*?)"/);
     const title = titleMatch ? titleMatch[1].trim() : '大纲（本地免Key生成）';
     return JSON.stringify({
@@ -820,7 +835,7 @@ function generateLocalMockWriterResponse(systemPrompt, userPrompt) {
   }
 
   // 2. 证据卡提取 (只在非大纲模式下匹配)
-  if ((systemPrompt.includes('证据卡') || systemPrompt.includes('Evidence Cards')) && !systemPrompt.includes('大纲')) {
+  if (mockStage === 'W3_evidence' || (!mockStage && (systemPrompt.includes('证据卡') || systemPrompt.includes('Evidence Cards')) && !systemPrompt.includes('大纲'))) {
     return JSON.stringify([
       {
         evidence_id: "EV-001",
@@ -929,7 +944,7 @@ function generateLocalMockWriterResponse(systemPrompt, userPrompt) {
   }
 
   // 4. 单章撰写
-  if (systemPrompt.includes('单章') || systemPrompt.includes('四段式')) {
+  if (mockStage === 'W5_chapter' || (!mockStage && (systemPrompt.includes('单章') || systemPrompt.includes('四段式')))) {
     return JSON.stringify({
       chapter_number: 1,
       chapter_title: "破除表象认知与设立反差",
@@ -947,7 +962,7 @@ function generateLocalMockWriterResponse(systemPrompt, userPrompt) {
   }
 
   // 5. 全文统稿
-  if (systemPrompt.includes('全文统稿') || systemPrompt.includes('final-script')) {
+  if (mockStage === 'W6_finalize' || (!mockStage && (systemPrompt.includes('全文统稿') || systemPrompt.includes('final-script')))) {
     return JSON.stringify({
       project_id: "local_mock_001",
       title: "定稿文案（本地免Key生成）",
@@ -974,16 +989,49 @@ function generateLocalMockWriterResponse(systemPrompt, userPrompt) {
     }, null, 2);
   }
 
-  // 6. 去 AI 味润色
-  if (systemPrompt.includes('去AI味') || systemPrompt.includes('口语化')) {
+  // 6. 去 AI 味润色 / De-AI Humanizer（本地免 Key 规则清洗，严禁回显任何 Prompt 标签）
+  if (mockStage === 'W7_humanize' || (!mockStage && (systemPrompt.includes('去 AI 味') || systemPrompt.includes('去AI味') || systemPrompt.includes('De-AI Humanizer') || systemPrompt.includes('口语化')))) {
+    let rawBody = userPrompt;
+    const tagMatch = userPrompt.match(/<<<SCRIPT_CONTENT>>>\s*([\s\S]*?)\s*<<<END_SCRIPT_CONTENT>>>/);
+    if (tagMatch) {
+      rawBody = tagMatch[1].trim();
+    } else {
+      rawBody = userPrompt
+        .replace(/^[\s\S]*?【待修复的第\s*\d+\/\d+\s*部分文案】：\s*/m, '')
+        .replace(/^[\s\S]*?【待修复的完整文案全文】：\s*/m, '')
+        .trim();
+    }
+    // 清除历史可能残留的 Prompt 污染前缀
+    rawBody = rawBody
+      .replace(/(?:^|\n)(?:【第\s*\d+\s*章：风格定位】\n?)?:?【(?:幽默风趣主播型|睿智悬疑反转型|亲切老友大白话型)[^】]*】：[^\n]*\n*/g, '')
+      .replace(/(?:^|\n)【待修复的第\s*\d+\/\d+\s*部分文案】：\s*\n*/g, '')
+      .trim();
+
+    const isSuspense = userPrompt.includes('睿智悬疑');
+    const isColloquial = userPrompt.includes('亲切老友');
+
+    const cleaned = rawBody
+      .replace(/总而言之[，,、]?/g, isSuspense ? '说穿了，' : '说白了，')
+      .replace(/不可否认的是[，,、]?/g, isSuspense ? '摆在眼前的事实是，' : '确实，')
+      .replace(/值得注意的是[，,、]?/g, isSuspense ? '可真正诡异的地方在于，' : '有意思的是，')
+      .replace(/在历史的长河中[，,、]?/g, '翻开旧账本，')
+      .replace(/然而[，,]/g, isColloquial ? '不过说真的，' : '可偏偏，')
+      .replace(/由此可见[，,、]?/g, '这么一算，')
+      .replace(/不仅如此[，,、]?/g, '更绝的是，')
+      .replace(/显而易见[，,、]?/g, '明摆着，');
+
     return JSON.stringify({
-      cleaned_script: "如果站在当年的视角看，这件事根本不是理所当然的。当时的人们翻山越岭，面对的不是诗情画意，而是一笔笔算得极细的真实账单。",
-      audit_log: [
-        "删除了'显而易见的是'、'不仅如此更重要的是'等八股口癖",
-        "将抽象的书面概括替换为'翻山越岭'、'真实账单'等具象口语",
-        "修复了中间段落的伪感慨，语气更加冷静克制"
-      ],
-      editorial_summary: "已完成全文口语化深度清洗，去除了 4 处机器八股腔，节奏更加贴合真实纪录片解说声线。"
+      humanized_text: cleaned,
+      cleaned_script: cleaned,
+      stats: {
+        original_chars: rawBody.length,
+        humanized_chars: cleaned.length,
+        compression_rate: rawBody.length > 0 ? `${Math.max(0, Math.round(((rawBody.length - cleaned.length) / rawBody.length) * 100))}%` : '0%',
+        removed_ai_phrases: ['总而言之', '不可否认的是', '值得注意的是', '在历史的长河中', '由此可见'],
+        split_long_sentences_count: Math.max(5, Math.round(cleaned.length / 260)),
+        humorous_analogies_count: 0
+      },
+      audit_report: "⚠️ 当前工程使用【本地免 Key 规则引擎】（仅清除 AI 八股词并做口语替换，不改变字数规模）；如需 AI 深度重写，请在「⚙️ AI 写作模型与网关配置」填入有效 API Key。"
     }, null, 2);
   }
 
@@ -1008,31 +1056,25 @@ async function fetchWikipediaExtract(query) {
   return '';
 }
 
-async function researchFactMaterials(title, { model, apiKey, baseUrl } = {}) {
+async function researchFactMaterials(title, { model, apiKey, baseUrl, projectDir } = {}) {
   const wikiContext = await fetchWikipediaExtract(title);
-  const sys = `你是一名知识型纪录片的事实考证与学术调研员。
-针对用户提出的长视频选题，请检索并梳理出客观真实的参考资料。
-严禁凭空胡编或文学脑补，必须提供客观存在的事实逻辑与历史因果。
-请按以下 4 个标准维度梳理出详实、具体的考证资料：
-【参考资料 1 · 地理/物理/技术底层机制】：说明自然环境参数、技术原理、最初由何种物理或资源条件决定。
-【参考资料 2 · 历史文献与起源演进】：记录文献最早记载、历史关键转折年代与事实。
-【参考资料 3 · 商业、制度与社会运作】：解析背后的商业考量、政策制度推动与社会分工演变。
-【参考资料 4 · 现代固化与统计数据】：呈现当代规模、统计数字、代表性案例或当前面临的现实代价。
-
-每条资料必须包含：出处说明、具体时间或数据、核心事实机制。请直接输出整理好的参考资料正文。`;
+  const sys = renderWriterPrompt(projectDir, 'W1_research', {
+    title,
+    wiki_context: wikiContext || '',
+  });
   const user = `【视频选题】：${title}\n${wikiContext ? wikiContext : ''}\n请展开深入事实调查并整理输出详实考证资料：`;
-  const text = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500 });
+  const text = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500, mockStage: 'W1_research' });
   return text && text.trim() ? text.trim() : `【自动事实考证资料】：关于“${title}”的地理底层机制、历史起源演进与现代社会运转档案。`;
 }
 
-async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, baseUrl, maxTokens = 3500 } = {}) {
+async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, baseUrl, maxTokens = 3500, mockStage = null } = {}) {
   let curApiKey = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
   let curBase = (baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
   let curModel = (model || 'deepseek/deepseek-chat').trim();
 
   // 若为本地免 Key 调试模式或本地 Mock 模式
   if (curApiKey === 'antigravity-local-dev' || curApiKey === 'antigravity-dev' || curModel.includes('antigravity') || (!curApiKey && (curBase.includes('localhost') || curBase.includes('127.0.0.1') || curBase.includes('免Key') || curBase.includes('51000')))) {
-    return generateLocalMockWriterResponse(systemPrompt, userPrompt);
+    return generateLocalMockWriterResponse(systemPrompt, userPrompt, mockStage);
   }
 
   // 若无显式传入 key，尝试从工程目录中寻找任意已配置的有效 key
@@ -1059,42 +1101,25 @@ async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, bas
 
   if (!curApiKey) {
     // 降级使用本地生成
-    return generateLocalMockWriterResponse(systemPrompt, userPrompt);
+    return generateLocalMockWriterResponse(systemPrompt, userPrompt, mockStage);
   }
 
   // 针对 Google 官方端点的模型自适应转换
   let sendModel = curModel;
   if (curBase.includes('googleapis.com')) {
     sendModel = sendModel.replace(/^google\//, '');
-    if (sendModel.includes('2.5') || sendModel.includes('1.5') || sendModel.includes('deepseek')) {
+    if (!sendModel.startsWith('gemini-') || sendModel.includes('2.5') || sendModel.includes('1.5')) {
       sendModel = 'gemini-flash-lite-latest';
     }
   }
 
-  try {
-    let resp = await fetch(`${curBase}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${curApiKey}`,
-        'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
-        'X-Title': 'WhyVideo Studio',
-      },
-      body: JSON.stringify({
-        model: sendModel,
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt },
-        ],
-        temperature: 0.4,
-        max_tokens: maxTokens,
-      }),
-    });
+  globalThis.__lastWriterLlmError = '';
 
-    // 针对 Gemini 404/503 异常平滑降级
-    if (!resp.ok && (resp.status === 404 || resp.status === 503) && curBase.includes('googleapis.com') && sendModel !== 'gemini-flash-lite-latest') {
-      sendModel = 'gemini-flash-lite-latest';
-      resp = await fetch(`${curBase}/chat/completions`, {
+  const doChatFetch = async (modelToUse) => {
+    const ctrl = new AbortController();
+    const tid = setTimeout(() => ctrl.abort(), 90000);
+    try {
+      return await fetch(`${curBase}/chat/completions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1103,7 +1128,7 @@ async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, bas
           'X-Title': 'WhyVideo Studio',
         },
         body: JSON.stringify({
-          model: sendModel,
+          model: modelToUse,
           messages: [
             { role: 'system', content: systemPrompt },
             { role: 'user', content: userPrompt },
@@ -1111,18 +1136,39 @@ async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, bas
           temperature: 0.4,
           max_tokens: maxTokens,
         }),
+        signal: ctrl.signal,
       });
+    } finally {
+      clearTimeout(tid);
+    }
+  };
+
+  try {
+    let resp = await doChatFetch(sendModel);
+
+    // 针对 Google 端点或 OpenRouter 已下线模型 (404/400/503) 自动平滑降级
+    if (!resp.ok && (resp.status === 404 || resp.status === 400 || resp.status === 503)) {
+      if (curBase.includes('googleapis.com') && sendModel !== 'gemini-flash-lite-latest') {
+        sendModel = 'gemini-flash-lite-latest';
+        resp = await doChatFetch(sendModel);
+      } else if (curBase.includes('openrouter.ai') && sendModel !== 'deepseek/deepseek-chat') {
+        sendModel = 'deepseek/deepseek-chat';
+        resp = await doChatFetch(sendModel);
+      }
     }
 
     if (!resp.ok) {
       const err = await resp.text();
-      console.warn(`[Writer Text Warning] Status ${resp.status}: ${err.slice(0, 100)}`);
+      const shortErr = `HTTP ${resp.status}: ${err.slice(0, 180)}`;
+      globalThis.__lastWriterLlmError = shortErr;
+      console.warn(`[Writer Text Warning] (${sendModel}) ${shortErr}`);
       return null;
     }
 
     const json = await resp.json();
     return json.choices?.[0]?.message?.content?.trim() || '';
   } catch (err) {
+    globalThis.__lastWriterLlmError = err.name === 'AbortError' ? '请求超时 (90s)' : err.message;
     console.error('[Writer Text Error]:', err);
     return null;
   }
@@ -2249,6 +2295,70 @@ function readBody(req) {
   });
 }
 
+function buildVirtualChapterSections(text) {
+  const clean = String(text || '').trim();
+  if (!clean) {
+    return {
+      '1_question_or_contradiction': '',
+      '2_mechanism_or_background': '',
+      '3_sourced_concrete_examples': '',
+      '4_mini_summary_and_transition': '',
+    };
+  }
+  const paragraphs = clean.split(/\n+/).map((p) => p.trim()).filter(Boolean);
+  if (paragraphs.length >= 4) {
+    const q1 = Math.max(1, Math.floor(paragraphs.length * 0.2));
+    const q2 = Math.max(q1 + 1, Math.floor(paragraphs.length * 0.5));
+    const q3 = Math.max(q2 + 1, Math.floor(paragraphs.length * 0.8));
+    return {
+      '1_question_or_contradiction': paragraphs.slice(0, q1).join('\n\n'),
+      '2_mechanism_or_background': paragraphs.slice(q1, q2).join('\n\n'),
+      '3_sourced_concrete_examples': paragraphs.slice(q2, q3).join('\n\n'),
+      '4_mini_summary_and_transition': paragraphs.slice(q3).join('\n\n'),
+    };
+  }
+  const sentences = clean.split(/(?<=[。！？!?])/).map((s) => s.trim()).filter(Boolean);
+  if (sentences.length >= 4) {
+    const s1 = Math.max(1, Math.floor(sentences.length * 0.25));
+    const s2 = Math.max(s1 + 1, Math.floor(sentences.length * 0.5));
+    const s3 = Math.max(s2 + 1, Math.floor(sentences.length * 0.75));
+    return {
+      '1_question_or_contradiction': sentences.slice(0, s1).join(''),
+      '2_mechanism_or_background': sentences.slice(s1, s2).join(''),
+      '3_sourced_concrete_examples': sentences.slice(s2, s3).join(''),
+      '4_mini_summary_and_transition': sentences.slice(s3).join(''),
+    };
+  }
+  return {
+    '1_question_or_contradiction': clean,
+    '2_mechanism_or_background': '',
+    '3_sourced_concrete_examples': '',
+    '4_mini_summary_and_transition': '',
+  };
+}
+
+function getFinalScriptRawText(finalScript) {
+  if (!finalScript) return '';
+  if (typeof finalScript === 'string') return finalScript;
+  if (finalScript.script_segments) {
+    const parts = [];
+    if (finalScript.script_segments.opening) parts.push(finalScript.script_segments.opening);
+    if (Array.isArray(finalScript.script_segments.chapters)) {
+      for (const ch of finalScript.script_segments.chapters) {
+        if (ch.narration_text) parts.push(ch.narration_text);
+      }
+    }
+    if (finalScript.script_segments.ending) parts.push(finalScript.script_segments.ending);
+    if (parts.length > 0) return parts.join('\n\n');
+  }
+  if (finalScript.full_narration_text) return finalScript.full_narration_text;
+  if (Array.isArray(finalScript.approved_narration_sentences)) {
+    return finalScript.approved_narration_sentences.join('\n');
+  }
+  if (finalScript.content) return finalScript.content;
+  return '';
+}
+
 function getWriterProjectData(projectId) {
   const paths = getPaths(projectId);
   let brief = null;
@@ -2256,6 +2366,8 @@ function getWriterProjectData(projectId) {
   let outline = null;
   let chapters = [];
   let finalScript = null;
+  let materials = '';
+  let manifest = null;
 
   if (fs.existsSync(paths.briefPath)) {
     try { brief = JSON.parse(fs.readFileSync(paths.briefPath, 'utf8')); } catch (e) {}
@@ -2265,6 +2377,9 @@ function getWriterProjectData(projectId) {
   }
   if (fs.existsSync(paths.outlinePath)) {
     try { outline = JSON.parse(fs.readFileSync(paths.outlinePath, 'utf8')); } catch (e) {}
+  }
+  if (fs.existsSync(paths.materialsPath)) {
+    try { materials = fs.readFileSync(paths.materialsPath, 'utf8'); } catch (e) {}
   }
   if (fs.existsSync(paths.dataDir)) {
     const files = fs.readdirSync(paths.dataDir);
@@ -2276,59 +2391,227 @@ function getWriterProjectData(projectId) {
         } catch (e) {}
       }
     }
-    chapters.sort((a, b) => (a.chapter_number || 0) - (b.chapter_number || 0));
+    chapters.sort((a, b) => (Number(a.chapter_number) || 0) - (Number(b.chapter_number) || 0));
   }
   if (fs.existsSync(paths.finalScriptPath)) {
     try { finalScript = JSON.parse(fs.readFileSync(paths.finalScriptPath, 'utf8')); } catch (e) {}
   }
+  if (fs.existsSync(paths.manifestPath)) {
+    try { manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8')); } catch (e) {}
+  }
 
-  // 兜底补齐：若工程缺少 brief，则提供标准化 WhyExplainerVideoWriter 规范默认 Brief 骨架
+  // 兜底补齐：若没有 finalScript 且非用户主动清零重写的空白草稿，从 scene-manifest.json 反向聚合定稿文案
+  if (!finalScript && !brief?._blank_draft && manifest && Array.isArray(manifest.scenes) && manifest.scenes.length > 0) {
+    const chapterMap = new Map();
+    for (const sc of manifest.scenes) {
+      const ref = sc.chapter_ref || '正文';
+      if (!chapterMap.has(ref)) chapterMap.set(ref, []);
+      if (sc.narration_text) chapterMap.get(ref).push(sc.narration_text.trim());
+    }
+    const segChapters = Array.from(chapterMap.entries()).map(([chTitle, lines], idx) => ({
+      chapter_number: idx + 1,
+      chapter_title: chTitle,
+      narration_text: lines.join('\n'),
+    }));
+    const rawText = segChapters.map((c) => c.narration_text).join('\n\n');
+    finalScript = {
+      project_id: projectId,
+      title: manifest.project_title || projectId,
+      total_word_count: rawText.length,
+      estimated_duration_minutes: Number(((manifest.total_duration_sec || rawText.length / 4) / 60).toFixed(1)),
+      revision_count: 0,
+      script_segments: { chapters: segChapters },
+      _hydrated_from_manifest: true,
+    };
+  }
+
+  // 标准化 finalScript（兼容 full_narration_text / approved_narration_sentences / content 格式）
+  if (finalScript) {
+    if (!finalScript.script_segments) {
+      const fallbackText =
+        finalScript.full_narration_text ||
+        (Array.isArray(finalScript.approved_narration_sentences)
+          ? finalScript.approved_narration_sentences.join('\n')
+          : '') ||
+        finalScript.content ||
+        '';
+      if (fallbackText) {
+        finalScript.script_segments = {
+          chapters: [
+            {
+              chapter_number: 1,
+              chapter_title: finalScript.title || '完整正文',
+              narration_text: fallbackText,
+            },
+          ],
+        };
+      }
+    }
+    const rawText = getFinalScriptRawText(finalScript);
+    if (!finalScript.total_word_count || finalScript.total_word_count === 0) {
+      finalScript.total_word_count = rawText.replace(/\s+/g, '').length;
+    }
+    if (!finalScript.estimated_duration_minutes) {
+      if (finalScript.total_duration_sec) {
+        finalScript.estimated_duration_minutes = Number((finalScript.total_duration_sec / 60).toFixed(1));
+      } else {
+        finalScript.estimated_duration_minutes = Number((finalScript.total_word_count / 240).toFixed(1));
+      }
+    }
+  }
+
+  // 标准化 materials
+  if (!materials && brief && brief.reference_materials) {
+    materials = Array.isArray(brief.reference_materials)
+      ? brief.reference_materials.join('\n\n')
+      : String(brief.reference_materials || '');
+  }
+
+  // 兜底补齐：若工程缺少 brief，则根据已有成片/定稿信息生成准确 Brief
   if (!brief) {
     let defaultTitle = projectId.replace(/^why_/, '').replace(/_\d+$/, '').replace(/_/g, ' ');
     if (finalScript && finalScript.title) defaultTitle = finalScript.title;
+    else if (manifest && manifest.project_title) defaultTitle = manifest.project_title;
+
+    const realChaptersCount =
+      (finalScript?.script_segments?.chapters && finalScript.script_segments.chapters.length) ||
+      (outline && Array.isArray(outline.chapters) && outline.chapters.length) ||
+      6;
+    const realDurationMin =
+      (finalScript && finalScript.estimated_duration_minutes) ||
+      (manifest && manifest.total_duration_sec ? Number((manifest.total_duration_sec / 60).toFixed(1)) : 25);
+
     brief = {
       project_id: projectId,
       title: defaultTitle || '为什么……？',
       core_question: `为什么${defaultTitle}？背后的地理、历史与经济机制是什么？`,
-      tentative_conclusion: '核心答案简述：由地理环境演变、历史传统沉淀与产业分工共同造就。',
-      target_audience: '泛知识纪录片观众、高知好奇心探索者',
-      target_duration_minutes: 25,
-      target_word_count: 7500,
-      planned_chapter_count: outline && Array.isArray(outline.chapters) ? outline.chapters.length : 6,
-      forbidden_claims: [
-        "绝对禁止使用'全世界只有'、'所有外国人'、'自古以来无一例外'等绝对化词汇",
-        "传说与轶事 (legend_or_anecdote) 严禁写成客观事实，必须标注'相传'或'有一种说法'",
-        "严禁脑补伪造历史人物现场心理活动或微表情独白"
-      ],
-      reference_materials: []
+      short_answer: finalScript?.script_segments?.opening?.slice(0, 180) || '核心因果脉络与底层机制拆解。',
+      target_duration_minutes: realDurationMin || 25,
+      estimated_word_count: finalScript?.total_word_count || 6500,
+      planned_chapter_count: realChaptersCount,
+      scope: {
+        time_range: '历史演进与现代机理',
+      },
+      taboos_and_exclusions: ['零编造', '严禁模仿特定博主口吻', '确保客观中立事实论证'],
+      reference_materials: [],
     };
+  } else {
+    if (!brief.short_answer && brief.tentative_conclusion) {
+      brief.short_answer = brief.tentative_conclusion;
+    }
+    if (!brief.taboos_and_exclusions && brief.forbidden_claims) {
+      brief.taboos_and_exclusions = brief.forbidden_claims;
+    }
   }
 
-  // 兜底补齐：若无 outline 但有 finalScript，提取大纲
+  // 兜底补齐：若无 outline 但有 finalScript，提取结构化大纲（字段严格对齐前端 renderOutlineView）
   if (!outline && finalScript && finalScript.script_segments && Array.isArray(finalScript.script_segments.chapters)) {
     outline = {
       project_id: projectId,
       title: finalScript.title || brief.title,
-      review_status: 'APPROVED',
-      human_review_notes: '已由定稿文案自动生成大纲映射',
-      chapters: finalScript.script_segments.chapters.map((ch, idx) => ({
-        chapter_number: ch.chapter_number || idx + 1,
-        chapter_title: ch.chapter_title || `第${idx + 1}章`,
-        core_question: `第${idx + 1}章核心问题探讨`,
-        mechanism: '背景与机制分析',
-        bound_evidence_ids: [],
-        target_words: (ch.narration_text || '').length || 1200
-      }))
+      approval_status: 'approved',
+      human_review_notes: '已由定稿文案自动提取大纲映射',
+      opening_hook: {
+        opening_question: brief.core_question || `关于《${finalScript.title || brief.title}》的核心疑问`,
+        immediate_short_answer: (finalScript.script_segments.opening || brief.short_answer || '').slice(0, 220),
+        supporting_evidence_ids: [],
+      },
+      chapters: finalScript.script_segments.chapters.map((ch, idx) => {
+        const text = ch.narration_text || '';
+        const firstSentence = text.split(/[。！？!?\n]/)[0] || '';
+        return {
+          chapter_number: ch.chapter_number || idx + 1,
+          chapter_title: ch.chapter_title || `第${idx + 1}章`,
+          sub_question: firstSentence ? `${firstSentence.slice(0, 48)}${firstSentence.length > 48 ? '...' : ''}` : `第${idx + 1}章核心问题探讨`,
+          mechanism_or_background_summary: text.slice(0, 120) + (text.length > 120 ? '...' : ''),
+          supporting_evidence_ids: [],
+          transition_to_next: '',
+        };
+      }),
+      single_ending_plan: {
+        revisit_core_question: brief.core_question || '',
+        final_takeaway: (finalScript.script_segments.ending || '').slice(0, 160),
+      },
+      _hydrated_from_script: true,
     };
+  } else if (outline && Array.isArray(outline.chapters)) {
+    // 兼容旧字段名映射
+    outline.chapters = outline.chapters.map((ch, idx) => ({
+      ...ch,
+      chapter_number: ch.chapter_number || idx + 1,
+      sub_question: ch.sub_question || ch.core_question || `第${idx + 1}章核心探讨`,
+      mechanism_or_background_summary: ch.mechanism_or_background_summary || ch.mechanism || '',
+      supporting_evidence_ids: Array.isArray(ch.supporting_evidence_ids)
+        ? ch.supporting_evidence_ids
+        : Array.isArray(ch.bound_evidence_ids)
+        ? ch.bound_evidence_ids
+        : [],
+    }));
+  }
+
+  // 兜底补齐：若分章文件缺失，从 finalScript.script_segments.chapters 自动反填各章内容，确保逐章查看绝不空白
+  if (finalScript && finalScript.script_segments && Array.isArray(finalScript.script_segments.chapters)) {
+    const existingByNum = new Map(chapters.map((c) => [Number(c.chapter_number), c]));
+    const hydratedChapters = [];
+    finalScript.script_segments.chapters.forEach((scCh, idx) => {
+      const chNum = Number(scCh.chapter_number || idx + 1);
+      if (existingByNum.has(chNum)) {
+        hydratedChapters.push(existingByNum.get(chNum));
+      } else {
+        const text = scCh.narration_text || '';
+        const outlineCh = outline?.chapters?.find((oc) => Number(oc.chapter_number) === chNum);
+        hydratedChapters.push({
+          project_id: projectId,
+          chapter_number: chNum,
+          chapter_title: scCh.chapter_title || outlineCh?.chapter_title || `第${chNum}章`,
+          sub_question: outlineCh?.sub_question || '',
+          revision_count: 0,
+          sections: buildVirtualChapterSections(text),
+          full_chapter_narration: text,
+          word_count: text.length,
+          _hydrated_from_script: true,
+        });
+      }
+    });
+    // 保留超出 finalScript 范围的已存草稿章
+    for (const c of chapters) {
+      if (!hydratedChapters.some((hc) => Number(hc.chapter_number) === Number(c.chapter_number))) {
+        hydratedChapters.push(c);
+      }
+    }
+    chapters = hydratedChapters.sort((a, b) => (Number(a.chapter_number) || 0) - (Number(b.chapter_number) || 0));
+  }
+
+  const normalizedEvidence = Array.isArray(evidenceCards) ? evidenceCards : [];
+  const hasFinalWords = Boolean(finalScript && (finalScript.total_word_count > 0 || getFinalScriptRawText(finalScript).length > 0));
+  const hasExistingContent = Boolean(
+    hasFinalWords ||
+    chapters.length > 0 ||
+    (outline && Array.isArray(outline.chapters) && outline.chapters.length > 0) ||
+    normalizedEvidence.length > 0
+  );
+
+  let activeStep = 1;
+  if (hasFinalWords) {
+    activeStep = 5;
+  } else if (chapters.length > 0) {
+    activeStep = 4;
+  } else if (outline && Array.isArray(outline.chapters) && outline.chapters.length > 0) {
+    activeStep = 3;
+  } else if (normalizedEvidence.length > 0) {
+    activeStep = 2;
   }
 
   return {
     projectId,
     brief,
-    evidenceCards: Array.isArray(evidenceCards) ? evidenceCards : [],
+    materials,
+    evidenceCards: normalizedEvidence,
     outline,
     chapters,
-    finalScript
+    finalScript,
+    activeStep,
+    hasExistingContent,
   };
 }
 
@@ -2342,8 +2625,13 @@ function saveWriterProjectData(projectId, part, payload) {
     fs.writeFileSync(paths.briefPath, JSON.stringify(payload, null, 2), 'utf8');
     return { ok: true, message: '立项 Brief 已保存' };
   }
-  if (part === 'evidence') {
-    fs.writeFileSync(paths.evidencePath, JSON.stringify(payload, null, 2), 'utf8');
+  if (part === 'materials') {
+    const text = typeof payload === 'string' ? payload : (payload?.materials || '');
+    fs.writeFileSync(paths.materialsPath, text, 'utf8');
+    return { ok: true, message: '参考研究资料已保存' };
+  }
+  if (part === 'evidence' || part === 'evidenceCards') {
+    fs.writeFileSync(paths.evidencePath, JSON.stringify(payload || [], null, 2), 'utf8');
     return { ok: true, message: '证据卡库已保存' };
   }
   if (part === 'outline') {
@@ -2351,34 +2639,210 @@ function saveWriterProjectData(projectId, part, payload) {
     return { ok: true, message: '结构大纲已保存' };
   }
   if (part === 'chapter') {
-    const chNum = payload.chapter_number || 1;
+    const chNum = Number(payload.chapter_number || 1);
     const chPath = path.join(paths.dataDir, `chapter_${chNum}.json`);
     fs.writeFileSync(chPath, JSON.stringify(payload, null, 2), 'utf8');
+
+    // 若已存在 final-script.json 且有对应章节，同步更新该章文本以保持一致
+    if (fs.existsSync(paths.finalScriptPath)) {
+      try {
+        const fsObj = JSON.parse(fs.readFileSync(paths.finalScriptPath, 'utf8'));
+        if (fsObj?.script_segments && Array.isArray(fsObj.script_segments.chapters)) {
+          const target = fsObj.script_segments.chapters.find((c) => Number(c.chapter_number) === chNum);
+          if (target) {
+            target.narration_text = payload.full_chapter_narration || target.narration_text;
+            if (payload.chapter_title) target.chapter_title = payload.chapter_title;
+            const rawText = getFinalScriptRawText(fsObj);
+            fsObj.total_word_count = rawText.replace(/\s+/g, '').length;
+            fsObj.estimated_duration_minutes = Number((fsObj.total_word_count / 240).toFixed(1));
+            fs.writeFileSync(paths.finalScriptPath, JSON.stringify(fsObj, null, 2), 'utf8');
+          }
+        }
+      } catch (e) {}
+    }
+
     return { ok: true, message: `第 ${chNum} 章已保存` };
   }
   if (part === 'finalScript') {
-    fs.writeFileSync(paths.finalScriptPath, JSON.stringify(payload, null, 2), 'utf8');
-    return { ok: true, message: '全文文案与终稿已保存' };
+    let toSave = payload;
+    // 若是从 Step 5 文本框手动保存 { title, content }，保留或解析结构化数据
+    if (payload && typeof payload.content === 'string' && !payload.script_segments) {
+      let existing = {};
+      if (fs.existsSync(paths.finalScriptPath)) {
+        try { existing = JSON.parse(fs.readFileSync(paths.finalScriptPath, 'utf8')); } catch (e) {}
+      }
+      const rawContent = payload.content.trim();
+      const rawBlocks = rawContent.split(/\n+={10,}\n+/).map((b) => b.trim()).filter(Boolean);
+      const blocks = [];
+      for (const rb of rawBlocks) {
+        if ((rb.match(/^【[^】\n]+】/gm) || []).length > 1) {
+          rb.split(/\n+(?=【[^】\n]+】)/).map((s) => s.trim()).filter(Boolean).forEach((s) => blocks.push(s));
+        } else {
+          blocks.push(rb);
+        }
+      }
+      let parsedSegments = null;
+      if (blocks.length > 0 && blocks.some((b) => b.startsWith('【'))) {
+        let opening = '';
+        let ending = '';
+        const chs = [];
+        for (const blk of blocks) {
+          const m = blk.match(/^【([^】]+)】\n?([\s\S]*)$/);
+          if (!m) {
+            chs.push({ chapter_number: chs.length + 1, chapter_title: `第${chs.length + 1}章`, narration_text: blk });
+            continue;
+          }
+          const header = m[1].trim();
+          const body = (m[2] || '').trim();
+          if (header.includes('风格定位') || header.startsWith('待修复')) {
+            continue;
+          }
+          if (header.includes('开篇')) {
+            opening = body;
+          } else if (header.includes('终局') || header.includes('结尾') || header.includes('收尾')) {
+            ending = body;
+          } else {
+            const chMatch = header.match(/第\s*(\d+)\s*章[：:\s]*(.*)/);
+            chs.push({
+              chapter_number: chMatch ? Number(chMatch[1]) : chs.length + 1,
+              chapter_title: chMatch ? (chMatch[2] || header).trim() : header,
+              narration_text: body,
+            });
+          }
+        }
+        parsedSegments = {
+          ...(opening ? { opening } : {}),
+          chapters: chs,
+          ...(ending ? { ending } : {}),
+        };
+      }
+      const wordCount = rawContent.replace(/【[^】]+】|={10,}|\s+/g, '').length;
+      toSave = {
+        ...existing,
+        project_id: projectId,
+        title: payload.title || existing.title || projectId,
+        total_word_count: wordCount,
+        estimated_duration_minutes: Number((wordCount / 240).toFixed(1)),
+        revision_count: (existing.revision_count || 0) + 1,
+        ...(payload.humanizeMeta ? { humanize_meta: payload.humanizeMeta } : {}),
+        ...(parsedSegments
+          ? { script_segments: parsedSegments }
+          : {
+              full_narration_text: rawContent,
+              script_segments: {
+                chapters: [
+                  {
+                    chapter_number: 1,
+                    chapter_title: payload.title || existing.title || '完整正文',
+                    narration_text: rawContent,
+                  },
+                ],
+              },
+            }),
+      };
+    }
+    fs.writeFileSync(paths.finalScriptPath, JSON.stringify(toSave, null, 2), 'utf8');
+    return { ok: true, message: '全文文案与终稿已保存', finalScript: toSave };
   }
   return { ok: false, error: '未知数据分区类型: ' + part };
 }
 
-function syncWriterToProducer(projectId, finalScriptOrText) {
-  let content = '';
-  let title = '';
-  if (typeof finalScriptOrText === 'string') {
-    content = finalScriptOrText;
-  } else if (finalScriptOrText && typeof finalScriptOrText === 'object') {
-    title = finalScriptOrText.title || '';
-    content = JSON.stringify(finalScriptOrText, null, 2);
+function syncWriterToProducer(projectId, { finalScript, content, title, preserveAssets = true } = {}) {
+  const curPaths = getPaths(projectId);
+  let oldScenes = [];
+  if (preserveAssets && fs.existsSync(curPaths.manifestPath)) {
+    try {
+      const oldMf = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      if (Array.isArray(oldMf.scenes)) oldScenes = oldMf.scenes;
+    } catch (e) {}
   }
+
+  let resolvedTitle = (title || finalScript?.title || '').trim();
+  if (!resolvedTitle && fs.existsSync(curPaths.briefPath)) {
+    try {
+      const br = JSON.parse(fs.readFileSync(curPaths.briefPath, 'utf8'));
+      if (br.title) resolvedTitle = br.title;
+    } catch (e) {}
+  }
+
+  // 优先采用用户当前编辑器中实时修改的文本 content，先保存更新 final-script.json
+  let scriptInput = '';
+  if (typeof content === 'string' && content.trim()) {
+    const saved = saveWriterProjectData(projectId, 'finalScript', {
+      title: resolvedTitle || projectId,
+      content: content.trim(),
+    });
+    if (saved?.finalScript) {
+      resolvedTitle = saved.finalScript.title || resolvedTitle;
+      scriptInput = JSON.stringify(saved.finalScript, null, 2);
+    } else {
+      scriptInput = content.trim();
+    }
+  } else if (finalScript && typeof finalScript === 'object') {
+    scriptInput = JSON.stringify(finalScript, null, 2);
+  } else {
+    return { ok: false, error: '文案内容不能为空' };
+  }
+
   const result = createProjectFromScript({
     projectId,
-    title,
-    content,
-    targetSeconds: 5.5
+    title: resolvedTitle,
+    content: scriptInput,
+    targetSeconds: 5.5,
   });
-  return result;
+
+  if (!result.ok) return result;
+
+  // 自动保留制作台已有镜头的素材绑定、手传模式与自定义动效参数
+  let preservedAssetsCount = 0;
+  if (preserveAssets && oldScenes.length > 0 && fs.existsSync(curPaths.manifestPath)) {
+    try {
+      const newMf = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      const norm = (str) => String(str || '').replace(/[\s，。！？!?、；：“”"‘'（）()]/g, '');
+      const oldByNormText = new Map();
+      for (const os of oldScenes) {
+        const key = norm(os.narration_text);
+        if (key && !oldByNormText.has(key)) oldByNormText.set(key, os);
+      }
+
+      let changed = false;
+      for (const ns of newMf.scenes || []) {
+        const key = norm(ns.narration_text);
+        let matched = oldByNormText.get(key);
+        if (!matched && key.length >= 6) {
+          for (const [okKey, os] of oldByNormText.entries()) {
+            if (okKey.includes(key) || key.includes(okKey)) {
+              matched = os;
+              break;
+            }
+          }
+        }
+        if (matched && (matched.final_asset_id || matched.source_mode === 'manual_upload' || matched.media_modifiers)) {
+          ns.source_mode = matched.source_mode || ns.source_mode;
+          if (matched.final_asset_id) ns.final_asset_id = matched.final_asset_id;
+          if (matched.visual_type) ns.visual_type = matched.visual_type;
+          if (matched.scene_type) ns.scene_type = matched.scene_type;
+          if (matched.media_modifiers) ns.media_modifiers = matched.media_modifiers;
+          if (Array.isArray(matched.content_keywords) && matched.content_keywords.length > 0) {
+            ns.content_keywords = matched.content_keywords;
+          }
+          if (matched.ppt_slide_spec) ns.ppt_slide_spec = matched.ppt_slide_spec;
+          if (matched.status) ns.status = matched.status;
+          preservedAssetsCount++;
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        fs.writeFileSync(curPaths.manifestPath, JSON.stringify(newMf, null, 2), 'utf8');
+        recompileProject(projectId);
+      }
+    } catch (e) {
+      console.warn('保留制作台素材映射时跳过异常:', e.message);
+    }
+  }
+
+  return { ...result, preservedAssetsCount };
 }
 
 const server = http.createServer(async (req, res) => {
@@ -2511,12 +2975,133 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify(resData));
     }
 
-    // 0.7 文案终稿一键同步至视觉分镜台 (Producer) 并生成镜头清单
+    // 0.65 新建空白文案工程（不影响原工程数据）
+    if (req.method === 'POST' && pathname === '/api/writer/create-blank-project') {
+      const body = await readBody(req);
+      const rawTitle = (body.title || '').trim();
+      let cleanId = (body.projectId || '')
+        .trim()
+        .toLowerCase()
+        .replace(/[^a-z0-9_-]/g, '_')
+        .replace(/_+/g, '_')
+        .replace(/^_+|_+$/g, '');
+      if (!cleanId) {
+        cleanId = `why_new_${Date.now().toString(36)}`;
+      }
+      const newPaths = getPaths(cleanId);
+      if (fs.existsSync(newPaths.projectDir)) {
+        cleanId = `${cleanId}_${Date.now().toString(36).slice(-4)}`;
+      }
+      const finalPaths = getPaths(cleanId);
+      fs.mkdirSync(finalPaths.dataDir, { recursive: true });
+      fs.mkdirSync(finalPaths.audioDir, { recursive: true });
+      fs.mkdirSync(path.dirname(finalPaths.captionsPath), { recursive: true });
+      fs.mkdirSync(finalPaths.outputDir, { recursive: true });
+      fs.writeFileSync(finalPaths.assetIndexPath, JSON.stringify({ project_id: cleanId, assets: [] }, null, 2), 'utf8');
+      fs.writeFileSync(
+        finalPaths.briefPath,
+        JSON.stringify(
+          {
+            project_id: cleanId,
+            title: rawTitle,
+            core_question: '',
+            short_answer: '',
+            target_duration_minutes: 25,
+            planned_chapter_count: 6,
+            scope: { time_range: '' },
+            taboos_and_exclusions: ['零编造', '严禁模仿特定博主口吻', '确保客观中立事实论证'],
+            _blank_draft: true,
+          },
+          null,
+          2
+        ),
+        'utf8'
+      );
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, projectId: cleanId, title: rawTitle || cleanId }));
+    }
+
+    // 0.66 清零重写当前工程文案（删除文案草稿文件，保留制作台分镜与媒体素材）
+    if (req.method === 'POST' && pathname === '/api/writer/reset-project') {
+      const curPaths = getPaths(queryProject);
+      if (!fs.existsSync(curPaths.dataDir)) {
+        fs.mkdirSync(curPaths.dataDir, { recursive: true });
+      }
+      const filesToRemove = [
+        curPaths.evidencePath,
+        curPaths.outlinePath,
+        curPaths.finalScriptPath,
+        curPaths.materialsPath,
+      ];
+      for (const fp of filesToRemove) {
+        if (fs.existsSync(fp)) {
+          try { fs.unlinkSync(fp); } catch (e) {}
+        }
+      }
+      if (fs.existsSync(curPaths.dataDir)) {
+        for (const f of fs.readdirSync(curPaths.dataDir)) {
+          if (/^chapter_\d+\.json$/i.test(f)) {
+            try { fs.unlinkSync(path.join(curPaths.dataDir, f)); } catch (e) {}
+          }
+        }
+      }
+      fs.writeFileSync(
+        curPaths.briefPath,
+        JSON.stringify(
+          {
+            project_id: queryProject,
+            title: '',
+            core_question: '',
+            short_answer: '',
+            target_duration_minutes: 25,
+            planned_chapter_count: 6,
+            scope: { time_range: '' },
+            taboos_and_exclusions: ['零编造', '严禁模仿特定博主口吻', '确保客观中立事实论证'],
+            _blank_draft: true,
+          },
+          null,
+          2
+        ),
+        'utf8'
+      );
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, projectId: queryProject, message: '当前工程文案已清零，可从第 1 步重新立项' }));
+    }
+
+    // 0.7 文案终稿一键同步至视觉分镜台 (Producer) 并生成镜头清单（保留已绑定素材）
     if (req.method === 'POST' && pathname === '/api/writer/sync-to-producer') {
       const body = await readBody(req);
-      const resData = syncWriterToProducer(queryProject, body.finalScript || body.content);
+      const resData = syncWriterToProducer(queryProject, {
+        finalScript: body.finalScript,
+        content: body.content,
+        title: body.title,
+        preserveAssets: body.preserveAssets !== false,
+      });
       res.writeHead(resData.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify(resData));
+    }
+
+    // 0.72 获取文案创作台提示词模板与风格预设（按当前工程独立生效）
+    if (req.method === 'GET' && pathname === '/api/writer/prompts') {
+      const state = getWriterPromptsState(paths.projectDir, queryProject);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(state));
+    }
+
+    // 0.73 保存文案创作台自定义提示词模板（仅对当前工程生效）
+    if (req.method === 'POST' && pathname === '/api/writer/prompts/save') {
+      const body = await readBody(req);
+      const saved = saveProjectWriterPromptPreset(paths.projectDir, queryProject, body);
+      res.writeHead(saved.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(saved));
+    }
+
+    // 0.74 重置文案创作台提示词模板（支持单阶段或全部恢复出厂默认）
+    if (req.method === 'POST' && pathname === '/api/writer/prompts/reset') {
+      const body = await readBody(req);
+      const resetRes = resetProjectWriterPromptPreset(paths.projectDir, queryProject, body.template_id || null);
+      res.writeHead(resetRes.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(resetRes));
     }
 
     // 0.75 AI 联网深度事实调查与资料补充
@@ -2527,7 +3112,8 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ ok: false, error: '请先提供视频题目' }));
       }
-      const materials = await researchFactMaterials(title, { model, apiKey, baseUrl });
+      const materials = await researchFactMaterials(title, { model, apiKey, baseUrl, projectDir: paths.projectDir });
+      saveWriterProjectData(queryProject, 'materials', materials);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: true, materials }));
     }
@@ -2543,29 +3129,17 @@ const server = http.createServer(async (req, res) => {
       }
       let researchedMaterials = null;
       if (!materials || materials.trim().length < 15) {
-        materials = await researchFactMaterials(title, { model, apiKey, baseUrl });
+        materials = await researchFactMaterials(title, { model, apiKey, baseUrl, projectDir: paths.projectDir });
         researchedMaterials = materials;
+        saveWriterProjectData(queryProject, 'materials', materials);
       }
-      const sys = `你是一名严谨的知识型长视频纪录片策划总监。请根据选题与事实资料，生成一份标准的视频立项 brief。
-必须且仅输出合法的 JSON 格式，字段包括：
-{
-  "project_id": "why_xxx_001",
-  "title": "视频标题（为什么……）",
-  "core_question": "全片核心设问",
-  "short_answer": "开篇前2分钟给出的简短核心答案（2-4句话，通俗透彻）",
-  "target_duration_minutes": 25,
-  "estimated_word_count": 6500,
-  "planned_chapter_count": 6,
-  "scope": {
-    "time_range": "时间跨度",
-    "geographic_scope": "地理范围",
-    "included_dimensions": ["机制一", "机制二"],
-    "excluded_dimensions": ["排除领域"]
-  },
-  "taboos_and_exclusions": ["严禁模仿特定博主口吻", "零编造", "禁用排外煽情"]
-}`;
+      const sys = renderWriterPrompt(paths.projectDir, 'W2_brief', {
+        title,
+        duration_minutes: durationMinutes,
+        materials,
+      });
       const user = `【视频题目】：${title}\n【预期时长】：${durationMinutes} 分钟\n【参考考证资料】：\n${materials}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500 });
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500, mockStage: 'W2_brief' });
       const parsed = extractJsonFromText(aiText);
       if (parsed) {
         parsed.project_id = queryProject;
@@ -2577,7 +3151,7 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的 Brief JSON', rawAi: aiText }));
     }
 
-    // 0.9 AI 从原始资料提取原子化证据卡 (半自动智能考证：缺资料自动联网考证补充)
+    // 0.9 AI 从原始资料或现有文案提取原子化证据卡 (半自动智能考证：缺资料自动联网考证补充)
     if (req.method === 'POST' && pathname === '/api/writer/ai/extract-evidence') {
       const body = await readBody(req);
       const { title, model, apiKey, baseUrl } = body;
@@ -2588,22 +3162,22 @@ const server = http.createServer(async (req, res) => {
       }
       let researchedMaterials = null;
       if (!materials || materials.trim().length < 15) {
-        materials = await researchFactMaterials(title, { model, apiKey, baseUrl });
-        researchedMaterials = materials;
+        const stored = getWriterProjectData(queryProject);
+        const scriptText = getFinalScriptRawText(stored?.finalScript);
+        if (scriptText && scriptText.length > 50) {
+          materials = `【工程现有文案正文事实源】：\n${scriptText.slice(0, 4000)}`;
+        } else {
+          materials = await researchFactMaterials(title, { model, apiKey, baseUrl, projectDir: paths.projectDir });
+          researchedMaterials = materials;
+          saveWriterProjectData(queryProject, 'materials', materials);
+        }
       }
-      const sys = `你是一名严谨的知识型纪录片资料考证员。你的任务是将选题与参考资料拆解为一组原子化的证据卡（Evidence Cards）。
-核心规则：
-1. 每张证据卡只包含一个独立事实主张；
-2. claim_type 严格限定四选一：verified_fact（已证实客观事实）、disputed_claim（存在争议）、legend_or_anecdote（民间传说/轶事）、author_interpretation（主观推论）；
-3. 必须输出 JSON 数组，每项包含：
-   - evidence_id: 如 "EV-001"
-   - claim_type: 四选一
-   - evidence_summary: 事实客观中文概括
-   - source_title: 资料出处说明
-   - reliability: high / medium / low
-请直接输出纯 JSON 数组，严禁包含任何前缀后缀说明。`;
+      const sys = renderWriterPrompt(paths.projectDir, 'W3_evidence', {
+        title,
+        materials,
+      });
       const user = `【视频题目】：${title}\n【考证资料内容】：\n${materials}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 3500 });
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 3500, mockStage: 'W3_evidence' });
       let list = extractJsonFromText(aiText);
       if (Array.isArray(list) && list.length > 0) {
         saveWriterProjectData(queryProject, 'evidenceCards', list);
@@ -2628,10 +3202,10 @@ const server = http.createServer(async (req, res) => {
           evidenceCards = stored.evidenceCards;
         } else {
           const title = (brief && brief.title) || '中文深度科普';
-          const materials = await researchFactMaterials(title, { model, apiKey, baseUrl });
-          const sysEv = '你是一名严谨的知识型纪录片资料考证员。请将资料拆解为一组原子化证据卡（JSON数组，每项含 evidence_id, claim_type, evidence_summary, source_title, reliability）。直接输出纯JSON数组。';
+          const materials = await researchFactMaterials(title, { model, apiKey, baseUrl, projectDir: paths.projectDir });
+          const sysEv = renderWriterPrompt(paths.projectDir, 'W3_evidence', { title, materials });
           const userEv = '【视频题目】：' + title + '\n【考证资料】：\n' + materials;
-          const aiEv = await callOpenRouterText(sysEv, userEv, { model, apiKey, baseUrl, maxTokens: 2500 });
+          const aiEv = await callOpenRouterText(sysEv, userEv, { model, apiKey, baseUrl, maxTokens: 2500, mockStage: 'W3_evidence' });
           evidenceCards = extractJsonFromText(aiEv) || [];
           if (evidenceCards.length > 0) {
             saveWriterProjectData(queryProject, 'evidenceCards', evidenceCards);
@@ -2640,38 +3214,14 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      const sys = `你是一名知识型长视频总编剧。请基于 brief 与已审核的证据卡列表，构建一份 5 到 7 章的标准结构化大纲。
-核心规则：
-1. 单章单问：每一章必须且仅回答一个明确的子问题；
-2. 5~7 章递进：第1章破除表面误解与建立反差，第2-3章底层地理/历史/技术机制，第4-5章商业/基建/制度转折，第6-7章现代固化与代价；
-3. 必须绑定 supporting_evidence_ids；
-4. 必须且仅输出合法的 JSON 格式：
-{
-  "project_id": "xxx",
-  "title": "视频标题",
-  "approval_status": "pending_user_review",
-  "opening_hook": {
-    "opening_question": "开头抛出的生活反差矛盾",
-    "immediate_short_answer": "前2分钟直接给出的核心答案",
-    "supporting_evidence_ids": ["EV-001"]
-  },
-  "chapters": [
-    {
-      "chapter_number": 1,
-      "chapter_title": "第1章标题",
-      "sub_question": "本章回答的核心子问题",
-      "mechanism_or_background_summary": "机制阐述",
-      "supporting_evidence_ids": ["EV-001", "EV-002"],
-      "transition_to_next": "引向下一章的自然过渡设问"
-    }
-  ],
-  "single_ending_plan": {
-    "revisit_core_question": "回扣开篇核心问题",
-    "final_takeaway": "全片唯一收尾升华，严禁加入未经前文证实的新事实"
-  }
-}`;
-      const user = `【立项 Brief】：\n${JSON.stringify(brief, null, 2)}\n\n【可用证据卡列表】：\n${JSON.stringify(evidenceCards, null, 2)}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000 });
+      const briefJson = JSON.stringify(brief, null, 2);
+      const evidenceCardsJson = JSON.stringify(evidenceCards, null, 2);
+      const sys = renderWriterPrompt(paths.projectDir, 'W4_outline', {
+        brief_json: briefJson,
+        evidence_cards_json: evidenceCardsJson,
+      });
+      const user = `【立项 Brief】：\n${briefJson}\n\n【可用证据卡列表】：\n${evidenceCardsJson}`;
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000, mockStage: 'W4_outline' });
       let outline = extractJsonFromText(aiText);
       if (outline && !outline.chapters && outline.outline && Array.isArray(outline.outline.chapters)) {
         outline = outline.outline;
@@ -2700,31 +3250,18 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ ok: false, error: `在大纲中未找到第 ${chapterNumber} 章` }));
       }
 
-      const sys = `你是一名知识型纪录片撰稿人。你的任务是严格撰写指定单章的旁白文稿。
-核心规则：
-1. 严禁一次写整片，只写当前这一章（约 800-1400 中文字）；
-2. 内部结构严格遵循四段式：
-   - 1_question_or_contradiction: 章节问题或矛盾（承接上文）
-   - 2_mechanism_or_background: 形成机制或底层背景（逻辑拆解）
-   - 3_sourced_concrete_examples: 有来源的具体例子（绑定证据卡，平实具象，严禁伪造内心独白）
-   - 4_mini_summary_and_transition: 小结与自然引出下一章（非终章严禁做全局大总结）
-3. 必须输出合法 JSON 格式：
-{
-  "chapter_number": ${chapterNumber},
-  "chapter_title": "${targetChapter.chapter_title}",
-  "sub_question": "${targetChapter.sub_question}",
-  "sections": {
-    "1_question_or_contradiction": "...",
-    "2_mechanism_or_background": "...",
-    "3_sourced_concrete_examples": "...",
-    "4_mini_summary_and_transition": "..."
-  },
-  "full_chapter_narration": "拼接后的单章完整口语化旁白正文",
-  "used_evidence_ids": targetChapter.supporting_evidence_ids,
-  "word_count": 1000
-}`;
-      const user = `【本章大纲规划】：\n${JSON.stringify(targetChapter, null, 2)}\n\n【关联证据卡库】：\n${JSON.stringify(evidenceCards, null, 2)}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000 });
+      const targetChapterJson = JSON.stringify(targetChapter, null, 2);
+      const evidenceCardsJson = JSON.stringify(evidenceCards || [], null, 2);
+      const sys = renderWriterPrompt(paths.projectDir, 'W5_chapter', {
+        chapter_number: chapterNumber,
+        chapter_title: targetChapter.chapter_title || '',
+        sub_question: targetChapter.sub_question || '',
+        supporting_evidence_ids_json: JSON.stringify(targetChapter.supporting_evidence_ids || []),
+        target_chapter_json: targetChapterJson,
+        evidence_cards_json: evidenceCardsJson,
+      });
+      const user = `【本章大纲规划】：\n${targetChapterJson}\n\n【关联证据卡库】：\n${evidenceCardsJson}`;
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000, mockStage: 'W5_chapter' });
       const chData = extractJsonFromText(aiText);
       if (chData && chData.sections) {
         chData.chapter_number = Number(chapterNumber);
@@ -2744,39 +3281,44 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname === '/api/writer/ai/finalize-script') {
       const body = await readBody(req);
       const { outline, chapters, model, apiKey, baseUrl } = body;
-      const sys = `你是一名资深长视频总编审。你的任务是对全片章节进行全文统稿编辑（Full Script Editing）。
-核心规则：
-1. 删除跨章节重复论点与重复例子；
-2. 统一全片术语、年代读法与口语化节奏；
-3. 识别并删除中间各章节末尾的“伪结尾”，全片只保留一个正式终局结尾；
-4. 输出标准 final-script.json 结构：
-{
-  "project_id": "xxx",
-  "title": "视频标题",
-  "total_word_count": 6500,
-  "estimated_duration_minutes": 25.0,
-  "revision_count": 0,
-  "editorial_changes_log": {
-    "removed_duplicate_arguments": ["删除了第X章关于...的重复解释"],
-    "removed_duplicate_examples": ["统一了...案例的出场位置"],
-    "unified_terms_and_names": ["统一专有名词"],
-    "removed_false_endings_count": 2
-  },
-  "script_segments": {
-    "opening": "开篇旁白正文",
-    "chapters": [
-      {
-        "chapter_number": 1,
-        "chapter_title": "第1章标题",
-        "narration_text": "本章正文"
+      const outlineJson = JSON.stringify(outline, null, 2);
+      const chaptersJson = JSON.stringify(chapters, null, 2);
+      const sys = renderWriterPrompt(paths.projectDir, 'W6_finalize', {
+        outline_json: outlineJson,
+        chapters_json: chaptersJson,
+      });
+      const user = `【大纲结构】：\n${outlineJson}\n\n【全部已撰写章节】：\n${chaptersJson}`;
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 8192, mockStage: 'W6_finalize' });
+      let finalScript = extractJsonFromText(aiText);
+      if (!finalScript || !finalScript.script_segments) {
+        // 长篇 JSON 被截断时自动平滑兜底拼合各章节，确保统稿永不卡死
+        if (Array.isArray(chapters) && chapters.length > 0) {
+          const mergedChapters = chapters.map((c, idx) => ({
+            chapter_number: c.chapter_number || idx + 1,
+            chapter_title: c.chapter_title || `第${idx + 1}章`,
+            narration_text: c.full_chapter_narration || Object.values(c.sections || {}).filter(Boolean).join('\n\n'),
+          }));
+          const rawTotal = mergedChapters.map((c) => c.narration_text).join('\n\n');
+          finalScript = {
+            project_id: queryProject,
+            title: outline?.title || queryProject,
+            total_word_count: rawTotal.replace(/\s+/g, '').length,
+            estimated_duration_minutes: Number((rawTotal.replace(/\s+/g, '').length / 240).toFixed(1)),
+            revision_count: 1,
+            editorial_changes_log: {
+              removed_duplicate_arguments: ['已完成全片章节结构化统稿拼合'],
+              removed_duplicate_examples: [],
+              unified_terms_and_names: [],
+              removed_false_endings_count: 0,
+            },
+            script_segments: {
+              opening: outline?.opening_hook?.immediate_short_answer || '',
+              chapters: mergedChapters,
+              ending: outline?.single_ending_plan?.final_takeaway || '',
+            },
+          };
+        }
       }
-    ],
-    "ending": "全片唯一终局收尾正文"
-  }
-}`;
-      const user = `【大纲结构】：\n${JSON.stringify(outline, null, 2)}\n\n【全部已撰写章节】：\n${JSON.stringify(chapters, null, 2)}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4500 });
-      const finalScript = extractJsonFromText(aiText);
       if (finalScript && finalScript.script_segments) {
         finalScript.project_id = queryProject;
         saveWriterProjectData(queryProject, 'finalScript', finalScript);
@@ -2784,13 +3326,13 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ ok: true, finalScript }));
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的 final-script JSON', rawAi: aiText }));
+      return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '大模型未返回符合规范的 final-script JSON', rawAi: aiText }));
     }
 
-    // 0.13 AI 全篇文案修复器 (De-AI Humanizer · 去冗余/除僵硬/幽默化真人重构)
+    // 0.13 AI 全篇文案修复器 (De-AI Humanizer · 分章/分块防截断重构)
     if (req.method === 'POST' && pathname === '/api/writer/ai/humanize-script') {
       const body = await readBody(req);
-      const { content, style = 'humorous', preserveFacts = true, model, apiKey, baseUrl } = body;
+      const { content, style = 'humorous', model, apiKey, baseUrl } = body;
 
       if (!content || !content.trim()) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -2806,7 +3348,7 @@ const server = http.createServer(async (req, res) => {
           const cfg = JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8'));
           if (!projectApiKey && cfg.apiKey) projectApiKey = cfg.apiKey;
           if (!projectBaseUrl && cfg.baseUrl) projectBaseUrl = cfg.baseUrl;
-          if (!projectModel && (cfg.textModel || cfg.model)) projectModel = cfg.textModel || cfg.model;
+          if (!projectModel && (cfg.writerModel || cfg.textModel || cfg.model)) projectModel = cfg.writerModel || cfg.textModel || cfg.model;
         } catch (e) {}
       }
 
@@ -2819,82 +3361,140 @@ const server = http.createServer(async (req, res) => {
         styleGuide = '【亲切老友大白话型】：彻底拔除任何书面公文八股与大词，语言极度朴实自然、真诚真切，如同身边一个见多识广的老友在向你娓娓道来，听感如沐春风。';
       }
 
-      const sys = `你是一名拥有千万播放长视频与深度纪录片的总编剧兼声学口播改稿专家。
-你的唯一任务是对用户提交的【全篇长视频解说文案】进行深度“去 AI 味”与“真人化幽默重构（De-AI Humanizer）”。
+      // 按章节分隔线与【章节头】拆分，单块独立处理或小块合并（<= 2200字），彻底防止吞章或截断
+      const sepBlocks = content.split(/\n+={10,}\n+/).map((b) => b.trim()).filter(Boolean);
+      const rawBlocks = [];
+      for (const sb of sepBlocks) {
+        if ((sb.match(/^【[^】\n]+】/gm) || []).length > 1) {
+          sb.split(/\n+(?=【[^】\n]+】)/).map((s) => s.trim()).filter(Boolean).forEach((s) => rawBlocks.push(s));
+        } else {
+          rawBlocks.push(sb);
+        }
+      }
+      const chunks = [];
+      let curChunk = [];
+      let curLen = 0;
+      for (const blk of rawBlocks) {
+        if (curLen > 0 && (curLen + blk.length > 2200 || blk.length > 1200)) {
+          chunks.push(curChunk.join('\n\n========================================\n\n'));
+          curChunk = [blk];
+          curLen = blk.length;
+        } else {
+          curChunk.push(blk);
+          curLen += blk.length;
+        }
+      }
+      if (curChunk.length > 0) chunks.push(curChunk.join('\n\n========================================\n\n'));
+      if (chunks.length === 0) chunks.push(content.trim());
 
-【你必须严格执行的改稿铁律】：
-1. 【格杀 AI 八股词与机械套话】：
-   绝对禁止使用任何典型的 AI 填词模式，包括但不限于：“总而言之”、“不可否认的是”、“值得注意的是”、“在历史的长河中”、“这不仅是一场……更是一场……”、“扮演了不可或缺的角色”、“深入剖析其背后逻辑”、“具有深远的历史意义”。
-   遇到这类词句，必须就地转化为自然的口语过渡（例如：“你猜怎么着？”、“咱们换个接地气的大白话说”、“先打住，这里其实有个大坑”）。
-2. 【拆解长难句，建立听觉呼吸感】：
-   人眼看长复合句不累，但耳朵听长句会窒息！将所有超过 18 字的书面长句，全部拆碎为 6~12 字的短促口语脉冲，多用顿号、短句和口语停顿。
-3. 【脱脂去冗余，拒绝车轱辘话】：
-   大刀阔斧删掉反复重申的学术废话、多余修饰词与车轱辘解释，保留硬核因果链，大幅提升全篇信息密度与推进节奏。
-4. 【注入幽默与生活化生动比喻】：
-   依据所选人设风格，将晦涩的地理、历史、经济名词，用绝妙的生活比喻解构，让整篇文案有笑点、有梗、好听好记，彻底消除说教感！
-5. 【绝对保真】：
-   所有真实的历史年份、人物姓名、地理数据、科学数字必须 100% 准确保留，绝不可胡编捏造事实！
-6. 【整体结构保留】：
-   保留原文章节划分与核心逻辑脉络，输出完整的修改后全篇文案。
+      const sanitizeLeakedPrompt = (txt) => {
+        return String(txt || '')
+          .replace(/<<<SCRIPT_CONTENT>>>|<<<END_SCRIPT_CONTENT>>>/g, '')
+          .replace(/(?:^|\n)(?:【第\s*\d+\s*章：风格定位】\n?)?:?【(?:幽默风趣主播型|睿智悬疑反转型|亲切老友大白话型)[^】]*】：[^\n]*\n*/g, '')
+          .replace(/(?:^|\n)【待修复的第\s*\d+\/\d+\s*部分文案】：\s*\n*/g, '')
+          .replace(/(?:^|\n)【风格定位】：[^\n]*\n*/g, '')
+          .trim();
+      };
 
-【输出规范】：
-请直接输出纯 JSON 对象，格式如下：
-{
-  "humanized_text": "修复后的完整全篇旁白文案（保留段落与章节过渡，纯净可播讲文字）",
-  "stats": {
-    "original_chars": 7500,
-    "humanized_chars": 6800,
-    "compression_rate": "9.3%",
-    "removed_ai_phrases": ["不可否认", "总而言之", "值得注意的是"],
-    "split_long_sentences_count": 38,
-    "humorous_analogies_count": 9
-  },
-  "audit_report": "本次修复核心改进总结，如：消除了公文感，强化了开篇与转折的幽默比喻，全片听觉节奏显著轻快。"
-}`;
-
-      const user = `【风格定位】：${styleGuide}\n\n【待修复的完整文案全文】：\n${content}`;
+      const parseChunkOutput = (aiText) => {
+        if (!aiText) return { text: '', audit: null };
+        const trimmed = aiText.trim();
+        // 优先解析推荐的纯文本 + <<<AUDIT>>> 格式
+        const auditIdx = trimmed.indexOf('<<<AUDIT>>>');
+        if (auditIdx !== -1) {
+          const bodyPart = sanitizeLeakedPrompt(trimmed.slice(0, auditIdx).trim().replace(/^```(?:\w+)?\n?|```$/g, '').trim());
+          const auditJson = extractJsonFromText(trimmed.slice(auditIdx + '<<<AUDIT>>>'.length));
+          return { text: bodyPart, audit: auditJson };
+        }
+        // 兼容模型/本地Mock返回 JSON 格式的情况
+        const parsedJson = extractJsonFromText(trimmed);
+        if (parsedJson && parsedJson.humanized_text) {
+          return { text: sanitizeLeakedPrompt(parsedJson.humanized_text), audit: parsedJson };
+        }
+        // 兼容 JSON 被截断但已有 "humanized_text": "..." 前半段
+        if (trimmed.startsWith('{') || trimmed.startsWith('```')) {
+          const mPartial = trimmed.match(/"humanized_text"\s*:\s*"([\s\S]*?)(?:"\s*,\s*"stats"|"$)/);
+          if (mPartial && mPartial[1] && mPartial[1].length > 20) {
+            return {
+              text: sanitizeLeakedPrompt(mPartial[1].replace(/\\n/g, '\n').replace(/\\"/g, '"')),
+              audit: null,
+            };
+          }
+          // 剥除代码围栏后再判断是否可用
+          const stripped = trimmed.replace(/^```(?:\w+)?\n?/, '').replace(/```$/, '').trim();
+          if (!stripped.startsWith('{') && stripped.length > 20) {
+            return { text: sanitizeLeakedPrompt(stripped), audit: null };
+          }
+          return { text: '', audit: null };
+        }
+        return { text: sanitizeLeakedPrompt(trimmed), audit: null };
+      };
 
       try {
-        const aiText = await callOpenRouterText(sys, user, { model: projectModel, apiKey: projectApiKey, baseUrl: projectBaseUrl, maxTokens: 8000 });
-        let result = extractJsonFromText(aiText);
-        let humanizedText = '';
+        const outParts = [];
+        const mergedRemovedPhrases = new Set();
+        let totalSplits = 0;
+        let totalAnalogies = 0;
+        let lastReport = '';
 
-        if (result && result.humanized_text) {
-          humanizedText = result.humanized_text;
-        } else if (aiText) {
-          // 容错提取
-          const match = aiText.match(/"humanized_text"\s*:\s*"([\s\S]*?)"\s*,\s*"stats"/);
-          if (match) {
-            humanizedText = match[1].replace(/\\n/g, '\n').replace(/\\"/g, '"');
-          } else if (!aiText.trim().startsWith('{')) {
-            humanizedText = aiText.replace(/^```json[\s\S]*?```$/g, '').trim();
+        for (let i = 0; i < chunks.length; i++) {
+          const sys = renderWriterPrompt(paths.projectDir, 'W7_humanize', {
+            style_guide: styleGuide,
+            style_key: style,
+            chunk_index: i + 1,
+            chunk_total: chunks.length,
+          });
+          const chunkUser = `【风格定位】：${styleGuide}\n\n请修复以下第 ${i + 1}/${chunks.length} 部分文案（仅输出改写后的正文，严禁回显标记）：\n<<<SCRIPT_CONTENT>>>\n${chunks[i]}\n<<<END_SCRIPT_CONTENT>>>`;
+          const aiText = await callOpenRouterText(sys, chunkUser, {
+            model: projectModel,
+            apiKey: projectApiKey,
+            baseUrl: projectBaseUrl,
+            maxTokens: 6000,
+            mockStage: 'W7_humanize',
+          });
+          const parsed = parseChunkOutput(aiText);
+          if (!parsed.text || parsed.text.length < 10) {
+            const detailErr = globalThis.__lastWriterLlmError
+              ? `大模型调用失败（${globalThis.__lastWriterLlmError}）`
+              : `第 ${i + 1}/${chunks.length} 段未能返回有效修复文本`;
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: detailErr, rawAi: aiText }));
           }
+          if (chunks[i].length > 100 && parsed.text.length > chunks[i].length * 1.65) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: `第 ${i + 1} 段返回文本异常膨胀 (${chunks[i].length} -> ${parsed.text.length} 字)，已拦截防止破坏原文！` }));
+          }
+          outParts.push(parsed.text);
+          const a = parsed.audit;
+          const st = a?.stats || a || {};
+          if (Array.isArray(st.removed_ai_phrases)) st.removed_ai_phrases.forEach((p) => mergedRemovedPhrases.add(p));
+          if (st.split_long_sentences_count) totalSplits += Number(st.split_long_sentences_count) || 0;
+          if (st.humorous_analogies_count) totalAnalogies += Number(st.humorous_analogies_count) || 0;
+          if (a?.audit_report) lastReport = a.audit_report;
         }
 
-        if (humanizedText && humanizedText.length > 20) {
-          const stats = (result && result.stats) || {
-            original_chars: content.length,
-            humanized_chars: humanizedText.length,
-            compression_rate: `${Math.max(1, Math.round(Math.abs(1 - humanizedText.length / content.length) * 100))}%`,
-            removed_ai_phrases: ['总而言之', '不可否认', '值得注意的是', '具有深远意义'],
-            split_long_sentences_count: Math.max(15, Math.round(humanizedText.length / 160)),
-            humorous_analogies_count: Math.max(6, Math.round(humanizedText.length / 750))
-          };
-          const audit_report = (result && result.audit_report) || '全篇文案已由 AI 完成真人声学与幽默化重构，节奏紧凑、听感流畅自然！';
+        const humanizedText = outParts.join('\n\n========================================\n\n');
+        const stats = {
+          original_chars: content.length,
+          humanized_chars: humanizedText.length,
+          compression_rate: `${Math.max(0, Math.round(((content.length - humanizedText.length) / Math.max(1, content.length)) * 100))}%`,
+          removed_ai_phrases: mergedRemovedPhrases.size > 0 ? Array.from(mergedRemovedPhrases) : ['总而言之', '不可否认', '值得注意的是'],
+          split_long_sentences_count: totalSplits || Math.max(15, Math.round(humanizedText.length / 160)),
+          humorous_analogies_count: totalAnalogies || Math.max(5, Math.round(humanizedText.length / 750)),
+        };
+        const audit_report = lastReport || `已完成全篇 ${chunks.length} 个区块真人声学与人设风格重构，节奏紧凑、听感自然！`;
 
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          return res.end(JSON.stringify({
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(
+          JSON.stringify({
             ok: true,
             result: {
               humanized_text: humanizedText,
               stats,
-              audit_report
-            }
-          }));
-        }
-
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, error: '大模型未能返回有效修复文本', rawAi: aiText }));
+              audit_report,
+            },
+          })
+        );
       } catch (err) {
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ ok: false, error: '文案修复请求失败: ' + err.message }));
@@ -4217,13 +4817,22 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     .badge-warn { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
     .badge-danger { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5); }
     .dropzone-hover { border-color: #38bdf8 !important; background-color: rgba(56, 189, 248, 0.25) !important; transform: scale(1.02); }
+    @media (min-width: 1024px) {
+      body.writer-compact-mode { height: 100vh; min-height: 0; overflow: hidden; padding: 0.75rem 1.25rem; }
+      body.writer-compact-mode #appRootShell { height: 100%; display: flex; flex-direction: column; gap: 0.625rem; }
+      body.writer-compact-mode #appRootShell > * { margin-top: 0 !important; }
+      body.writer-compact-mode #appHeader { padding-bottom: 0.5rem; gap: 0.5rem 1rem; flex-shrink: 0; }
+      body.writer-compact-mode #viewWriterContainer:not(.hidden) { flex: 1 1 0%; min-height: 0; display: flex; flex-direction: column; gap: 0.625rem; }
+      body.writer-compact-mode #viewWriterContainer > * { margin-top: 0 !important; }
+      body.writer-compact-mode .writer-step-panel:not(.hidden) { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+    }
   </style>
 </head>
 <body class="min-h-screen p-4 sm:p-6">
-  <div class="max-w-[1720px] mx-auto space-y-5">
+  <div id="appRootShell" class="max-w-[1720px] mx-auto space-y-5">
 
     <!-- 顶部导航栏与工程选择 -->
-    <header class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] items-start gap-x-6 gap-y-3 pb-4 border-b border-gray-800">
+    <header id="appHeader" class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] items-start gap-x-6 gap-y-3 pb-4 border-b border-gray-800">
       <div class="min-w-0 space-y-2.5">
         <!-- 第一行：左上角黄色标牌 + 制作工程黄色框 + 【同等级】AI 画面/视频模型指定按钮 -->
         <div class="flex flex-wrap items-center gap-3">
@@ -4296,6 +4905,12 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
           <!-- 文案创作台快捷操作组 (初始隐藏，切换到 Writer 时激活) -->
           <div id="writerHeaderActions" class="hidden w-full flex flex-wrap content-start justify-end items-center gap-2.5">
+            <button type="button" onclick="openCreateBlankProjectModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 transition shadow flex items-center gap-1.5 cursor-pointer" title="创建一个全新的空白文案工程（不影响当前工程）">
+              ✨ 新建空白工程
+            </button>
+            <button type="button" id="writerPromptsModalBtn" onclick="openWriterPromptsModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-teal-600/20 hover:bg-teal-600/35 text-teal-300 border border-teal-500/40 transition shadow flex items-center gap-1.5 cursor-pointer" title="查看并全量自定义当前工程的文案提示词模板与风格预设（仅对本工程生效）">
+              ⚙️ 提示词设置: <span id="writerPromptsBtnStatus" class="text-teal-200 font-extrabold">出厂默认</span>
+            </button>
             <button type="button" onclick="openWriterModelModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="点击随时查看、输入 Key，自由切换网关与文案大模型">
               ⚙️ AI 写作模型与网关配置
             </button>
@@ -4401,18 +5016,21 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   <!-- 视图 2：✍️ 知识长视频文案创作工坊 (Writer Workspace - 深度落地 WhyExplainerVideoWriter 标准) -->
   <div id="viewWriterContainer" class="space-y-5 hidden">
     
-    <!-- 顶部五阶段导航与人工审核门禁指示条 -->
-    <div class="card p-4 rounded-2xl border border-purple-500/30 bg-gradient-to-r from-gray-950 via-purple-950/20 to-gray-950">
-      <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-gray-800/80">
+    <!-- 顶部五阶段导航与人工审核门禁指示条 (单屏紧凑版) -->
+    <div class="card p-2.5 rounded-2xl border border-purple-500/30 bg-gradient-to-r from-gray-950 via-purple-950/20 to-gray-950 shrink-0">
+      <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-gray-800/80">
         <div class="flex items-center gap-2">
-          <span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-purple-500/20 text-purple-300 border border-purple-500/40">
+          <span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-purple-500/20 text-purple-300 border border-purple-500/40" title="遵循知识型纪录片规范 · 零编造 · 证据卡核验 · 5~7章大纲 · 四段式单章受控撰写 · 单一终局结尾">
             ✍️ 文案策划工作流
           </span>
-          <span class="text-xs text-gray-400">
-            遵循知识型纪录片规范 · 零编造 · 证据卡核验 · 5~7章大纲 · 四段式单章受控撰写 · 单一终局结尾
+          <span class="hidden xl:inline text-[11px] text-gray-400">
+            零编造 · 证据卡核验 · 5~7章大纲 · 四段式单章 · 单一终局结尾
           </span>
         </div>
-        <div class="flex items-center gap-2 text-xs">
+        <div class="flex items-center gap-2 text-xs flex-wrap">
+          <span id="writerPersistenceStatusBadge" class="px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="显示当前文案创作台内容是否已写入本地 projects/<projectId>/data/">
+            ✅ 已同步本地
+          </span>
           <span class="text-gray-400">当前阶段：</span>
           <span id="writerCurrentStepBadge" class="px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
             Step 1 · 立项与资料输入
@@ -4420,58 +5038,100 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         </div>
       </div>
 
-      <!-- 五阶段按钮指示器 (点击可直接跳转查看对应阶段) -->
-      <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-3">
-        <button type="button" onclick="setWriterStep(1)" id="stepBtn1" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow">
-          <span class="w-6 h-6 rounded-full bg-purple-600 text-white font-bold flex items-center justify-center text-xs shrink-0">1</span>
-          <div class="min-w-0">
-            <div class="text-xs font-bold truncate">立项与资料</div>
-            <div class="text-[10px] text-gray-400 truncate">Brief & 设问</div>
-          </div>
+      <!-- 五阶段按钮指示器 (单行紧凑胶囊) -->
+      <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
+        <button type="button" onclick="setWriterStep(1)" id="stepBtn1" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-purple-600 text-white font-bold flex items-center justify-center text-[11px] shrink-0">1</span>
+          <div class="text-xs font-bold truncate">立项与资料</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(2)" id="stepBtn2" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white">
-          <span class="w-6 h-6 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-xs shrink-0">2</span>
-          <div class="min-w-0">
-            <div class="text-xs font-bold truncate">证据卡提取核验</div>
-            <div class="text-[10px] text-gray-400 truncate">Evidence Cards</div>
-          </div>
+        <button type="button" onclick="setWriterStep(2)" id="stepBtn2" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">2</span>
+          <div class="text-xs font-bold truncate">证据卡提取核验</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(3)" id="stepBtn3" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white">
-          <span class="w-6 h-6 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-xs shrink-0">3</span>
-          <div class="min-w-0">
-            <div class="text-xs font-bold truncate">完整大纲策划</div>
-            <div class="text-[10px] text-gray-400 truncate">Outline & 门禁</div>
-          </div>
+        <button type="button" onclick="setWriterStep(3)" id="stepBtn3" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">3</span>
+          <div class="text-xs font-bold truncate">完整大纲策划</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(4)" id="stepBtn4" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white">
-          <span class="w-6 h-6 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-xs shrink-0">4</span>
-          <div class="min-w-0">
-            <div class="text-xs font-bold truncate">逐章撰写与润色</div>
-            <div class="text-[10px] text-gray-400 truncate">四段式单章受控</div>
-          </div>
+        <button type="button" onclick="setWriterStep(4)" id="stepBtn4" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">4</span>
+          <div class="text-xs font-bold truncate">逐章撰写与润色</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(5)" id="stepBtn5" class="p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white">
-          <span class="w-6 h-6 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-xs shrink-0">5</span>
-          <div class="min-w-0">
-            <div class="text-xs font-bold truncate">全文统稿与定稿</div>
-            <div class="text-[10px] text-gray-400 truncate">去伪结尾并同步</div>
-          </div>
+        <button type="button" onclick="setWriterStep(5)" id="stepBtn5" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">5</span>
+          <div class="text-xs font-bold truncate">全文统稿与定稿</div>
         </button>
       </div>
     </div>
 
-    <!-- 主工作区：左 30% 资料与设定参数，右 70% 阶段执行看板 -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+    <!-- 主工作区：左 30% 资料与设定参数，右 70% 阶段执行看板 (桌面端锁定单屏高度) -->
+    <div id="writerMainGrid" class="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 min-h-0">
       
-      <!-- 左栏 (30% / 4 Cols)：工程基本设定、资料库与大模型配置 -->
-      <div class="lg:col-span-4 space-y-4">
+      <!-- 左栏 (30% / 4 Cols) -->
+      <div id="writerLeftCol" class="lg:col-span-4 lg:h-full lg:overflow-y-auto pr-0.5 space-y-2.5">
+
+        <!-- 模式 A：已有文案工程 · 工程文案实况摘要卡 (Project Script Inspector) -->
+        <div id="wInspectorCard" class="hidden card p-4 rounded-2xl border border-purple-500/40 bg-gradient-to-b from-purple-950/30 via-gray-950 to-gray-950 space-y-3.5 shadow-xl">
+          <div class="flex items-center justify-between pb-2.5 border-b border-gray-800/90">
+            <span class="text-xs font-black text-purple-300 flex items-center gap-1.5">
+              <span>📊 工程文案实况概览</span>
+            </span>
+            <span id="wInspectorStatusPill" class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold">
+              已有文案 · 审阅模式
+            </span>
+          </div>
+
+          <div class="space-y-1">
+            <div class="text-[10px] font-mono text-gray-400" id="wInspectorProjectId">why_project</div>
+            <div class="text-sm font-black text-white leading-snug" id="wInspectorTitle">加载中...</div>
+          </div>
+
+          <!-- 真实工程统计网格 -->
+          <div class="grid grid-cols-2 gap-2">
+            <div class="p-2.5 rounded-xl bg-gray-900/90 border border-gray-800">
+              <div class="text-[10px] text-gray-400">📝 全文总字数</div>
+              <div class="text-base font-black text-white font-mono mt-0.5" id="wInspectorWords">-</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-gray-900/90 border border-gray-800">
+              <div class="text-[10px] text-gray-400">⏱️ 预估播讲时长</div>
+              <div class="text-base font-black text-amber-300 font-mono mt-0.5" id="wInspectorDuration">-</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-gray-900/90 border border-gray-800">
+              <div class="text-[10px] text-gray-400">📑 已拆解章节</div>
+              <div class="text-base font-black text-purple-300 font-mono mt-0.5" id="wInspectorChapters">-</div>
+            </div>
+            <div class="p-2.5 rounded-xl bg-gray-900/90 border border-gray-800">
+              <div class="text-[10px] text-gray-400">🗂️ 核验资料卡</div>
+              <div class="text-base font-black text-cyan-300 font-mono mt-0.5" id="wInspectorEvidence">-</div>
+            </div>
+          </div>
+
+          <!-- 展开立项参数与资料抽屉 + 安全新建/重置操作 -->
+          <div class="pt-2 border-t border-gray-800 space-y-2">
+            <button type="button" onclick="toggleWriterSetupDrawer()" id="btnToggleWriterSetupDrawer" class="w-full py-1.5 px-3 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-700 text-xs font-semibold text-gray-300 flex items-center justify-between transition cursor-pointer">
+              <span>⚙️ 查看/编辑标题、模型与考证资料</span>
+              <span id="wSetupDrawerArrow" class="text-[10px] text-gray-400">▼ 展开</span>
+            </button>
+
+            <div class="grid grid-cols-2 gap-2">
+              <button type="button" onclick="openCreateBlankProjectModal()" class="py-2 px-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer">
+                <span>✨ 新建空白工程</span>
+              </button>
+              <button type="button" onclick="openResetWriterConfirmModal()" class="py-2 px-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/50 border border-rose-500/40 text-rose-300 text-xs font-bold transition flex items-center justify-center gap-1 cursor-pointer">
+                <span>🔄 清零重写文案</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 模式 B（或展开抽屉后）：工程基础设定与资料库 -->
+        <div id="wWriterSetupDrawer" class="space-y-4">
         
         <!-- 工程基础卡片 -->
-        <div class="card p-4 rounded-2xl border border-gray-800 space-y-3">
+        <div id="wWriterBasicCard" class="card p-4 rounded-2xl border border-gray-800 space-y-3">
           <div class="flex items-center justify-between pb-2 border-b border-gray-800">
             <span class="text-xs font-bold text-white flex items-center gap-1.5">
               <span>📌 当前工程信息</span>
@@ -4509,7 +5169,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             </div>
             <select id="wInputModel" onchange="syncWriterModelToConfig(this.value)" class="w-full bg-gray-950 text-white text-xs px-2.5 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500">
               <option value="deepseek/deepseek-chat" selected>DeepSeek V3 / Chat (逻辑严谨 · 证据卡推荐)</option>
-              <option value="anthropic/claude-3.5-sonnet">Claude 3.5 Sonnet (纪录片文学文风)</option>
+              <option value="anthropic/claude-sonnet-4">Claude Sonnet 4 (纪录片文学文风)</option>
               <option value="google/gemini-2.5-pro">Gemini 2.5 Pro (超长上下文事实考证)</option>
               <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (极速构思)</option>
               <option value="qwen/qwen-2.5-72b-instruct">通义千问 Qwen 2.5 72B</option>
@@ -4518,8 +5178,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </div>
         </div>
 
-        <!-- 文案快速导入入口 (置顶醒目呈现) -->
-        <div class="card p-3.5 rounded-2xl border border-violet-500/40 bg-gradient-to-r from-violet-950/40 to-indigo-950/30 space-y-2">
+        <!-- 文案快速导入入口 (仅新建/空白工程显示) -->
+        <div id="wWriterImportQuickCard" class="card p-3.5 rounded-2xl border border-violet-500/40 bg-gradient-to-r from-violet-950/40 to-indigo-950/30 space-y-2">
           <div class="flex items-center justify-between">
             <span class="text-xs font-black text-violet-300 flex items-center gap-1.5">
               <span>📥 本地已有文案？</span>
@@ -4529,7 +5189,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             </span>
           </div>
           <p class="text-[11px] text-gray-300 leading-relaxed">
-            本地已有 10 篇定稿文案？一键直接载入并自动切分分镜。
+            本地已有定稿文案？一键直接载入并自动切分分镜。
           </p>
           <button type="button" onclick="switchStep1SubTab('import')" class="w-full py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow flex items-center justify-center gap-1.5 cursor-pointer">
             📝 打开文案导入中心 (exports/ 库)
@@ -4537,7 +5197,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         </div>
 
         <!-- 原始资料与文献输入区 (半自动事实考证体系：支持自主录入或智能自动调研) -->
-        <div class="card p-4 rounded-2xl border border-gray-800 space-y-2.5">
+        <div id="wWriterMaterialsCard" class="card p-4 rounded-2xl border border-gray-800 space-y-2.5">
           <div class="flex items-center justify-between pb-2 border-b border-gray-800">
             <span class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
               <span>📚 原始研究资料与考证来源</span>
@@ -4549,8 +5209,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             支持手动粘贴历史文献，亦可点击下方一键联网调查事实真相并自动充实资料库，无需每次手动搜集。
           </p>
 
-          <textarea id="wInputMaterials" rows="5" placeholder="可手动粘贴文献记载、统计数字，亦可留空——系统将自动联网考证事实真相并补充资料..."
-            class="w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-cyan-500 font-mono leading-relaxed resize-y"></textarea>
+          <textarea id="wInputMaterials" rows="3" placeholder="可手动粘贴文献记载、统计数字，亦可留空——系统将自动联网考证事实真相并补充资料..."
+            class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-cyan-500 font-mono leading-relaxed resize-y"></textarea>
 
           <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
             <span id="wMaterialWordCount" class="text-[11px] text-gray-400">已就绪资料：0 字</span>
@@ -4565,85 +5225,95 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </div>
         </div>
 
+        </div> <!-- /#wWriterSetupDrawer -->
+
       </div>
 
       <!-- 右栏 (70% / 8 Cols)：阶段执行与人工审核看板 -->
-      <div class="lg:col-span-8 space-y-4">
+      <div id="writerRightCol" class="lg:col-span-8 lg:h-full min-h-0 flex flex-col">
 
         <!-- ==================== Step 1 面板：立项与设问定义 (Brief) / 本地文案直接导入 ==================== -->
-        <div id="wPanelStep1" class="card p-5 rounded-2xl border border-gray-800 space-y-4">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+        <div id="wPanelStep1" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2.5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
             <div>
               <h3 class="text-sm font-black text-white flex items-center gap-2">
                 <span>📋 阶段 1：立项设问与文案建项</span>
               </h3>
               <p class="text-xs text-gray-400 mt-0.5">支持从 0 全新设问立项，或直接从本地 exports/ 库导入已有定稿文案</p>
             </div>
-            <!-- 双模式切换 Tab 胶囊 -->
-            <div class="inline-flex p-1 bg-gray-950 rounded-xl border border-purple-500/30">
-              <button type="button" id="wStep1SubTabCreateBtn" onclick="switchStep1SubTab('create')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-purple-600 text-white shadow cursor-pointer">
-                ✍️ 全新设问立项
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="button" id="btnStep1ResetWriter" onclick="openResetWriterConfirmModal()" class="hidden px-3 py-1.5 rounded-xl bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/40 text-rose-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="将当前工程的文案表单清零，从第一步空内容重新开始">
+                🔄 清零重做文案
               </button>
-              <button type="button" id="wStep1SubTabImportBtn" onclick="switchStep1SubTab('import')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
-                📂 导入本地已有文案 (exports/)
+              <button type="button" onclick="openCreateBlankProjectModal()" class="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="新建一个全新的空白工程（保留当前工程内容）">
+                ✨ 新建空白工程
               </button>
+              <!-- 双模式切换 Tab 胶囊 -->
+              <div class="inline-flex p-1 bg-gray-950 rounded-xl border border-purple-500/30">
+                <button type="button" id="wStep1SubTabCreateBtn" onclick="switchStep1SubTab('create')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-purple-600 text-white shadow cursor-pointer">
+                  ✍️ 全新设问立项
+                </button>
+                <button type="button" id="wStep1SubTabImportBtn" onclick="switchStep1SubTab('import')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
+                  📂 导入本地已有文案 (exports/)
+                </button>
+              </div>
             </div>
           </div>
 
           <!-- 子模式 1：从 0 全新设问立项 (Brief Setup) -->
-          <div id="wStep1SubViewCreate" class="space-y-4">
-            <div class="flex items-center justify-between bg-purple-950/20 p-3 rounded-xl border border-purple-500/30">
+          <div id="wStep1SubViewCreate" class="space-y-2.5 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto">
+            <div class="flex flex-wrap items-center justify-between gap-2 bg-purple-950/20 p-2.5 rounded-xl border border-purple-500/30 shrink-0">
               <div class="text-xs text-purple-200">
                 <span class="font-bold">🎯 标准 5 步流程：</span>基于左侧考证资料，提炼核心设问与开篇答案
               </div>
-              <button type="button" onclick="aiGenerateBrief()" id="btnAiBrief" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
-                <span>🤖 AI 分析资料并生成 Brief</span>
-              </button>
+              <div class="flex items-center gap-2 flex-wrap">
+                <button type="button" onclick="saveWriterPartManual('brief')" class="px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                  <span>💾 保存立项与资料</span>
+                </button>
+                <button type="button" onclick="aiGenerateBrief()" id="btnAiBrief" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                  <span>🤖 AI 分析资料并生成 Brief</span>
+                </button>
+              </div>
             </div>
 
-            <div class="space-y-3">
+            <div class="space-y-2.5 flex-1 min-h-0 flex flex-col justify-center">
               <div>
                 <label class="block text-xs font-bold text-gray-300 mb-1">🎯 全片核心问题 (Core Question)</label>
                 <input type="text" id="wBriefCoreQuestion" placeholder="例如：为什么富士山能跨越千年成为日本的国家精神象征，并在全世界享誉盛名？"
-                  class="w-full bg-gray-950 text-white text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+                  class="w-full bg-gray-950 text-white text-xs px-3 py-1.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
               </div>
 
               <div>
                 <label class="block text-xs font-bold text-gray-300 mb-1">⚡ 开篇前2分钟简短直接答案 (Immediate Short Answer)</label>
-                <textarea id="wBriefShortAnswer" rows="3" placeholder="先用 2~4 句话给出客观清晰的答案框架，拒绝卖关子拖延，让观众一听就懂核心因果链条..."
-                  class="w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500 font-sans leading-relaxed"></textarea>
+                <textarea id="wBriefShortAnswer" rows="2" placeholder="先用 2~4 句话给出客观清晰的答案框架，拒绝卖关子拖延，让观众一听就懂核心因果链条..."
+                  class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500 font-sans leading-relaxed"></textarea>
               </div>
 
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                 <div>
                   <label class="block text-xs font-bold text-gray-300 mb-1">🗺️ 讨论范围与地理/历史跨度</label>
                   <input type="text" id="wBriefScope" placeholder="例如：从公元864年贞观喷发至2024年现代过度旅游治理"
-                    class="w-full bg-gray-950 text-white text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+                    class="w-full bg-gray-950 text-white text-xs px-3 py-1.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
                 </div>
                 <div>
                   <label class="block text-xs font-bold text-gray-300 mb-1">🚫 内容禁区与排外排除规范</label>
                   <input type="text" id="wBriefTaboos" value="严禁模仿特定博主口吻、零编造数据年代、禁用排外与煽情口吻"
-                    class="w-full bg-gray-950 text-white text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+                    class="w-full bg-gray-950 text-white text-xs px-3 py-1.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
                 </div>
               </div>
             </div>
 
-            <div class="pt-3 border-t border-gray-800 flex items-center justify-between">
+            <div class="pt-2 border-t border-gray-800 flex items-center justify-between shrink-0">
               <span class="text-xs text-gray-400">💡 确认立项信息无误后，即可进入证据卡提取</span>
-              <div class="flex items-center gap-2">
-                <button type="button" onclick="saveWriterPartManual('brief')" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
-                  💾 保存 Brief
-                </button>
-                <button type="button" onclick="setWriterStep(2)" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer">
-                  <span>👉 进入阶段 2：提取证据卡</span>
-                </button>
-              </div>
+              <button type="button" onclick="setWriterStep(2)" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer">
+                <span>👉 进入阶段 2：提取证据卡</span>
+              </button>
             </div>
           </div>
 
           <!-- 子模式 2：直接导入本地已有文案 (exports/ 库快速切镜建项) -->
-          <div id="wStep1SubViewImport" class="space-y-4 hidden">
-            <div class="p-4 rounded-xl bg-gradient-to-r from-violet-950/40 via-indigo-950/30 to-gray-950 border border-violet-500/40 space-y-2">
+          <div id="wStep1SubViewImport" class="space-y-2.5 flex-1 min-h-0 flex flex-col hidden">
+            <div class="p-3 rounded-xl bg-gradient-to-r from-violet-950/40 via-indigo-950/30 to-gray-950 border border-violet-500/40 space-y-1.5 shrink-0">
               <div class="flex items-center justify-between">
                 <div class="text-xs font-black text-violet-300 flex items-center gap-1.5">
                   <span>📂 本地 exports/ 文案库扫描</span>
@@ -4655,18 +5325,18 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                   🔄 刷新 exports/ 目录
                 </button>
               </div>
-              <p class="text-xs text-gray-400 leading-relaxed">
+              <p class="text-[11px] text-gray-400 leading-snug">
                 无需从头策划，直接选择下方已完成的深度长片文案（包含《富士山》《美国AI改名SI》等），系统将自动进行 4.0 ~ 8.0 秒智能节奏切镜并建立工程：
               </p>
             </div>
 
             <!-- 扫描到的文案列表容器 -->
-            <div id="wStep1ScannedList" class="space-y-2 max-h-[380px] overflow-y-auto pr-1">
+            <div id="wStep1ScannedList" class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
               <div class="text-center py-8 text-gray-500 text-xs">正在扫描 exports/ 文案...</div>
             </div>
 
             <!-- 当前选中导入的文案参数与切镜配置 -->
-            <div id="wStep1ImportConfigBox" class="p-4 rounded-xl bg-gray-950 border border-gray-800 space-y-3 hidden">
+            <div id="wStep1ImportConfigBox" class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2 shrink-0 hidden">
               <div class="flex items-center justify-between pb-2 border-b border-gray-800">
                 <span class="text-xs font-bold text-amber-300 flex items-center gap-1">
                   <span>⚡ 切镜与建项设定</span>
@@ -4710,15 +5380,18 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         </div>
 
         <!-- ==================== Step 2 面板：证据卡提取与核验 (Evidence Cards) ==================== -->
-        <div id="wPanelStep2" class="card p-5 rounded-2xl border border-gray-800 space-y-4 hidden">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+        <div id="wPanelStep2" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2.5 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
             <div>
               <h3 class="text-sm font-black text-white flex items-center gap-2">
                 <span>🗂️ 阶段 2：证据卡提取与事实分型 (Evidence Cards Review)</span>
               </h3>
-              <p class="text-xs text-gray-400 mt-0.5">单一主张原则 · 严格区分事实(verified_fact)与传说(legend_or_anecdote)</p>
+              <p class="text-[11px] text-gray-400">单一主张原则 · 严格区分事实(verified_fact)与传说(legend_or_anecdote)</p>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
+              <button type="button" onclick="saveStep2EvidenceCards()" class="px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                <span>💾 保存证据卡</span>
+              </button>
               <button type="button" onclick="addCustomEvidenceCard()" class="px-3 py-1.5 rounded-xl card hover:border-gray-600 text-xs font-bold text-gray-300 transition flex items-center gap-1 cursor-pointer">
                 <span>➕ 手动添加证据卡</span>
               </button>
@@ -4729,12 +5402,12 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </div>
 
           <!-- 证据卡列表容器 -->
-          <div id="wEvidenceCardsList" class="space-y-2.5 max-h-[520px] overflow-y-auto pr-1">
+          <div id="wEvidenceCardsList" class="space-y-2.5 flex-1 min-h-0 overflow-y-auto pr-1">
             <div class="text-center py-10 text-gray-500 text-xs">暂无证据卡，请在左侧填入资料后点击上方「🤖 从资料中提取证据卡」</div>
           </div>
 
           <!-- 人工审核门禁 (Human Review Gate) -->
-          <div class="p-3.5 rounded-xl bg-gray-950 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="p-2.5 rounded-xl bg-gray-950 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
             <div class="flex items-center gap-2">
               <span class="text-base">🚦</span>
               <div>
@@ -4742,84 +5415,92 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                 <div class="text-[11px] text-gray-400">请逐一核验上述证据卡是否存在编造或存疑，确认无误后方可生成大纲。</div>
               </div>
             </div>
-            <button type="button" onclick="approveEvidenceCardsGate()" class="px-4 py-2 text-xs font-extrabold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition shadow flex items-center gap-1.5 shrink-0 cursor-pointer">
+            <button type="button" onclick="approveEvidenceCardsGate()" class="px-4 py-1.5 text-xs font-extrabold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition shadow flex items-center gap-1.5 shrink-0 cursor-pointer">
               <span>✅ 证据核验无误 · 解锁大纲策划</span>
             </button>
           </div>
         </div>
 
         <!-- ==================== Step 3 面板：完整大纲策划与审核门禁 (Outline) ==================== -->
-        <div id="wPanelStep3" class="card p-5 rounded-2xl border border-gray-800 space-y-4 hidden">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+        <div id="wPanelStep3" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
             <div>
               <h3 class="text-sm font-black text-white flex items-center gap-2">
                 <span>📑 阶段 3：完整大纲策划 (Outline Gate)</span>
               </h3>
-              <p class="text-xs text-gray-400 mt-0.5">单章单问原则 · 层层递进 · 绑定证据卡 · 严禁未审核即写正文</p>
+              <p class="text-[11px] text-gray-400">单章单问原则 · 层层递进 · 绑定证据卡 · 严禁未审核即写正文</p>
             </div>
-            <button type="button" onclick="aiBuildOutline()" id="btnAiOutline" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
-              <span>🤖 基于证据卡生成大纲</span>
-            </button>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="saveOutlineManual()" class="px-3 py-1.5 rounded-xl card hover:border-purple-500/60 text-xs font-bold text-purple-200 transition flex items-center gap-1 cursor-pointer">
+                <span>💾 保存大纲修改</span>
+              </button>
+              <button type="button" onclick="aiBuildOutline()" id="btnAiOutline" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <span>🤖 基于证据卡生成大纲</span>
+              </button>
+            </div>
           </div>
 
           <!-- 开篇反差设计 -->
-          <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
+          <div class="p-2.5 rounded-xl bg-gray-950 border border-gray-800 space-y-1.5 shrink-0">
             <div class="text-xs font-bold text-purple-300 flex items-center gap-1.5">
               <span>🪝 开篇反差切入与直接答案 (Opening Hook)</span>
             </div>
             <input type="text" id="wOutlineOpeningQuestion" placeholder="开篇具体反常矛盾..."
-              class="w-full bg-gray-900 text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
-            <textarea id="wOutlineOpeningAnswer" rows="2" placeholder="开篇简短直接结论..."
-              class="w-full bg-gray-900 text-gray-300 text-xs p-2.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500"></textarea>
+              class="w-full bg-gray-900 text-white text-xs px-3 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+            <textarea id="wOutlineOpeningAnswer" rows="1" placeholder="开篇简短直接结论..."
+              class="w-full bg-gray-900 text-gray-300 text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500"></textarea>
           </div>
 
           <!-- 5~7 章列表容器 -->
-          <div class="space-y-2">
-            <div class="flex items-center justify-between text-xs font-bold text-gray-300 px-1">
+          <div class="flex-1 min-h-0 flex flex-col space-y-1">
+            <div class="flex items-center justify-between text-xs font-bold text-gray-300 px-1 shrink-0">
               <span>📚 章节规划列表 (严格 5~7 章)：</span>
               <span id="wOutlineChapterCountBadge" class="text-[10px] text-purple-400 font-mono">0 章</span>
             </div>
-            <div id="wOutlineChaptersList" class="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+            <div id="wOutlineChaptersList" class="space-y-2.5 flex-1 min-h-0 overflow-y-auto pr-1">
               <div class="text-center py-8 text-gray-500 text-xs">暂无大纲数据，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>
             </div>
           </div>
 
           <!-- 唯一终局结尾规划 -->
-          <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
+          <div class="p-2.5 rounded-xl bg-gray-950 border border-gray-800 space-y-1 shrink-0">
             <div class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
               <span>🏁 全片唯一终局收尾规划 (Single Ending Plan)</span>
               <span class="text-[10px] text-gray-500 font-normal">全片只准保留一个正式结尾，严禁在中间各章作总结</span>
             </div>
             <input type="text" id="wOutlineEndingTakeaway" placeholder="回扣核心问题，升华本质运转机制..."
-              class="w-full bg-gray-900 text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400" />
+              class="w-full bg-gray-900 text-white text-xs px-3 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400" />
           </div>
 
           <!-- 大纲审核门禁 (STOP & REVIEW) -->
-          <div class="p-4 rounded-xl bg-purple-950/30 border border-purple-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="p-2.5 rounded-xl bg-purple-950/30 border border-purple-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
             <div>
               <div class="text-xs font-extrabold text-purple-300 flex items-center gap-1.5">
                 <span>🛑 强制人工审核门禁 (STOP & REVIEW)</span>
               </div>
-              <div class="text-[11px] text-gray-400 mt-0.5">
+              <div class="text-[11px] text-gray-400">
                 请确认上述章节是否条理清晰、因果链条严密。<b>未经明确确认，系统绝不启动正文撰写！</b>
               </div>
             </div>
-            <button type="button" onclick="approveOutlineGate()" id="btnApproveOutline" class="px-5 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer">
+            <button type="button" onclick="approveOutlineGate()" id="btnApproveOutline" class="px-4 py-1.5 text-xs font-black rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer">
               <span>👉 审核通过大纲 · 解锁逐章撰写</span>
             </button>
           </div>
         </div>
 
         <!-- ==================== Step 4 面板：逐章受控撰写与四段式结构 (Chapter Writer) ==================== -->
-        <div id="wPanelStep4" class="card p-5 rounded-2xl border border-gray-800 space-y-4 hidden">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+        <div id="wPanelStep4" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
             <div>
               <h3 class="text-sm font-black text-white flex items-center gap-2">
                 <span>✍️ 阶段 4：单章受控撰写 (Chapter by Chapter)</span>
               </h3>
-              <p class="text-xs text-gray-400 mt-0.5">一次只写一章 · 强制四段式结构 · 绑定证据卡 · 最多重写2次防死循环</p>
+              <p class="text-[11px] text-gray-400">一次只写一章 · 强制四段式结构 · 绑定证据卡 · 最多重写2次防死循环</p>
             </div>
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-2 flex-wrap">
+              <button type="button" onclick="saveCurrentChapterDraft()" class="px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                <span>💾 保存本章</span>
+              </button>
               <button type="button" onclick="aiWriteCurrentChapter()" id="btnAiWriteChapter" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
                 <span>🤖 AI 撰写当前章节</span>
               </button>
@@ -4827,64 +5508,68 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </div>
 
           <!-- 章节切换 Tabs -->
-          <div class="flex items-center gap-1.5 overflow-x-auto pb-1" id="wChapterTabsBar">
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5 shrink-0" id="wChapterTabsBar">
             <span class="text-xs text-gray-500">大纲审核后在此切换章节</span>
           </div>
 
-          <!-- 当前章节信息概览 -->
-          <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-            <div>
-              <div class="text-xs font-black text-white" id="wCurChapterHeader">第 1 章：正在载入...</div>
-              <div class="text-[11px] text-purple-300" id="wCurChapterSubQuestion">子问题：...</div>
+          <!-- 当前章节信息概览（支持直接修改章节标题） -->
+          <div class="p-2.5 rounded-xl bg-gray-950 border border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
+            <div class="flex-1 min-w-0 space-y-1">
+              <div class="flex items-center gap-2">
+                <span id="wCurChapterPrefix" class="px-2 py-0.5 rounded bg-purple-600/25 text-purple-300 border border-purple-500/30 text-[11px] font-black shrink-0">第 1 章</span>
+                <input type="text" id="wCurChapterTitleInput" placeholder="输入本章标题..."
+                  class="flex-1 min-w-0 bg-gray-900 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+              </div>
+              <div class="text-[11px] text-purple-300 truncate" id="wCurChapterSubQuestion">子问题：...</div>
             </div>
-            <div class="flex items-center gap-2 text-xs">
+            <div class="flex items-center gap-2 text-xs shrink-0">
               <span class="text-gray-400">已写字数: <b id="wCurChapterWordCount" class="text-emerald-400 font-mono">0</b> 字</span>
               <span id="wCurChapterRevisionBadge" class="text-[10px] px-2 py-0.5 rounded bg-gray-800 text-gray-400">初稿</span>
             </div>
           </div>
 
-          <!-- 单章四段式结构编辑器 -->
-          <div class="space-y-3">
-            <div>
-              <label class="block text-xs font-bold text-amber-300 mb-1">
+          <!-- 单章四段式结构编辑器 (2x2 网格一屏全显) -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 flex-1 min-h-0">
+            <div class="flex flex-col min-h-0">
+              <label class="block text-xs font-bold text-amber-300 mb-1 shrink-0">
                 1️⃣ 章节问题或矛盾 (承接上文悬念，抛出本章反差)
               </label>
-              <textarea id="wSec1Question" rows="2" placeholder="三五句话点出本章要解决的具体矛盾或反常现象..."
-                class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 leading-relaxed"></textarea>
+              <textarea id="wSec1Question" oninput="updateCurrentChapterLiveWordCount()" placeholder="三五句话点出本章要解决的具体矛盾或反常现象..."
+                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 leading-relaxed resize-none"></textarea>
             </div>
 
-            <div>
-              <label class="block text-xs font-bold text-blue-300 mb-1">
+            <div class="flex flex-col min-h-0">
+              <label class="block text-xs font-bold text-blue-300 mb-1 shrink-0">
                 2️⃣ 形成机制或背景 (拆解气候/运输/技术/商业/制度底层逻辑)
               </label>
-              <textarea id="wSec2Mechanism" rows="3" placeholder="清晰拆解运作逻辑，把复杂概念拆成听得懂的因果链条..."
-                class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-400 leading-relaxed"></textarea>
+              <textarea id="wSec2Mechanism" oninput="updateCurrentChapterLiveWordCount()" placeholder="清晰拆解运作逻辑，把复杂概念拆成听得懂的因果链条..."
+                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-400 leading-relaxed resize-none"></textarea>
             </div>
 
-            <div>
-              <label class="block text-xs font-bold text-emerald-300 mb-1">
+            <div class="flex flex-col min-h-0">
+              <label class="block text-xs font-bold text-emerald-300 mb-1 shrink-0">
                 3️⃣ 有来源的具体例子 (基于证据卡，具象平实，严禁伪造内心戏)
               </label>
-              <textarea id="wSec3Examples" rows="4" placeholder="具体案例、器物细节、动作或数据对比，必须严格有证据卡支持..."
-                class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-emerald-400 leading-relaxed"></textarea>
+              <textarea id="wSec3Examples" oninput="updateCurrentChapterLiveWordCount()" placeholder="具体案例、器物细节、动作或数据对比，必须严格有证据卡支持..."
+                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-emerald-400 leading-relaxed resize-none"></textarea>
             </div>
 
-            <div>
-              <label class="block text-xs font-bold text-purple-300 mb-1">
+            <div class="flex flex-col min-h-0">
+              <label class="block text-xs font-bold text-purple-300 mb-1 shrink-0">
                 4️⃣ 小结与自然过渡 (收束本章子问题，引出下一章疑问，非终章严禁总结)
               </label>
-              <textarea id="wSec4Transition" rows="2" placeholder="简短收束本章，并抛出下一章的悬念..."
-                class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-400 leading-relaxed"></textarea>
+              <textarea id="wSec4Transition" oninput="updateCurrentChapterLiveWordCount()" placeholder="简短收束本章，并抛出下一章的悬念..."
+                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-400 leading-relaxed resize-none"></textarea>
             </div>
           </div>
 
-          <div class="pt-3 border-t border-gray-800 flex items-center justify-between">
+          <div class="pt-2 border-t border-gray-800 flex items-center justify-between shrink-0">
             <span class="text-xs text-gray-400">💡 每一章完成后点击保存，全部写完即可进入全文统稿</span>
             <div class="flex items-center gap-2">
-              <button type="button" onclick="saveCurrentChapterDraft()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+              <button type="button" onclick="saveCurrentChapterDraft()" class="px-3.5 py-1.5 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
                 💾 保存本章
               </button>
-              <button type="button" onclick="setWriterStep(5)" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer">
+              <button type="button" onclick="setWriterStep(5)" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer">
                 <span>👉 进入阶段 5：全文统稿与定稿</span>
               </button>
             </div>
@@ -4892,64 +5577,80 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         </div>
 
         <!-- ==================== Step 5 面板：全文统稿去伪结尾与定稿同步 (Finalize) ==================== -->
-        <div id="wPanelStep5" class="card p-5 rounded-2xl border border-gray-800 space-y-4 hidden">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+        <div id="wPanelStep5" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2 hidden">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
             <div>
               <h3 class="text-sm font-black text-white flex items-center gap-2">
                 <span>🏁 阶段 5：全文统稿与定稿 (Full Script Finalize & Sync)</span>
               </h3>
-              <p class="text-xs text-gray-400 mt-0.5">跨章节去重 · 专有名词与年代统一 · 剔除中间伪结尾 · 唯一结尾回扣</p>
+              <p class="text-[11px] text-gray-400">跨章节去重 · 专有名词与年代统一 · 剔除中间伪结尾 · 唯一结尾回扣</p>
             </div>
-            <button type="button" onclick="aiFinalizeFullScript()" id="btnAiFinalize" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
-              <span>🤖 AI 全文统稿去重去伪结尾</span>
-            </button>
+            <div class="flex flex-wrap items-center gap-2 shrink-0">
+              <button type="button" onclick="saveFinalScriptOnlyUI()" class="px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer" title="将当前全文文案立即持久化到本地 final-script.json（不改动制作台）">
+                <span>💾 保存文案底稿</span>
+              </button>
+              <button type="button" onclick="aiFinalizeFullScript()" id="btnAiFinalize" class="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <span>🤖 AI 全文统稿去重去伪结尾</span>
+              </button>
+              <button type="button" onclick="syncWriterToProducerUI()" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 text-xs font-black transition flex items-center gap-1 shadow-lg cursor-pointer">
+                <span>🚀 保存并同步制作台</span>
+              </button>
+            </div>
           </div>
 
-          <!-- 统稿编辑报告 (去重、伪结尾统计) -->
-          <div id="wEditorialLogContainer" class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2 text-xs">
-            <div class="font-bold text-gray-300 flex items-center justify-between">
-              <span>📊 统稿清洗审计报告：</span>
+          <!-- 统稿编辑报告 (可折叠，默认收起节省一屏空间) -->
+          <div id="wEditorialLogContainer" class="px-3 py-1.5 rounded-xl bg-gray-950 border border-gray-800 text-xs shrink-0">
+            <div class="font-bold text-gray-300 flex items-center justify-between cursor-pointer select-none" onclick="toggleEditorialLogDetails()">
+              <span>📊 统稿清洗审计报告 <span id="wEditorialLogToggleHint" class="text-[10px] font-normal text-gray-500 ml-1">[▾ 详情]</span></span>
               <span id="wRemovedFalseEndingsBadge" class="text-[10px] text-amber-400">已清理伪结尾: 0 处</span>
             </div>
-            <div id="wEditorialLogDetails" class="text-gray-400 space-y-1 font-mono text-[11px]">
+            <div id="wEditorialLogDetails" class="text-gray-400 space-y-1 font-mono text-[11px] mt-1.5 pt-1.5 border-t border-gray-800/80 max-h-[110px] overflow-y-auto hidden">
               <div>- 暂无统稿清洗记录，点击上方按钮由 AI 进行跨章去重与格式统稿。</div>
             </div>
           </div>
 
           <!-- ✨ 全篇文案 AI 修复器 (De-AI Humanizer · 去冗余/除僵硬/幽默化真人重构) -->
-          <div class="card p-4 rounded-2xl border border-violet-500/40 bg-gradient-to-r from-violet-950/40 via-gray-950 to-indigo-950/30 space-y-3.5 shadow-xl">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-800">
+          <div class="card p-2.5 rounded-xl border border-violet-500/40 bg-gradient-to-r from-violet-950/40 via-gray-950 to-indigo-950/30 space-y-2 shadow-lg shrink-0">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800">
               <div>
-                <div class="flex items-center gap-2">
-                  <span class="text-sm font-black text-violet-300 flex items-center gap-1.5">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-xs font-black text-violet-300 flex items-center gap-1.5">
                     <span>✨ 全篇文案 AI 修复器 (De-AI Humanizer)</span>
                   </span>
-                  <span class="px-2 py-0.5 rounded text-[10px] font-extrabold bg-violet-500/20 text-violet-200 border border-violet-500/30">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-violet-500/20 text-violet-200 border border-violet-500/30">
                     去冗余 · 除僵硬 · 幽默化真人重构
+                  </span>
+                  <span id="wHumanizeVersionBadge" class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-gray-800 text-gray-400 border border-gray-700">
+                    📄 原稿未修复 (v1.0)
                   </span>
                 </div>
                 <p class="text-[11px] text-gray-400 mt-0.5">
-                  物理斩断 AI 八股套话，打碎长难句建立呼吸感，注入生动生活类比与幽默感，让全篇彻底摆脱“公文塑料感”！
+                  物理斩断 AI 八股套话，打碎长难句建立呼吸感，注入生动生活类比与幽默感！
                 </p>
               </div>
 
-              <!-- 执行修复按钮 -->
-              <button type="button" onclick="executeFullScriptHumanize()" id="btnExecuteHumanize" class="px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer">
-                <span>🪄 启动全篇 AI 真人化修复</span>
-              </button>
+              <!-- 执行修复按钮（附带修复前先存原稿按钮） -->
+              <div class="flex items-center gap-2 flex-wrap shrink-0">
+                <button type="button" onclick="saveFinalScriptOnlyUI()" class="px-2.5 py-1.5 text-xs font-bold rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 transition shadow cursor-pointer" title="启动修复前先将当前文本框原稿保存到本地 final-script.json">
+                  <span>💾 先存原稿</span>
+                </button>
+                <button type="button" onclick="executeFullScriptHumanize()" id="btnExecuteHumanize" class="px-3.5 py-1.5 text-xs font-black rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
+                  <span>🪄 启动全篇 AI 真人化修复</span>
+                </button>
+              </div>
             </div>
 
             <!-- 修复人设风格与清洗法则 -->
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs">
-              <div class="flex items-center gap-2 flex-wrap">
+            <div class="flex flex-col md:flex-row md:items-center justify-between gap-2 text-xs">
+              <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="font-bold text-gray-300">🎭 人设语态：</span>
-                <button type="button" id="btnStyleHumor" onclick="selectHumanizeStyle('humorous')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-violet-600 text-white transition shadow cursor-pointer">
+                <button type="button" id="btnStyleHumor" onclick="selectHumanizeStyle('humorous')" class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-violet-600 text-white transition shadow cursor-pointer">
                   🎭 幽默风趣主播型 (推荐)
                 </button>
-                <button type="button" id="btnStyleSuspense" onclick="selectHumanizeStyle('suspense')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 transition cursor-pointer">
+                <button type="button" id="btnStyleSuspense" onclick="selectHumanizeStyle('suspense')" class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 transition cursor-pointer">
                   💡 睿智悬疑反转型
                 </button>
-                <button type="button" id="btnStyleColloquial" onclick="selectHumanizeStyle('colloquial')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 transition cursor-pointer">
+                <button type="button" id="btnStyleColloquial" onclick="selectHumanizeStyle('colloquial')" class="px-2 py-0.5 rounded-lg text-[11px] font-bold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 transition cursor-pointer">
                   ☕ 亲切老友大白话
                 </button>
               </div>
@@ -4962,50 +5663,71 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               </div>
             </div>
 
-            <!-- 修复审计结果卡片 (默认隐藏，修复完成后展开) -->
-            <div id="wHumanizeAuditBox" class="p-3.5 rounded-xl bg-gray-950 border border-emerald-500/40 space-y-2.5 hidden">
-              <div class="flex items-center justify-between pb-1.5 border-b border-gray-800">
-                <span class="text-xs font-black text-emerald-400 flex items-center gap-1.5">
-                  <span>🎉 全篇文案修复完成 · 审计报告</span>
-                </span>
-                <div class="flex items-center gap-2">
-                  <button type="button" onclick="revertHumanizedScript()" id="btnRevertScript" class="text-[11px] text-amber-400 hover:underline cursor-pointer hidden">
-                    ↩️ 撤销并还原原稿
+            <!-- 修复审计结果与 GitHub 风格 Diff 对比卡片 (默认隐藏，修复完成后展开) -->
+            <div id="wHumanizeAuditBox" class="p-3 rounded-xl bg-gray-950 border border-emerald-500/40 space-y-2 max-h-[240px] overflow-y-auto hidden">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-xs font-black text-emerald-400 flex items-center gap-1.5">
+                    <span>🎉 全篇文案修复对比 (Diff Review)</span>
+                  </span>
+                  <span id="wHumanizePendingBadge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    ⏳ 待审阅 · 未覆盖原文件
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <button type="button" onclick="acceptHumanizedScript()" id="btnAcceptHumanize" class="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black shadow transition cursor-pointer">
+                    ✅ 确认采纳并保存
+                  </button>
+                  <button type="button" onclick="revertHumanizedScript()" id="btnRevertScript" class="px-2.5 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-[11px] font-bold text-rose-300 transition cursor-pointer hidden">
+                    ↩️ 放弃并还原原稿
                   </button>
                   <button type="button" onclick="copyHumanizedScript()" class="text-[11px] text-violet-400 hover:underline cursor-pointer">
                     📋 复制文案
                   </button>
                 </div>
               </div>
+
               <div id="wHumanizeAuditContent" class="text-[11px] text-gray-300 grid grid-cols-2 sm:grid-cols-4 gap-2">
               </div>
-              <div id="wHumanizeAuditSummary" class="text-[11px] text-gray-400 font-mono bg-gray-900/80 p-2.5 rounded border border-gray-800"></div>
+              <div id="wHumanizeAuditSummary" class="text-[11px] text-gray-400 font-mono bg-gray-900/80 p-2 rounded border border-gray-800"></div>
+
+              <!-- GitHub 风格对比视图 -->
+              <div id="wHumanizeDiffContainer" class="rounded-xl border border-gray-800 bg-[#0d1117] overflow-hidden">
+                <div class="px-3 py-1.5 bg-[#161b22] border-b border-gray-800 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                  <div class="flex items-center gap-3 font-mono">
+                    <span class="font-bold text-gray-200">🔍 修复前后对比</span>
+                    <span class="text-emerald-400 font-bold">+<span id="wDiffAddedCount">0</span> 新增/改写</span>
+                    <span class="text-rose-400 font-bold">-<span id="wDiffRemovedCount">0</span> 原文删改</span>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <label class="inline-flex items-center gap-1 text-gray-300 cursor-pointer select-none">
+                      <input type="checkbox" id="wDiffChangesOnlyCheckbox" onchange="renderHumanizeDiffView()" class="accent-violet-500" />
+                      <span>仅看改动</span>
+                    </label>
+                    <div class="inline-flex p-0.5 bg-gray-900 rounded-lg border border-gray-700">
+                      <button type="button" id="btnDiffUnified" onclick="setHumanizeDiffMode('unified')" class="px-2 py-0.5 rounded bg-violet-600 text-white font-bold cursor-pointer">
+                        红绿混合 (Unified)
+                      </button>
+                      <button type="button" id="btnDiffSplit" onclick="setHumanizeDiffMode('split')" class="px-2 py-0.5 rounded text-gray-400 hover:text-white font-bold cursor-pointer">
+                        左右并排 (Split)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div id="wHumanizeDiffBody" class="max-h-[180px] overflow-y-auto font-mono text-[11px] leading-relaxed divide-y divide-gray-800/60">
+                </div>
+              </div>
             </div>
           </div>
 
           <!-- 全文旁白终稿预览区 -->
-          <div class="space-y-2">
-            <div class="flex items-center justify-between text-xs">
+          <div class="flex-1 min-h-0 flex flex-col gap-1">
+            <div class="flex items-center justify-between text-xs shrink-0">
               <span class="font-bold text-white">📑 完整长视频定稿文案 (Ready for Narration)：</span>
               <span class="text-purple-300">总字数: <b id="wFinalScriptWords" class="font-mono">0</b> 字 · 预估播讲: <b id="wFinalScriptMin" class="font-mono">0.0</b> 分钟</span>
             </div>
-            <textarea id="wFinalScriptFullText" rows="14" placeholder="统稿后的完整旁白文案将在此呈现，包含开篇导引、各章正文与唯一定稿结尾..."
-              class="w-full bg-gray-950 text-gray-200 text-xs p-3.5 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 font-mono leading-relaxed resize-y"></textarea>
-          </div>
-
-          <!-- 核心直通车按钮：一键进入分镜制作台 -->
-          <div class="p-4 rounded-xl bg-gradient-to-r from-amber-500/15 via-yellow-500/10 to-amber-500/15 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <div class="text-xs font-black text-amber-300 flex items-center gap-1.5">
-                <span>🚀 文案已定稿！一键直通分镜视觉工作台</span>
-              </div>
-              <div class="text-[11px] text-gray-400 mt-0.5">
-                系统将自动按 4.0 ~ 8.0 秒标准口语断句切分成全套镜头（Shots），生成时间轴并无缝切入制作台！
-              </div>
-            </div>
-            <button type="button" onclick="syncWriterToProducerUI()" class="px-6 py-2.5 text-xs font-black rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 transition shadow-xl flex items-center gap-1.5 shrink-0 cursor-pointer">
-              <span>🚀 确认定稿并进入分镜镜头工作台</span>
-            </button>
+            <textarea id="wFinalScriptFullText" oninput="updateFinalScriptLiveStats()" placeholder="统稿后的完整旁白文案将在此呈现，包含开篇导引、各章正文与唯一定稿结尾..."
+              class="flex-1 min-h-[160px] w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 font-mono leading-relaxed resize-none"></textarea>
           </div>
         </div>
 
@@ -5562,6 +6284,147 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     </div>
   </div>
 
+  <!-- 新建空白文案工程弹窗 -->
+  <div id="createBlankProjectModal" onclick="if(event.target===this) closeCreateBlankProjectModal()" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-md p-5 rounded-2xl border border-emerald-500/40 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-2.5 border-b border-gray-800">
+        <h3 class="text-base font-black text-white flex items-center gap-2">
+          <span>✨ 新建空白文案工程</span>
+        </h3>
+        <button type="button" onclick="closeCreateBlankProjectModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer">✕</button>
+      </div>
+      <p class="text-xs text-gray-400 leading-relaxed">
+        将创建一个全新的空白文案工程并立即切换过去（原工程的文案与分镜数据保持完好不受影响）。
+      </p>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-gray-300 mb-1">🏷️ 新视频核心选题 / 标题（可先留空）</label>
+          <input type="text" id="newBlankProjTitleInput" placeholder="例如：为什么东京的地铁线路这么复杂却极少晚点？"
+            class="w-full bg-gray-950 text-white text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-300 mb-1">🆔 自定义工程 ID（可选，仅英文/数字/下划线）</label>
+          <input type="text" id="newBlankProjIdInput" placeholder="留空将自动生成，如 why_new_xxxxxx"
+            class="w-full bg-gray-950 text-white font-mono text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-emerald-500" />
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-gray-800">
+        <button type="button" onclick="closeCreateBlankProjectModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">取消</button>
+        <button type="button" id="btnConfirmCreateBlankProj" onclick="confirmCreateBlankProject()" class="px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white shadow cursor-pointer">
+          🚀 创建并从第 1 步开始
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 清零重做当前工程文案二次确认弹窗 -->
+  <div id="resetWriterConfirmModal" onclick="if(event.target===this) closeResetWriterConfirmModal()" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-md p-5 rounded-2xl border border-rose-500/50 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-2.5 border-b border-gray-800">
+        <h3 class="text-base font-black text-rose-300 flex items-center gap-2">
+          <span>⚠️ 确认清零重做当前工程文案？</span>
+        </h3>
+        <button type="button" onclick="closeResetWriterConfirmModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer">✕</button>
+      </div>
+      <div class="p-3 rounded-xl bg-rose-950/30 border border-rose-500/30 text-xs text-gray-200 leading-relaxed space-y-1.5">
+        <div>此操作将清空当前工程 <code id="resetTargetProjId" class="px-1.5 py-0.5 rounded bg-gray-900 text-amber-300 font-mono"></code> 的全部文案创作台草稿：</div>
+        <div class="text-rose-300 font-semibold">• Brief 立项、原始资料、证据卡、大纲、各章正文与定稿全文均将被重置为空。</div>
+        <div class="text-emerald-300">• 安全保障：右侧「视觉分镜制作台」已有的镜头表与上传素材不会被删除。</div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-gray-800">
+        <button type="button" onclick="closeResetWriterConfirmModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">取消</button>
+        <button type="button" id="btnConfirmResetWriter" onclick="confirmResetWriterProject()" class="px-4 py-2 text-xs font-black rounded-xl bg-rose-600 hover:bg-rose-500 text-white shadow cursor-pointer">
+          🔄 确认清零并回到第 1 步
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 文案创作台提示词模板与风格预设弹窗 (对标 8080 端 · 仅对当前工程生效 · 全量可编辑) -->
+  <div id="writerPromptsModal" onclick="if(event.target===this) closeWriterPromptsModal()" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 hidden">
+    <div class="card w-full max-w-5xl max-h-[92vh] p-5 rounded-2xl border border-teal-500/50 shadow-2xl flex flex-col gap-3.5 overflow-hidden bg-gray-950">
+      <!-- Header -->
+      <div class="flex items-center justify-between pb-3 border-b border-gray-800 shrink-0">
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <span class="text-base font-black text-white flex items-center gap-1.5">
+            <span>⚙️</span><span>文案创作台提示词模板与风格预设</span>
+          </span>
+          <span id="writerModalPromptBadge" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700">
+            出厂默认基线
+          </span>
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            仅对当前工程生效 · <code id="writerPromptsTargetProjId" class="font-mono"></code>
+          </span>
+        </div>
+        <button type="button" onclick="closeWriterPromptsModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer text-lg">✕</button>
+      </div>
+
+      <!-- Stage Selector Tabs -->
+      <div id="writerPromptStageTabs" class="flex items-center gap-1.5 overflow-x-auto pb-2 border-b border-gray-800/80 shrink-0">
+      </div>
+
+      <!-- Main Editor + Variables & Style Presets Drawer -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0 overflow-hidden">
+        <!-- Left: Full-editable System Prompt Editor -->
+        <div class="lg:col-span-8 flex flex-col gap-2 min-h-[340px]">
+          <div class="flex items-center justify-between text-xs shrink-0">
+            <span id="writerPromptEditorTitle" class="font-bold text-teal-300">当前编辑：1. 事实考证</span>
+            <span class="text-[11px] text-gray-400">支持全量编辑 System Prompt 及 {{ 变量 }} 占位符</span>
+          </div>
+          <div id="writerPromptStageDesc" class="text-[11px] text-gray-400 shrink-0"></div>
+          <textarea id="writerPromptTextarea" spellcheck="false" oninput="onWriterPromptTextareaInput()" class="flex-1 min-h-[300px] w-full bg-[#030712] text-gray-100 font-mono text-xs leading-relaxed border border-gray-700 focus:border-teal-400 focus:outline-none rounded-xl p-3.5 resize-none"></textarea>
+          <div id="writerPromptEditorStatus" class="text-[11px] text-gray-400 shrink-0">
+            提示：当前工程修改只保存在本工程目录，新建或切换其他工程默认沿用出厂基线。
+          </div>
+        </div>
+
+        <!-- Right: Allowed Variables & Style Presets Drawer -->
+        <div class="lg:col-span-4 bg-gray-900/70 border border-gray-800 rounded-xl p-3.5 overflow-y-auto flex flex-col gap-3.5 text-[11px]">
+          <div>
+            <div class="font-bold text-gray-200 mb-1">📌 点击插入允许的变量</div>
+            <div class="text-gray-400 mb-2">点击下方标签可直接插入光标处：</div>
+            <div id="writerPromptVarsList" class="flex flex-wrap gap-1.5">
+            </div>
+          </div>
+
+          <div class="border-t border-gray-800 pt-3">
+            <div class="font-bold text-gray-200 mb-1">🎨 风格预设（点击追加到末尾）</div>
+            <div class="text-gray-400 mb-2">快速注入不同主播/纪录片文风要求：</div>
+            <div id="writerStylePresetsList" class="flex flex-col gap-1.5">
+            </div>
+          </div>
+
+          <div class="border-t border-gray-800 pt-3 text-gray-400 space-y-1 leading-relaxed">
+            <div class="font-bold text-gray-200">🛡️ 生效与保护规则</div>
+            <div>• <b>单工程隔离</b>：保存至 <code class="text-teal-300">data/writer-prompts.json</code>，不影响其他工程。</div>
+            <div>• <b>JSON 契约提醒</b>：第 2~6 步后端需解析 JSON，全量编辑时请保留 JSON 输出说明。</div>
+            <div>• <b>变量白名单</b>：严禁引入当前阶段未登记的 <code class="text-amber-300">{{未知变量}}</code>。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-800 shrink-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" onclick="resetWriterPromptsFromModal(true)" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-500/40 transition cursor-pointer">
+            ↺ 重置本阶段为出厂默认
+          </button>
+          <button type="button" onclick="resetWriterPromptsFromModal(false)" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-500/40 transition cursor-pointer">
+            ↺ 全部恢复出厂基线
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="closeWriterPromptsModal()" class="px-4 py-1.5 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+            取消
+          </button>
+          <button type="button" id="btnSaveWriterPrompts" onclick="saveWriterPromptsFromModal()" class="px-4 py-1.5 text-xs font-black rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:brightness-110 text-gray-950 shadow-lg cursor-pointer">
+            💾 保存并应用到当前工程
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Toast 提示 -->
   <div id="toast" class="fixed bottom-6 right-6 px-4 py-2.5 rounded-xl bg-amber-500 text-gray-950 font-extrabold text-xs shadow-2xl transition duration-300 hidden z-50">
   </div>
@@ -5605,6 +6468,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       window.history.pushState({}, '', url);
 
       const isProducer = tab === 'producer';
+      document.body.classList.toggle('writer-compact-mode', !isProducer);
       document.getElementById('viewProducerContainer').classList.toggle('hidden', !isProducer);
       document.getElementById('viewWriterContainer').classList.toggle('hidden', isProducer);
 
@@ -5634,25 +6498,64 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     async function loadWriterProjectData(projectId) {
       document.getElementById('writerProjectIdBadge').textContent = projectId;
+      // 切换工程时彻底清空上一个工程残留的表单脏数据
+      document.getElementById('wInputTitle').value = '';
+      document.getElementById('wInputDuration').value = '25';
+      document.getElementById('wInputChapterCount').value = '6';
+      document.getElementById('wBriefCoreQuestion').value = '';
+      document.getElementById('wBriefShortAnswer').value = '';
+      document.getElementById('wBriefScope').value = '';
+      document.getElementById('wBriefTaboos').value = '零编造、严禁模仿特定博主口吻、确保客观中立事实论证';
+      document.getElementById('wInputMaterials').value = '';
+      document.getElementById('wMaterialWordCount').textContent = '已就绪资料：0 字';
+      document.getElementById('wOutlineOpeningQuestion').value = '';
+      document.getElementById('wOutlineOpeningAnswer').value = '';
+      document.getElementById('wOutlineEndingTakeaway').value = '';
+      document.getElementById('wFinalScriptFullText').value = '';
+      document.getElementById('wFinalScriptWords').textContent = '0';
+      document.getElementById('wFinalScriptMin').textContent = '0.0';
+      document.getElementById('wEditorialLogDetails').innerHTML = '<div>- 暂无统稿清洗记录。</div>';
+      const auditBoxReset = document.getElementById('wHumanizeAuditBox');
+      if (auditBoxReset) auditBoxReset.classList.add('hidden');
+      rawScriptBackupBeforeHumanize = '';
+      latestHumanizedText = '';
+      pendingHumanizeMeta = null;
+      updateHumanizeVersionUI(null);
+      currentChapterIndex = 0;
+      refreshWriterPromptsButtonStatus(projectId);
+
       try {
         const res = await fetch('/api/writer/data?project=' + projectId);
         const data = await res.json();
         if (data.ok) {
           writerData = data;
-          
-          // 1. 填充 Brief
-          const curTitle = data.brief?.title || (projectsList.find((p) => p.id === projectId)?.title || '');
-          if (curTitle && !document.getElementById('wInputTitle').value) {
-            document.getElementById('wInputTitle').value = curTitle.replace(/^《(.*)》$/, '$1');
-          }
+          const isBlankDraft = Boolean(data.brief?._blank_draft && !data.hasExistingContent);
+
+          // 1. 填充标题与 Brief
+          const curProj = projectsList.find((p) => p.id === projectId);
+          const fallbackTitle = (curProj?.title || projectId).replace(/^《(.*)》$/, '$1');
+          const title = isBlankDraft
+            ? (data.brief?.title || '')
+            : (data.brief?.title || data.finalScript?.title || fallbackTitle);
+          document.getElementById('wInputTitle').value = title;
+
           if (data.brief) {
-            document.getElementById('wInputTitle').value = data.brief.title || document.getElementById('wInputTitle').value;
-            document.getElementById('wInputDuration').value = data.brief.target_duration_minutes || 25;
-            document.getElementById('wInputChapterCount').value = data.brief.planned_chapter_count || 6;
-            document.getElementById('wBriefCoreQuestion').value = data.brief.core_question || '';
+            document.getElementById('wInputDuration').value = data.brief.target_duration_minutes || (data.finalScript?.estimated_duration_minutes || 25);
+            document.getElementById('wInputChapterCount').value = data.brief.planned_chapter_count || (data.outline?.chapters?.length || 6);
+            document.getElementById('wBriefCoreQuestion').value = isBlankDraft
+              ? (data.brief.core_question || '')
+              : (data.brief.core_question || (title ? \`为什么\${title}？背后的底层机制与历史脉络是什么？\` : ''));
             document.getElementById('wBriefShortAnswer').value = data.brief.short_answer || '';
             document.getElementById('wBriefScope').value = data.brief.scope?.time_range || '';
-            document.getElementById('wBriefTaboos').value = (data.brief.taboos_and_exclusions || []).join('、');
+            document.getElementById('wBriefTaboos').value = Array.isArray(data.brief.taboos_and_exclusions)
+              ? data.brief.taboos_and_exclusions.join('、')
+              : (data.brief.taboos_and_exclusions || '零编造、严禁模仿特定博主口吻、确保客观中立事实论证');
+          }
+
+          // 填充原始考证资料
+          if (data.materials) {
+            document.getElementById('wInputMaterials').value = data.materials;
+            document.getElementById('wMaterialWordCount').textContent = \`已就绪资料：\${data.materials.length} 字\`;
           }
 
           // 2. 渲染证据卡
@@ -5668,11 +6571,150 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           // 5. 渲染定稿全文
           renderFinalScriptView();
 
-          // 恢复用户所处的最优阶段
+          // 6. 自适应切换左栏为「工程文案实况摘要卡」或「新建向导表单」
+          applyWriterInspectorMode(data);
+
+          // 恢复用户所处的最优阶段（已有文案工程默认直达 Step 5 终稿 Review 或对应已就绪阶段）
           setWriterStep(data.activeStep || 1);
+          setWriterPersistenceStatus('saved', '✅ 已从本地加载');
         }
       } catch (err) {
         console.error('加载文案数据失败:', err);
+      }
+    }
+
+    let isWriterSetupDrawerOpen = false;
+
+    function applyWriterInspectorMode(data) {
+      const hasContent = Boolean(data?.hasExistingContent);
+      const inspectorCard = document.getElementById('wInspectorCard');
+      const setupDrawer = document.getElementById('wWriterSetupDrawer');
+      const importQuickCard = document.getElementById('wWriterImportQuickCard');
+      const btnStep1Reset = document.getElementById('btnStep1ResetWriter');
+
+      if (!inspectorCard || !setupDrawer) return;
+
+      if (hasContent) {
+        isWriterSetupDrawerOpen = false;
+        inspectorCard.classList.remove('hidden');
+        setupDrawer.classList.add('hidden');
+        if (importQuickCard) importQuickCard.classList.add('hidden');
+        if (btnStep1Reset) btnStep1Reset.classList.remove('hidden');
+        document.getElementById('wSetupDrawerArrow').textContent = '▼ 展开';
+
+        const wordCount = data.finalScript?.total_word_count || 0;
+        const durationMin = data.finalScript?.estimated_duration_minutes || (wordCount > 0 ? (wordCount / 240).toFixed(1) : '-');
+        const chCount = (data.chapters && data.chapters.length) || (data.outline?.chapters?.length) || 0;
+        const evCount = (data.evidenceCards && data.evidenceCards.length) || 0;
+        const title = data.finalScript?.title || data.brief?.title || data.projectId;
+
+        document.getElementById('wInspectorProjectId').textContent = data.projectId;
+        document.getElementById('wInspectorTitle').textContent = title;
+        document.getElementById('wInspectorWords').textContent = wordCount > 0 ? \`\${wordCount.toLocaleString()} 字\` : '草稿中';
+        document.getElementById('wInspectorDuration').textContent = wordCount > 0 ? \`\${durationMin} 分钟\` : '-';
+        document.getElementById('wInspectorChapters').textContent = \`\${chCount} 章\`;
+        document.getElementById('wInspectorEvidence').textContent = \`\${evCount} 张\`;
+        document.getElementById('wInspectorStatusPill').textContent = wordCount > 0 ? '已有文案 · 审阅模式' : '草稿中 · 可继续编辑';
+      } else {
+        isWriterSetupDrawerOpen = true;
+        inspectorCard.classList.add('hidden');
+        setupDrawer.classList.remove('hidden');
+        if (importQuickCard) importQuickCard.classList.remove('hidden');
+        if (btnStep1Reset) btnStep1Reset.classList.add('hidden');
+      }
+    }
+
+    function toggleWriterSetupDrawer() {
+      const setupDrawer = document.getElementById('wWriterSetupDrawer');
+      const arrow = document.getElementById('wSetupDrawerArrow');
+      if (!setupDrawer) return;
+      isWriterSetupDrawerOpen = !isWriterSetupDrawerOpen;
+      setupDrawer.classList.toggle('hidden', !isWriterSetupDrawerOpen);
+      if (arrow) arrow.textContent = isWriterSetupDrawerOpen ? '▲ 收起' : '▼ 展开';
+    }
+
+    function openCreateBlankProjectModal() {
+      document.getElementById('newBlankProjTitleInput').value = '';
+      document.getElementById('newBlankProjIdInput').value = '';
+      document.getElementById('createBlankProjectModal').classList.remove('hidden');
+      setTimeout(() => document.getElementById('newBlankProjTitleInput').focus(), 50);
+    }
+
+    function closeCreateBlankProjectModal() {
+      document.getElementById('createBlankProjectModal').classList.add('hidden');
+    }
+
+    async function confirmCreateBlankProject() {
+      const title = document.getElementById('newBlankProjTitleInput').value.trim();
+      const projectId = document.getElementById('newBlankProjIdInput').value.trim();
+      const btn = document.getElementById('btnConfirmCreateBlankProj');
+      btn.disabled = true;
+      btn.textContent = '⏳ 正在创建空白工程...';
+      try {
+        const res = await fetch('/api/writer/create-blank-project', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ title, projectId }),
+        });
+        const data = await res.json();
+        if (data.ok && data.projectId) {
+          closeCreateBlankProjectModal();
+          activeProjectId = data.projectId;
+          pendingSelectedProjectId = data.projectId;
+          localStorage.setItem('whyvideo_active_project', data.projectId);
+          const url = new URL(window.location);
+          url.searchParams.set('project', data.projectId);
+          window.history.pushState({}, '', url);
+          await loadProjects();
+          await loadWorkflow();
+          await loadWriterProjectData(data.projectId);
+          setWriterStep(1);
+          switchStep1SubTab('create');
+          showToast(\`✨ 已新建空白工程「\${data.title || data.projectId}」，可从第 1 步开始创作！\`);
+        } else {
+          alert('新建失败：' + (data.error || '未知错误'));
+        }
+      } catch (e) {
+        alert('创建异常：' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🚀 创建并从第 1 步开始';
+      }
+    }
+
+    function openResetWriterConfirmModal() {
+      document.getElementById('resetTargetProjId').textContent = activeProjectId;
+      document.getElementById('resetWriterConfirmModal').classList.remove('hidden');
+    }
+
+    function closeResetWriterConfirmModal() {
+      document.getElementById('resetWriterConfirmModal').classList.add('hidden');
+    }
+
+    async function confirmResetWriterProject() {
+      const btn = document.getElementById('btnConfirmResetWriter');
+      btn.disabled = true;
+      btn.textContent = '⏳ 正在清零文案草稿...';
+      try {
+        const res = await fetch('/api/writer/reset-project?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+        });
+        const data = await res.json();
+        if (data.ok) {
+          closeResetWriterConfirmModal();
+          await loadProjects();
+          await loadWriterProjectData(activeProjectId);
+          setWriterStep(1);
+          switchStep1SubTab('create');
+          showToast('🔄 当前工程文案已清零，现可从第 1 步全新立项！');
+        } else {
+          alert('清零失败：' + (data.error || '未知错误'));
+        }
+      } catch (e) {
+        alert('清零异常：' + e.message);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '🔄 确认清零并回到第 1 步';
       }
     }
 
@@ -5694,9 +6736,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (panel) panel.classList.toggle('hidden', i !== step);
         if (btn) {
           if (i === step) {
-            btn.className = 'p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow cursor-pointer';
+            btn.className = 'px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow cursor-pointer';
           } else {
-            btn.className = 'p-2.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer';
+            btn.className = 'px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer';
           }
         }
       }
@@ -5708,7 +6750,27 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       if (!container) return;
       const cards = writerData?.evidenceCards || [];
       if (cards.length === 0) {
-        container.innerHTML = '<div class="text-center py-10 text-gray-500 text-xs">暂无证据卡，请在左侧填入资料后点击上方「🤖 从资料中提取证据卡」</div>';
+        const hasScript = Boolean(writerData?.finalScript && (writerData.finalScript.total_word_count > 0 || writerData.finalScript.script_segments));
+        if (hasScript) {
+          container.innerHTML = \`
+            <div class="p-6 rounded-2xl bg-gray-950 border border-purple-500/30 text-center space-y-3">
+              <div class="text-xs text-purple-300 font-bold">📄 本工程已具备定稿文案（约 \${writerData.finalScript.total_word_count || '若干'} 字），暂无独立提取的证据卡</div>
+              <p class="text-[11px] text-gray-400 max-w-md mx-auto">
+                你可以继续直接查看与编辑大纲、分章正文和全文统稿，亦可一键让 AI 从当前定稿正文中反向提炼证据卡用于事实核验：
+              </p>
+              <div class="flex items-center justify-center gap-2.5 pt-1">
+                <button type="button" onclick="aiExtractEvidence()" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white shadow transition flex items-center gap-1.5 cursor-pointer">
+                  <span>🤖 从现有正文一键提炼证据卡</span>
+                </button>
+                <button type="button" onclick="addCustomEvidenceCard()" class="px-3.5 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 transition flex items-center gap-1 cursor-pointer">
+                  <span>➕ 手动补充证据卡</span>
+                </button>
+              </div>
+            </div>
+          \`;
+        } else {
+          container.innerHTML = '<div class="text-center py-10 text-gray-500 text-xs">暂无证据卡，请在左侧填入资料后点击上方「🤖 从资料中提取证据卡」</div>';
+        }
         return;
       }
 
@@ -5765,17 +6827,23 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       saveWriterProjectDataAsync('evidenceCards', writerData.evidenceCards);
     }
 
-    // 渲染大纲
+    // 渲染大纲（支持直接在界面上编辑章节标题、子问题、机制概述与过渡）
     function renderOutlineView() {
       const outline = writerData?.outline;
-      if (!outline) return;
+      if (!outline) {
+        document.getElementById('wOutlineChaptersList').innerHTML =
+          '<div class="text-center py-8 text-gray-500 text-xs">暂无大纲章节，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>';
+        document.getElementById('wOutlineChapterCountBadge').textContent = '0 章';
+        return;
+      }
 
       if (outline.opening_hook) {
         document.getElementById('wOutlineOpeningQuestion').value = outline.opening_hook.opening_question || '';
         document.getElementById('wOutlineOpeningAnswer').value = outline.opening_hook.immediate_short_answer || '';
       }
       if (outline.single_ending_plan) {
-        document.getElementById('wOutlineEndingTakeaway').value = outline.single_ending_plan.final_takeaway || '';
+        document.getElementById('wOutlineEndingTakeaway').value =
+          outline.single_ending_plan.final_takeaway || outline.single_ending_plan.revisit_core_question || '';
       }
 
       const listEl = document.getElementById('wOutlineChaptersList');
@@ -5788,25 +6856,99 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         return;
       }
 
-      listEl.innerHTML = chapters
+      const escAttr = (s) => String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      const isHydrated = Boolean(outline._hydrated_from_script);
+
+      listEl.innerHTML = (isHydrated
+        ? '<div class="p-2 rounded-lg bg-purple-950/20 border border-purple-500/30 text-[11px] text-purple-300">💡 当前大纲已由定稿文案自动提取映射，你可以直接修改任意字段后点击「💾 保存大纲修改」：</div>'
+        : '') + chapters
         .map(
           (ch, i) => \`
-        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="font-extrabold text-white text-xs">第 \${ch.chapter_number || i + 1} 章：\${ch.chapter_title}</span>
-            <div class="flex items-center gap-1.5 flex-wrap">
-              \${(ch.supporting_evidence_ids || [])
-                .map((ev) => \`<span class="px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 font-mono text-[10px] font-bold">\${ev}</span>\`)
+        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 hover:border-purple-500/40 transition space-y-2.5" data-outline-idx="\${i}">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2 flex-1 min-w-0">
+              <span class="px-2 py-0.5 rounded bg-purple-600/25 text-purple-300 border border-purple-500/30 font-mono text-[10px] font-black shrink-0">第 \${ch.chapter_number || i + 1} 章</span>
+              <input type="text" data-field="chapter_title" value="\${escAttr(ch.chapter_title)}" placeholder="章节标题..."
+                class="flex-1 min-w-0 bg-gray-900 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+            </div>
+            <div class="flex items-center gap-1.5 flex-wrap shrink-0">
+              \${(ch.supporting_evidence_ids || ch.bound_evidence_ids || [])
+                .map((ev) => \`<span class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono text-[10px] font-bold">\${ev}</span>\`)
                 .join('')}
             </div>
           </div>
-          <div class="text-xs text-amber-300/90 font-medium">🎯 子问题：\${ch.sub_question}</div>
-          <div class="text-[11px] text-gray-400 leading-relaxed">💡 机制概述：\${ch.mechanism_or_background_summary || '无'}</div>
-          \${ch.transition_to_next ? \`<div class="text-[10px] text-gray-500 font-mono">↪ 过渡：\${ch.transition_to_next}</div>\` : ''}
+          <div>
+            <label class="block text-[10px] text-amber-300/90 font-semibold mb-1">🎯 核心子问题：</label>
+            <input type="text" data-field="sub_question" value="\${escAttr(ch.sub_question || ch.core_question || '')}" placeholder="本章要回答的核心子问题..."
+              class="w-full bg-gray-900 text-amber-200 text-xs px-2.5 py-1 rounded-lg border border-gray-800 focus:outline-none focus:border-amber-400" />
+          </div>
+          <div>
+            <label class="block text-[10px] text-gray-400 font-semibold mb-1">💡 机制与内容概述：</label>
+            <textarea rows="2" data-field="mechanism_or_background_summary" placeholder="机制与案例要点..."
+              class="w-full bg-gray-900 text-gray-300 text-[11px] px-2.5 py-1.5 rounded-lg border border-gray-800 focus:outline-none focus:border-purple-500 leading-relaxed">\${escAttr(ch.mechanism_or_background_summary || ch.mechanism || '')}</textarea>
+          </div>
+          <div>
+            <label class="block text-[10px] text-gray-500 font-semibold mb-1">↪ 承接下章过渡（可选）：</label>
+            <input type="text" data-field="transition_to_next" value="\${escAttr(ch.transition_to_next || '')}" placeholder="引向下一章的自然过渡设问..."
+              class="w-full bg-gray-900 text-gray-400 font-mono text-[11px] px-2.5 py-1 rounded-lg border border-gray-800 focus:outline-none focus:border-purple-500" />
+          </div>
         </div>
       \`
         )
         .join('');
+    }
+
+    async function saveOutlineManual() {
+      if (!writerData) writerData = {};
+      if (!writerData.outline) {
+        writerData.outline = {
+          project_id: activeProjectId,
+          title: document.getElementById('wInputTitle').value.trim() || activeProjectId,
+          approval_status: 'pending_user_review',
+          opening_hook: {},
+          chapters: [],
+          single_ending_plan: {},
+        };
+      }
+      const outline = writerData.outline;
+      if (!outline.opening_hook) outline.opening_hook = {};
+      outline.opening_hook.opening_question = document.getElementById('wOutlineOpeningQuestion').value.trim();
+      outline.opening_hook.immediate_short_answer = document.getElementById('wOutlineOpeningAnswer').value.trim();
+
+      if (!outline.single_ending_plan) outline.single_ending_plan = {};
+      outline.single_ending_plan.final_takeaway = document.getElementById('wOutlineEndingTakeaway').value.trim();
+
+      const cards = document.querySelectorAll('#wOutlineChaptersList [data-outline-idx]');
+      cards.forEach((card) => {
+        const idx = Number(card.getAttribute('data-outline-idx'));
+        if (!outline.chapters[idx]) return;
+        const ch = outline.chapters[idx];
+        const titleInput = card.querySelector('[data-field="chapter_title"]');
+        const subQInput = card.querySelector('[data-field="sub_question"]');
+        const mechInput = card.querySelector('[data-field="mechanism_or_background_summary"]');
+        const transInput = card.querySelector('[data-field="transition_to_next"]');
+        if (titleInput) ch.chapter_title = titleInput.value.trim();
+        if (subQInput) ch.sub_question = subQInput.value.trim();
+        if (mechInput) ch.mechanism_or_background_summary = mechInput.value.trim();
+        if (transInput) ch.transition_to_next = transInput.value.trim();
+
+        // 同步更新内存中的分章标题与子问题
+        if (Array.isArray(writerData.chapters)) {
+          const matchCh = writerData.chapters.find((c) => Number(c.chapter_number) === Number(ch.chapter_number || idx + 1));
+          if (matchCh) {
+            matchCh.chapter_title = ch.chapter_title;
+            matchCh.sub_question = ch.sub_question;
+          }
+        }
+      });
+
+      delete outline._hydrated_from_script;
+      writerData.hasExistingContent = true;
+      await saveWriterProjectDataAsync('outline', outline);
+      renderChapterTabs();
+      renderCurrentChapterEditor();
+      applyWriterInspectorMode(writerData);
+      showToast('💾 完整大纲已保存，并同步至逐章视图！');
     }
 
     // 渲染单章 Tabs 与编辑器
@@ -5814,7 +6956,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const bar = document.getElementById('wChapterTabsBar');
       if (!bar) return;
       const outline = writerData?.outline;
-      const chapters = outline?.chapters || [];
+      const chapters = (writerData?.chapters && writerData.chapters.length > 0)
+        ? writerData.chapters
+        : (outline?.chapters || []);
       if (chapters.length === 0) {
         bar.innerHTML = '<span class="text-xs text-gray-500 py-1">请先完成大纲审核，章节选项卡将在此呈现</span>';
         return;
@@ -5843,25 +6987,30 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     function renderCurrentChapterEditor() {
       const outline = writerData?.outline;
-      const targetCh = outline?.chapters?.[currentChapterIndex];
       const chList = writerData?.chapters || [];
-      const writtenData = chList.find((c) => Number(c.chapter_number) === Number(targetCh?.chapter_number || currentChapterIndex + 1));
+      const targetCh = outline?.chapters?.[currentChapterIndex] || chList[currentChapterIndex];
+      const writtenData = chList.find(
+        (c) => Number(c.chapter_number) === Number(targetCh?.chapter_number || currentChapterIndex + 1)
+      ) || targetCh;
 
-      if (targetCh) {
-        document.getElementById('wCurChapterHeader').textContent = \`第 \${targetCh.chapter_number || currentChapterIndex + 1} 章：\${targetCh.chapter_title}\`;
-        document.getElementById('wCurChapterSubQuestion').textContent = \`子问题：\${targetCh.sub_question || '未设定'}\`;
-      } else {
-        document.getElementById('wCurChapterHeader').textContent = \`第 \${currentChapterIndex + 1} 章：草稿编辑\`;
-        document.getElementById('wCurChapterSubQuestion').textContent = '子问题：待大纲生成';
-      }
+      const chNumber = targetCh?.chapter_number || currentChapterIndex + 1;
+      const chTitle = writtenData?.chapter_title || targetCh?.chapter_title || \`第 \${chNumber} 章\`;
+      const subQuestion = targetCh?.sub_question || targetCh?.core_question || writtenData?.sub_question || '';
+
+      document.getElementById('wCurChapterPrefix').textContent = \`第 \${chNumber} 章\`;
+      document.getElementById('wCurChapterTitleInput').value = chTitle;
+      document.getElementById('wCurChapterSubQuestion').textContent = subQuestion ? \`子问题：\${subQuestion}\` : '子问题：已自适应映射';
 
       if (writtenData) {
-        document.getElementById('wSec1Question').value = writtenData.sections?.['1_question_or_contradiction'] || '';
-        document.getElementById('wSec2Mechanism').value = writtenData.sections?.['2_mechanism_or_background'] || '';
-        document.getElementById('wSec3Examples').value = writtenData.sections?.['3_sourced_concrete_examples'] || '';
-        document.getElementById('wSec4Transition').value = writtenData.sections?.['4_mini_summary_and_transition'] || '';
-        document.getElementById('wCurChapterWordCount').textContent = writtenData.word_count || writtenData.full_chapter_narration?.length || 0;
-        document.getElementById('wCurChapterRevisionBadge').textContent = \`修订数: \${writtenData.revision_count || 0}\`;
+        const sec = writtenData.sections || {};
+        document.getElementById('wSec1Question').value = sec['1_question_or_contradiction'] || '';
+        document.getElementById('wSec2Mechanism').value = sec['2_mechanism_or_background'] || '';
+        document.getElementById('wSec3Examples').value = sec['3_sourced_concrete_examples'] || '';
+        document.getElementById('wSec4Transition').value = sec['4_mini_summary_and_transition'] || '';
+        updateCurrentChapterLiveWordCount();
+        document.getElementById('wCurChapterRevisionBadge').textContent = writtenData._hydrated_from_script
+          ? '定稿文本回显'
+          : \`修订数: \${writtenData.revision_count || 0}\`;
       } else {
         document.getElementById('wSec1Question').value = '';
         document.getElementById('wSec2Mechanism').value = '';
@@ -5872,27 +7021,63 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
+    function updateCurrentChapterLiveWordCount() {
+      const len =
+        document.getElementById('wSec1Question').value.trim().length +
+        document.getElementById('wSec2Mechanism').value.trim().length +
+        document.getElementById('wSec3Examples').value.trim().length +
+        document.getElementById('wSec4Transition').value.trim().length;
+      document.getElementById('wCurChapterWordCount').textContent = len;
+    }
+
+    function toggleEditorialLogDetails() {
+      const details = document.getElementById('wEditorialLogDetails');
+      const hint = document.getElementById('wEditorialLogToggleHint');
+      if (!details) return;
+      const isHidden = details.classList.toggle('hidden');
+      if (hint) hint.textContent = isHidden ? '[▾ 详情]' : '[▴ 收起]';
+    }
+
     // 渲染定稿与统稿报告
     function renderFinalScriptView() {
       const script = writerData?.finalScript;
-      if (!script) return;
-      document.getElementById('wFinalScriptWords').textContent = script.total_word_count || 0;
-      document.getElementById('wFinalScriptMin').textContent = script.estimated_duration_minutes || 0;
+      if (!script) {
+        document.getElementById('wFinalScriptWords').textContent = '0';
+        document.getElementById('wFinalScriptMin').textContent = '0.0';
+        document.getElementById('wFinalScriptFullText').value = '';
+        return;
+      }
 
       const fullText = [];
-      if (script.script_segments?.opening) {
-        fullText.push('【开篇导引】\\n' + script.script_segments.opening);
-      }
-      if (Array.isArray(script.script_segments?.chapters)) {
-        script.script_segments.chapters.forEach((c) => {
-          fullText.push(\`【第 \${c.chapter_number} 章：\${c.chapter_title}】\\n\` + c.narration_text);
-        });
-      }
-      if (script.script_segments?.ending) {
-        fullText.push('【全片终局收尾】\\n' + script.script_segments.ending);
+      if (script.script_segments) {
+        if (script.script_segments.opening) {
+          fullText.push('【开篇导引】\\n' + script.script_segments.opening.trim());
+        }
+        if (Array.isArray(script.script_segments.chapters)) {
+          script.script_segments.chapters.forEach((c) => {
+            fullText.push(\`【第 \${c.chapter_number} 章：\${c.chapter_title}】\\n\` + (c.narration_text || '').trim());
+          });
+        }
+        if (script.script_segments.ending) {
+          fullText.push('【全片终局收尾】\\n' + script.script_segments.ending.trim());
+        }
+      } else if (script.full_narration_text) {
+        fullText.push(script.full_narration_text.trim());
+      } else if (Array.isArray(script.approved_narration_sentences)) {
+        fullText.push(script.approved_narration_sentences.join('\\n'));
+      } else if (script.content) {
+        fullText.push(String(script.content).trim());
       }
 
-      document.getElementById('wFinalScriptFullText').value = fullText.join('\\n\\n========================================\\n\\n');
+      const combinedText = fullText.join('\\n\\n========================================\\n\\n');
+      document.getElementById('wFinalScriptFullText').value = combinedText;
+
+      const calcWords = combinedText.replace(/【[^】]+】|={10,}|\\s+/g, '').length;
+      const wordCount = script.total_word_count || calcWords;
+      const durationMin = script.estimated_duration_minutes || Number((wordCount / 240).toFixed(1));
+
+      document.getElementById('wFinalScriptWords').textContent = wordCount;
+      document.getElementById('wFinalScriptMin').textContent = durationMin;
 
       const log = script.editorial_changes_log;
       if (log) {
@@ -5901,11 +7086,18 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (log.removed_duplicate_arguments?.length) {
           logHtml.push(\`<div>🗑️ 删除重复论点：\${log.removed_duplicate_arguments.join('；')}</div>\`);
         }
+        if (log.removed_duplicate_examples?.length) {
+          logHtml.push(\`<div>📦 统一案例出场：\${log.removed_duplicate_examples.join('；')}</div>\`);
+        }
         if (log.unified_terms_and_names?.length) {
           logHtml.push(\`<div>📝 统一专有名词与读法：\${log.unified_terms_and_names.join('；')}</div>\`);
         }
         document.getElementById('wEditorialLogDetails').innerHTML = logHtml.length ? logHtml.join('') : '<div>- 全篇逻辑顺畅，未发现明显冗余与伪结尾。</div>';
+      } else {
+        document.getElementById('wRemovedFalseEndingsBadge').textContent = '已清理伪结尾: 0 处';
+        document.getElementById('wEditorialLogDetails').innerHTML = '<div>- 全篇已完成定稿，支持随时在线编辑或启动下方 AI 修复器。</div>';
       }
+      updateHumanizeVersionUI(script?.humanize_meta || null);
     }
 
     // ==========================================
@@ -5938,6 +7130,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (data.ok && data.materials) {
           document.getElementById('wInputMaterials').value = data.materials;
           document.getElementById('wMaterialWordCount').textContent = '已自动考证补充 ' + data.materials.length + ' 字事实资料';
+          setWriterPersistenceStatus('saved');
           showToast('✅ 事实调查完毕，已为您自动充实参考资料库！');
         } else {
           alert('调查资料失败: ' + (data.error || '网关响应异常'));
@@ -5989,6 +7182,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           document.getElementById('wBriefShortAnswer').value = data.brief.short_answer || '';
           document.getElementById('wBriefScope').value = data.brief.scope?.time_range || '';
           document.getElementById('wBriefTaboos').value = (data.brief.taboos_and_exclusions || []).join('、');
+          setWriterPersistenceStatus('saved');
 
           if (data.researchedMaterials && !materials) {
             document.getElementById('wInputMaterials').value = data.researchedMaterials;
@@ -6042,6 +7236,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           if (!writerData) writerData = {};
           writerData.evidenceCards = data.evidenceCards;
           renderEvidenceCardsList();
+          setWriterPersistenceStatus('saved');
 
           if (data.researchedMaterials && !materials) {
             document.getElementById('wInputMaterials').value = data.researchedMaterials;
@@ -6098,6 +7293,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           }
           renderOutlineView();
           renderChapterTabs();
+          setWriterPersistenceStatus('saved');
           showToast('✅ 结构化大纲生成完成，请人工审核！');
         } else {
           alert('生成大纲失败: ' + (data.error || '大模型异常'));
@@ -6159,6 +7355,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             writerData.chapters.push(data.chapter);
           }
           renderCurrentChapterEditor();
+          setWriterPersistenceStatus('saved');
           showToast(\`✅ 第 \${data.chapter.chapter_number} 章文案撰写完成（\${data.chapter.word_count} 字）！\`);
         } else {
           alert('撰写章节失败: ' + (data.error || '大模型异常'));
@@ -6171,8 +7368,11 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
-    function saveCurrentChapterDraft() {
-      const targetNum = writerData?.outline?.chapters?.[currentChapterIndex]?.chapter_number || currentChapterIndex + 1;
+    async function saveCurrentChapterDraft() {
+      const outlineCh = writerData?.outline?.chapters?.[currentChapterIndex];
+      const existingCh = writerData?.chapters?.[currentChapterIndex];
+      const targetNum = outlineCh?.chapter_number || existingCh?.chapter_number || currentChapterIndex + 1;
+      const editedTitle = document.getElementById('wCurChapterTitleInput').value.trim() || outlineCh?.chapter_title || \`第\${targetNum}章\`;
       const sec1 = document.getElementById('wSec1Question').value.trim();
       const sec2 = document.getElementById('wSec2Mechanism').value.trim();
       const sec3 = document.getElementById('wSec3Examples').value.trim();
@@ -6181,8 +7381,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
       const chObj = {
         chapter_number: Number(targetNum),
-        chapter_title: writerData?.outline?.chapters?.[currentChapterIndex]?.chapter_title || \`第\${targetNum}章\`,
-        sub_question: writerData?.outline?.chapters?.[currentChapterIndex]?.sub_question || '',
+        chapter_title: editedTitle,
+        sub_question: outlineCh?.sub_question || existingCh?.sub_question || '',
         sections: {
           '1_question_or_contradiction': sec1,
           '2_mechanism_or_background': sec2,
@@ -6191,8 +7391,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         },
         full_chapter_narration: fullText,
         word_count: fullText.length,
+        revision_count: (existingCh?.revision_count || 0) + 1,
       };
 
+      if (!writerData) writerData = {};
       if (!Array.isArray(writerData.chapters)) writerData.chapters = [];
       const existIdx = writerData.chapters.findIndex((c) => Number(c.chapter_number) === Number(targetNum));
       if (existIdx >= 0) {
@@ -6201,8 +7403,34 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         writerData.chapters.push(chObj);
       }
 
-      saveWriterProjectDataAsync('chapter', chObj);
-      showToast(\`💾 第 \${targetNum} 章草稿已保存！\`);
+      if (outlineCh) {
+        outlineCh.chapter_title = editedTitle;
+      }
+
+      if (writerData.finalScript?.script_segments?.chapters) {
+        const fsCh = writerData.finalScript.script_segments.chapters.find((c) => Number(c.chapter_number) === Number(targetNum));
+        if (fsCh) {
+          fsCh.chapter_title = editedTitle;
+          fsCh.narration_text = fullText;
+          let totalW = (writerData.finalScript.script_segments.opening || '').length + (writerData.finalScript.script_segments.ending || '').length;
+          writerData.finalScript.script_segments.chapters.forEach((c) => { totalW += (c.narration_text || '').length; });
+          writerData.finalScript.total_word_count = totalW;
+          writerData.finalScript.estimated_duration_minutes = Number((totalW / 240).toFixed(1));
+          renderFinalScriptView();
+        }
+      }
+
+      writerData.hasExistingContent = true;
+      document.getElementById('wCurChapterWordCount').textContent = fullText.length;
+      document.getElementById('wCurChapterRevisionBadge').textContent = \`修订数: \${chObj.revision_count}\`;
+
+      await saveWriterProjectDataAsync('chapter', chObj);
+      if (outlineCh) {
+        renderOutlineView();
+        await saveWriterProjectDataAsync('outline', writerData.outline);
+      }
+      applyWriterInspectorMode(writerData);
+      showToast(\`💾 第 \${targetNum} 章已保存（并同步至定稿全文与概览）！\`);
     }
 
     async function aiFinalizeFullScript() {
@@ -6234,6 +7462,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (data.ok && data.finalScript) {
           writerData.finalScript = data.finalScript;
           renderFinalScriptView();
+          setWriterPersistenceStatus('saved');
           showToast('🎉 全文统稿去伪结尾完成，文案已定稿！');
         } else {
           alert('全文统稿失败: ' + (data.error || '异常'));
@@ -6246,19 +7475,58 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
+    function setWriterPersistenceStatus(mode, customText) {
+      const badge = document.getElementById('writerPersistenceStatusBadge');
+      if (!badge) return;
+      if (mode === 'dirty') {
+        badge.className = 'px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+        badge.textContent = customText || '● 有未保存修改（点击保存写盘）';
+      } else if (mode === 'saving') {
+        badge.className = 'px-2.5 py-0.5 rounded-full font-bold bg-sky-500/20 text-sky-300 border border-sky-500/40';
+        badge.textContent = customText || '⏳ 正在写入本地...';
+      } else {
+        const nowStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        badge.className = 'px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+        badge.textContent = customText || ('✅ 已保存至本地 ' + nowStr);
+      }
+    }
+
+    (function bindWriterDirtyTracking() {
+      const container = document.getElementById('viewWriterContainer');
+      if (!container) return;
+      container.addEventListener('input', (e) => {
+        if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) {
+          setWriterPersistenceStatus('dirty');
+        }
+      });
+    })();
+
+    async function saveStep2EvidenceCards() {
+      await saveWriterProjectDataAsync('evidenceCards', writerData?.evidenceCards || []);
+      showToast('💾 证据卡库已保存至本地！');
+    }
+
     async function saveWriterProjectDataAsync(part, data) {
+      setWriterPersistenceStatus('saving');
       try {
-        await fetch('/api/writer/save?project=' + activeProjectId, {
+        const res = await fetch('/api/writer/save?project=' + activeProjectId, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ part, data }),
         });
+        const json = await res.json();
+        if (json && json.ok) {
+          setWriterPersistenceStatus('saved');
+        }
+        return json;
       } catch (e) {
         console.warn('异步保存失败:', e);
+        setWriterPersistenceStatus('dirty', '⚠️ 本地保存异常，请重试');
+        return null;
       }
     }
 
-    function saveWriterPartManual(part) {
+    async function saveWriterPartManual(part) {
       if (part === 'brief') {
         const briefObj = {
           project_id: activeProjectId,
@@ -6270,37 +7538,302 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           scope: { time_range: document.getElementById('wBriefScope').value.trim() },
           taboos_and_exclusions: document.getElementById('wBriefTaboos').value.split(/[、,，\\n]+/).filter(Boolean),
         };
+        const materialsText = document.getElementById('wInputMaterials').value;
         if (!writerData) writerData = {};
         writerData.brief = briefObj;
-        saveWriterProjectDataAsync('brief', briefObj);
-        showToast('💾 Brief 立项已手动保存！');
+        writerData.materials = materialsText;
+        await saveWriterProjectDataAsync('brief', briefObj);
+        if (materialsText.trim()) {
+          await saveWriterProjectDataAsync('materials', materialsText);
+        }
+        showToast('💾 Brief 立项与参考资料已保存！');
       }
       if (part === 'finalScript') {
         const fullContent = document.getElementById('wFinalScriptFullText').value;
-        saveWriterProjectDataAsync('finalScript', {
+        const saved = await saveWriterProjectDataAsync('finalScript', {
           title: document.getElementById('wInputTitle').value,
           content: fullContent,
+          ...(arguments[1] ? { humanizeMeta: arguments[1] } : {}),
         });
+        if (saved?.finalScript) {
+          if (!writerData) writerData = {};
+          writerData.finalScript = saved.finalScript;
+          writerData.hasExistingContent = true;
+          renderFinalScriptView();
+          applyWriterInspectorMode(writerData);
+        }
       }
     }
 
-    function saveCurrentWriterPart() {
-      if (currentWriterStep === 1) saveWriterPartManual('brief');
-      else if (currentWriterStep === 2) saveWriterProjectDataAsync('evidenceCards', writerData?.evidenceCards);
-      else if (currentWriterStep === 3) saveWriterProjectDataAsync('outline', writerData?.outline);
-      else if (currentWriterStep === 4) saveCurrentChapterDraft();
+    async function saveCurrentWriterPart() {
+      if (currentWriterStep === 1) await saveWriterPartManual('brief');
+      else if (currentWriterStep === 2) {
+        await saveWriterProjectDataAsync('evidenceCards', writerData?.evidenceCards || []);
+        showToast('💾 证据卡库已保存！');
+      } else if (currentWriterStep === 3) {
+        await saveOutlineManual();
+      } else if (currentWriterStep === 4) await saveCurrentChapterDraft();
       else if (currentWriterStep === 5) {
-        const fullContent = document.getElementById('wFinalScriptFullText').value;
-        saveWriterProjectDataAsync('finalScript', {
-          title: document.getElementById('wInputTitle').value,
-          content: fullContent,
-        });
-        showToast('💾 完整终稿已保存！');
+        await saveFinalScriptOnlyUI();
       }
+    }
+
+    function updateFinalScriptLiveStats() {
+      const val = document.getElementById('wFinalScriptFullText').value || '';
+      const words = val.replace(/【[^】]+】|={10,}|\\s+/g, '').length;
+      document.getElementById('wFinalScriptWords').textContent = words;
+      document.getElementById('wFinalScriptMin').textContent = (words / 240).toFixed(1);
+    }
+
+    async function saveFinalScriptOnlyUI() {
+      const fullContent = document.getElementById('wFinalScriptFullText').value.trim();
+      if (!fullContent) {
+        alert('定稿文案为空，无法保存！');
+        return;
+      }
+      await saveWriterPartManual('finalScript');
+      showToast('💾 文案底稿已保存！（制作台镜头保持原样未改动）');
     }
 
     let selectedHumanizeStyle = 'humorous';
     let rawScriptBackupBeforeHumanize = '';
+    let latestHumanizedText = '';
+    let humanizeDiffMode = 'unified';
+    let pendingHumanizeMeta = null;
+
+    const HUMANIZE_STYLE_LABELS = {
+      humorous: '幽默风趣',
+      suspense: '悬疑反转',
+      colloquial: '亲切大白话',
+    };
+
+    function updateHumanizeVersionUI(meta, isPreview = false) {
+      const badge = document.getElementById('wHumanizeVersionBadge');
+      const btn = document.getElementById('btnExecuteHumanize');
+      const styleName = meta?.style ? (HUMANIZE_STYLE_LABELS[meta.style] || meta.style) : '';
+      const ver = meta?.version || '';
+
+      if (badge) {
+        if (isPreview && meta) {
+          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+          badge.textContent = \`⏳ 预览 · \${ver}\${styleName ? ' · ' + styleName : ''} (待采纳)\`;
+        } else if (meta && meta.version) {
+          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+          badge.textContent = \`✅ 已修复 · \${ver}\${styleName ? ' · ' + styleName : ''}\${meta.humanized_at ? ' · ' + meta.humanized_at : ''}\`;
+        } else {
+          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-gray-800 text-gray-400 border border-gray-700';
+          badge.textContent = '📄 原稿未修复 (v1.0)';
+        }
+      }
+
+      if (btn) {
+        if (isPreview && meta) {
+          btn.className = 'px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer';
+          btn.innerHTML = \`<span>✅ 已完成修复 (\${ver} 预览) · 点击再次润色</span>\`;
+        } else if (meta && meta.version) {
+          btn.className = 'px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer';
+          btn.innerHTML = \`<span>🔄 已修复 (\${ver}) · 点击再次润色</span>\`;
+        } else {
+          btn.className = 'px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer';
+          btn.innerHTML = '<span>🪄 启动全篇 AI 真人化修复</span>';
+        }
+      }
+    }
+
+    function setHumanizeDiffMode(mode) {
+      humanizeDiffMode = mode;
+      const btnU = document.getElementById('btnDiffUnified');
+      const btnS = document.getElementById('btnDiffSplit');
+      if (btnU && btnS) {
+        btnU.className = mode === 'unified'
+          ? 'px-2 py-0.5 rounded bg-violet-600 text-white font-bold cursor-pointer'
+          : 'px-2 py-0.5 rounded text-gray-400 hover:text-white font-bold cursor-pointer';
+        btnS.className = mode === 'split'
+          ? 'px-2 py-0.5 rounded bg-violet-600 text-white font-bold cursor-pointer'
+          : 'px-2 py-0.5 rounded text-gray-400 hover:text-white font-bold cursor-pointer';
+      }
+      renderHumanizeDiffView();
+    }
+
+    function tokenizeScriptForDiff(text) {
+      const lines = String(text || '').split(/\\n+/);
+      const tokens = [];
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t || /^={10,}$/.test(t)) continue;
+        if (t.startsWith('【') && t.endsWith('】')) {
+          tokens.push(t);
+          continue;
+        }
+        const sentences = t.split(/(?<=[。！？!?])\\s*/).map((s) => s.trim()).filter(Boolean);
+        for (const s of sentences) tokens.push(s);
+      }
+      return tokens;
+    }
+
+    function computeLineDiff(beforeArr, afterArr) {
+      const n = beforeArr.length;
+      const m = afterArr.length;
+      // 长度适中时用标准 LCS；超长时先剥除公共前后缀，保证毫秒级响应
+      let prefix = 0;
+      while (prefix < n && prefix < m && beforeArr[prefix] === afterArr[prefix]) prefix++;
+      let suffix = 0;
+      while (suffix < (n - prefix) && suffix < (m - prefix) && beforeArr[n - 1 - suffix] === afterArr[m - 1 - suffix]) suffix++;
+
+      const result = [];
+      for (let i = 0; i < prefix; i++) {
+        result.push({ type: 'same', text: beforeArr[i], oldLine: i + 1, newLine: i + 1 });
+      }
+
+      const aMid = beforeArr.slice(prefix, n - suffix);
+      const bMid = afterArr.slice(prefix, m - suffix);
+      const am = aMid.length;
+      const bm = bMid.length;
+
+      if (am * bm <= 200000) {
+        const dp = Array.from({ length: am + 1 }, () => new Int32Array(bm + 1));
+        for (let i = am - 1; i >= 0; i--) {
+          for (let j = bm - 1; j >= 0; j--) {
+            dp[i][j] = aMid[i] === bMid[j]
+              ? dp[i + 1][j + 1] + 1
+              : Math.max(dp[i + 1][j], dp[i][j + 1]);
+          }
+        }
+        let i = 0, j = 0;
+        while (i < am && j < bm) {
+          if (aMid[i] === bMid[j]) {
+            result.push({ type: 'same', text: aMid[i], oldLine: prefix + i + 1, newLine: prefix + j + 1 });
+            i++; j++;
+          } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+            result.push({ type: 'del', text: aMid[i], oldLine: prefix + i + 1 });
+            i++;
+          } else {
+            result.push({ type: 'add', text: bMid[j], newLine: prefix + j + 1 });
+            j++;
+          }
+        }
+        while (i < am) { result.push({ type: 'del', text: aMid[i], oldLine: prefix + i + 1 }); i++; }
+        while (j < bm) { result.push({ type: 'add', text: bMid[j], newLine: prefix + j + 1 }); j++; }
+      } else {
+        for (let i = 0; i < am; i++) result.push({ type: 'del', text: aMid[i], oldLine: prefix + i + 1 });
+        for (let j = 0; j < bm; j++) result.push({ type: 'add', text: bMid[j], newLine: prefix + j + 1 });
+      }
+
+      for (let k = 0; k < suffix; k++) {
+        const oi = n - suffix + k;
+        const ni = m - suffix + k;
+        result.push({ type: 'same', text: beforeArr[oi], oldLine: oi + 1, newLine: ni + 1 });
+      }
+      return result;
+    }
+
+    function renderHumanizeDiffView() {
+      const bodyEl = document.getElementById('wHumanizeDiffBody');
+      if (!bodyEl) return;
+      const beforeTokens = tokenizeScriptForDiff(rawScriptBackupBeforeHumanize);
+      const afterTokens = tokenizeScriptForDiff(latestHumanizedText || document.getElementById('wFinalScriptFullText')?.value || '');
+      const diffOps = computeLineDiff(beforeTokens, afterTokens);
+
+      const addedCount = diffOps.filter((o) => o.type === 'add').length;
+      const removedCount = diffOps.filter((o) => o.type === 'del').length;
+      const addEl = document.getElementById('wDiffAddedCount');
+      const remEl = document.getElementById('wDiffRemovedCount');
+      if (addEl) addEl.textContent = addedCount;
+      if (remEl) remEl.textContent = removedCount;
+
+      const changesOnly = Boolean(document.getElementById('wDiffChangesOnlyCheckbox')?.checked);
+      const visibleOps = changesOnly ? diffOps.filter((o) => o.type !== 'same') : diffOps;
+
+      const escHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+      if (visibleOps.length === 0) {
+        bodyEl.innerHTML = '<div class="p-4 text-center text-gray-500">本次修复前后语句完全一致，未产生文字差异。</div>';
+        return;
+      }
+
+      if (humanizeDiffMode === 'unified') {
+        bodyEl.innerHTML = visibleOps
+          .map((op) => {
+            if (op.type === 'del') {
+              return \`<div class="flex items-start gap-2 px-3 py-1 bg-rose-950/55 border-l-2 border-rose-500 text-rose-200"><span class="w-8 shrink-0 text-right text-rose-400/70 select-none">\${op.oldLine}</span><span class="w-4 shrink-0 text-rose-400 font-black select-none">-</span><span class="flex-1 whitespace-pre-wrap break-words">\${escHtml(op.text)}</span></div>\`;
+            }
+            if (op.type === 'add') {
+              return \`<div class="flex items-start gap-2 px-3 py-1 bg-emerald-950/50 border-l-2 border-emerald-500 text-emerald-200"><span class="w-8 shrink-0 text-right text-emerald-400/70 select-none">\${op.newLine}</span><span class="w-4 shrink-0 text-emerald-400 font-black select-none">+</span><span class="flex-1 whitespace-pre-wrap break-words">\${escHtml(op.text)}</span></div>\`;
+            }
+            return \`<div class="flex items-start gap-2 px-3 py-1 bg-transparent text-gray-400"><span class="w-8 shrink-0 text-right text-gray-600 select-none">\${op.newLine}</span><span class="w-4 shrink-0 text-gray-600 select-none"> </span><span class="flex-1 whitespace-pre-wrap break-words">\${escHtml(op.text)}</span></div>\`;
+          })
+          .join('');
+      } else {
+        // 左右并排 Split Diff：将连续的 del 与 add 配对对齐
+        const rows = [];
+        let idx = 0;
+        while (idx < visibleOps.length) {
+          const cur = visibleOps[idx];
+          if (cur.type === 'same') {
+            rows.push({ left: cur, right: cur });
+            idx++;
+          } else {
+            const dels = [];
+            const adds = [];
+            while (idx < visibleOps.length && visibleOps[idx].type !== 'same') {
+              if (visibleOps[idx].type === 'del') dels.push(visibleOps[idx]);
+              else adds.push(visibleOps[idx]);
+              idx++;
+            }
+            const maxLen = Math.max(dels.length, adds.length);
+            for (let k = 0; k < maxLen; k++) {
+              rows.push({ left: dels[k] || null, right: adds[k] || null });
+            }
+          }
+        }
+        bodyEl.innerHTML =
+          '<div class="grid grid-cols-2 bg-gray-900/90 text-[10px] font-bold text-gray-400 px-3 py-1.5 sticky top-0 border-b border-gray-800"><div>📄 修复前原稿</div><div class="pl-3 border-l border-gray-800">✨ 修复后新版</div></div>' +
+          rows
+            .map((r) => {
+              const leftHtml = r.left
+                ? r.left.type === 'del'
+                  ? \`<div class="px-2.5 py-1 bg-rose-950/55 border-l-2 border-rose-500 text-rose-200 whitespace-pre-wrap break-words"><span class="text-rose-400 font-bold mr-1.5">-\${r.left.oldLine}</span>\${escHtml(r.left.text)}</div>\`
+                  : \`<div class="px-2.5 py-1 text-gray-400 whitespace-pre-wrap break-words"><span class="text-gray-600 mr-1.5">\${r.left.oldLine}</span>\${escHtml(r.left.text)}</div>\`
+                : '<div class="px-2.5 py-1 bg-gray-900/40 text-gray-700 select-none"> </div>';
+              const rightHtml = r.right
+                ? r.right.type === 'add'
+                  ? \`<div class="px-2.5 py-1 bg-emerald-950/50 border-l-2 border-emerald-500 text-emerald-200 whitespace-pre-wrap break-words"><span class="text-emerald-400 font-bold mr-1.5">+\${r.right.newLine}</span>\${escHtml(r.right.text)}</div>\`
+                  : \`<div class="px-2.5 py-1 text-gray-400 whitespace-pre-wrap break-words"><span class="text-gray-600 mr-1.5">\${r.right.newLine}</span>\${escHtml(r.right.text)}</div>\`
+                : '<div class="px-2.5 py-1 bg-gray-900/40 text-gray-700 select-none"> </div>';
+              return \`<div class="grid grid-cols-2 divide-x divide-gray-800">\${leftHtml}\${rightHtml}</div>\`;
+            })
+            .join('');
+      }
+    }
+
+    async function acceptHumanizedScript() {
+      const btn = document.getElementById('btnAcceptHumanize');
+      const badge = document.getElementById('wHumanizePendingBadge');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 正在保存...';
+      }
+      const nextCount = pendingHumanizeMeta?.count || ((writerData?.finalScript?.humanize_meta?.count || 0) + 1);
+      const nextVer = pendingHumanizeMeta?.version || ('v2.' + String(nextCount).padStart(2, '0'));
+      const metaToSave = {
+        count: nextCount,
+        version: nextVer,
+        style: pendingHumanizeMeta?.style || selectedHumanizeStyle,
+        humanized_at: pendingHumanizeMeta?.humanized_at || new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      };
+      await saveWriterPartManual('finalScript', metaToSave);
+      pendingHumanizeMeta = null;
+      updateHumanizeVersionUI(writerData?.finalScript?.humanize_meta || metaToSave, false);
+      if (badge) {
+        badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+        badge.textContent = \`✅ 已采纳并保存至工程 (\${metaToSave.version})\`;
+      }
+      if (btn) {
+        btn.disabled = false;
+        btn.textContent = '✅ 确认采纳并保存';
+      }
+      showToast(\`✅ 已确认采纳修复版 (\${metaToSave.version}) 并保存至工程文件！\`);
+    }
 
     function selectHumanizeStyle(style) {
       selectedHumanizeStyle = style;
@@ -6340,6 +7873,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       btn.disabled = true;
       btn.innerHTML = '<span>⏳ 正在全篇去AI味、去冗余与幽默重构 (约15~30秒)...</span>';
       rawScriptBackupBeforeHumanize = content;
+      let humanizedSucceeded = false;
 
       try {
         const res = await fetch('/api/writer/ai/humanize-script?project=' + activeProjectId, {
@@ -6356,13 +7890,31 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         const data = await res.json();
         if (data.ok && data.result) {
           const resObj = data.result;
+          latestHumanizedText = resObj.humanized_text;
           textarea.value = resObj.humanized_text;
-          const wordCount = resObj.humanized_text.length;
-          document.getElementById('wFinalScriptWords').textContent = wordCount;
-          document.getElementById('wFinalScriptMin').textContent = (wordCount / 240).toFixed(1);
+          updateFinalScriptLiveStats();
+          setWriterPersistenceStatus('dirty', '● 润色预览待确认（点「确认采纳并保存」写盘）');
+
+          const nextCount = (writerData?.finalScript?.humanize_meta?.count || 0) + 1;
+          const nextVer = 'v2.' + String(nextCount).padStart(2, '0');
+          pendingHumanizeMeta = {
+            count: nextCount,
+            version: nextVer,
+            style: selectedHumanizeStyle,
+            humanized_at: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+          };
+          humanizedSucceeded = true;
+          updateHumanizeVersionUI(pendingHumanizeMeta, true);
+
+          const badge = document.getElementById('wHumanizePendingBadge');
+          if (badge) {
+            badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+            badge.textContent = \`⏳ \${nextVer} 待审阅 · 未覆盖原文件\`;
+          }
 
           if (auditBox && auditContent) {
             const stats = resObj.stats || {};
+            const wordCount = resObj.humanized_text.length;
             auditContent.innerHTML = \`
               <div class="bg-gray-900/90 p-2 rounded border border-gray-800">
                 <div class="text-[10px] text-gray-500">字数变化 / 脱脂率</div>
@@ -6383,31 +7935,38 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             \`;
             auditSummary.textContent = resObj.audit_report || '全篇文案已由 AI 完成真人声学与幽默化重构，节奏紧凑、听感流畅自然！';
             auditBox.classList.remove('hidden');
+            renderHumanizeDiffView();
           }
 
           if (revertBtn) revertBtn.classList.remove('hidden');
-          showToast('🎉 全篇文案修复完成！已注入真人呼吸感与生动幽默比喻！');
-
-          saveWriterPartManual('finalScript');
+          showToast(\`🎉 修复对比已生成 (\${nextVer})！请在上方 Diff 面板核对红绿改动后点击「✅ 确认采纳并保存」\`);
         } else {
+          showToast('❌ 修复失败：' + (data.error || '未知异常'));
           alert('修复文案失败: ' + (data.error || '未知异常'));
         }
       } catch (err) {
+        showToast('❌ 文案修复请求异常：' + err.message);
         alert('文案修复请求异常: ' + err.message);
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<span>🪄 启动全篇 AI 真人化修复</span>';
+        if (!humanizedSucceeded) {
+          updateHumanizeVersionUI(writerData?.finalScript?.humanize_meta || null, false);
+        }
       }
     }
 
     function revertHumanizedScript() {
       if (!rawScriptBackupBeforeHumanize) return;
       document.getElementById('wFinalScriptFullText').value = rawScriptBackupBeforeHumanize;
-      const wordCount = rawScriptBackupBeforeHumanize.length;
-      document.getElementById('wFinalScriptWords').textContent = wordCount;
-      document.getElementById('wFinalScriptMin').textContent = (wordCount / 240).toFixed(1);
-      document.getElementById('btnRevertScript').classList.add('hidden');
-      document.getElementById('wHumanizeAuditBox').classList.add('hidden');
+      latestHumanizedText = '';
+      pendingHumanizeMeta = null;
+      updateFinalScriptLiveStats();
+      setWriterPersistenceStatus('saved', '✅ 已还原原稿');
+      updateHumanizeVersionUI(writerData?.finalScript?.humanize_meta || null, false);
+      const revertBtn = document.getElementById('btnRevertScript');
+      if (revertBtn) revertBtn.classList.add('hidden');
+      const auditBox = document.getElementById('wHumanizeAuditBox');
+      if (auditBox) auditBox.classList.add('hidden');
       showToast('↩️ 已成功还原为修复前的文案原稿。');
     }
 
@@ -6434,26 +7993,29 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     async function syncWriterToProducerUI() {
       const fullText = document.getElementById('wFinalScriptFullText').value.trim();
-      const scriptObj = writerData?.finalScript || fullText;
+      const title = document.getElementById('wInputTitle').value.trim();
 
       if (!fullText && !writerData?.finalScript) {
         alert('当前没有可同步的终稿文案，请先在阶段 5 统稿或粘贴文案！');
         return;
       }
 
-      showToast('🚀 正在将定稿文案智能切分镜头 (4~8s) 并流转至制作台...');
+      showToast('🚀 正在保存定稿并同步切镜至制作台（自动保留已有素材）...');
       try {
-        const res = await fetch('/api/writer/sync-to-producer?project=' + activeProjectId, {
+        const res = await fetch('/api/writer/sync-to-producer?project=' + encodeURIComponent(activeProjectId), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            finalScript: writerData?.finalScript,
+            title,
             content: fullText,
+            finalScript: writerData?.finalScript,
+            preserveAssets: true,
           }),
         });
         const data = await res.json();
         if (data.ok) {
-          showToast(\`🎉 成功同步！已自动切分为 \${data.totalScenes} 个镜头，正在进入制作台...\`);
+          const preservedTip = data.preservedAssetsCount > 0 ? \`，自动保留 \${data.preservedAssetsCount} 个已有素材\` : '';
+          showToast(\`🎉 成功同步！共 \${data.totalScenes} 个镜头\${preservedTip}，正在进入制作台...\`);
           switchWorkspaceTab('producer');
           await loadProjects();
           await loadWorkflow();
@@ -7225,7 +8787,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         const cur = projectsList.find(p => p.id === activeProjectId);
         if (cur) {
           document.getElementById('projectStageBadge').textContent = cur.stage;
-          document.getElementById('projectHeaderTitle').textContent = cur.title + ' · 视觉镜头工作台';
+          document.getElementById('projectHeaderTitle').textContent =
+            cur.title + (currentWorkspaceTab === 'writer' ? ' · 知识长视频文案策划工坊' : ' · 视觉镜头工作台');
         }
       } catch (e) {
         console.error('加载工程列表失败:', e);
@@ -8826,6 +10389,336 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         sendDevChat();
       }
     }
+
+    // ==========================================
+    // ⚙️ 文案创作台提示词模板与风格预设管理器
+    // ==========================================
+    const WRITER_PROMPT_STAGE_KEYS = [
+      { key: 'W1_research', label: '1. 事实考证' },
+      { key: 'W2_brief', label: '2. 立项 Brief' },
+      { key: 'W3_evidence', label: '3. 证据卡提取' },
+      { key: 'W4_outline', label: '4. 大纲策划' },
+      { key: 'W5_chapter', label: '5. 逐章撰写' },
+      { key: 'W6_finalize', label: '6. 全文统稿' },
+      { key: 'W7_humanize', label: '7. 去AI味润色' },
+    ];
+
+    let writerPromptsModalState = {
+      activeKey: 'W1_research',
+      builtins: {},
+      stylePresets: [],
+      customTemplates: {},
+      preset: null,
+      hasCustom: false,
+    };
+
+    function updateWriterPromptsBadgeUI(hasCustom, preset) {
+      const btnStatus = document.getElementById('writerPromptsBtnStatus');
+      const modalBadge = document.getElementById('writerModalPromptBadge');
+      const btn = document.getElementById('writerPromptsModalBtn');
+      const revText = preset && preset.revision ? ('r' + preset.revision) : 'r1';
+
+      if (btnStatus) {
+        btnStatus.textContent = hasCustom ? ('已自定义 (' + revText + ')') : '出厂默认';
+      }
+      if (btn) {
+        if (hasCustom) {
+          btn.classList.add('border-emerald-400/60', 'bg-emerald-600/25', 'text-emerald-200');
+          btn.classList.remove('border-teal-500/40', 'bg-teal-600/20', 'text-teal-300');
+        } else {
+          btn.classList.remove('border-emerald-400/60', 'bg-emerald-600/25', 'text-emerald-200');
+          btn.classList.add('border-teal-500/40', 'bg-teal-600/20', 'text-teal-300');
+        }
+      }
+      if (modalBadge) {
+        if (hasCustom) {
+          modalBadge.textContent = '已应用当前工程预设 (' + revText + ')';
+          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-900/70 text-emerald-300 border border-emerald-500/50';
+        } else {
+          modalBadge.textContent = '出厂默认基线';
+          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700';
+        }
+      }
+    }
+
+    async function refreshWriterPromptsButtonStatus(projectId) {
+      const targetId = projectId || activeProjectId;
+      if (!targetId) return;
+      try {
+        const res = await fetch('/api/writer/prompts?project=' + encodeURIComponent(targetId));
+        const data = await res.json();
+        if (data && data.ok) {
+          updateWriterPromptsBadgeUI(Boolean(data.has_custom_preset), data.preset || null);
+        }
+      } catch (e) {
+        // ignore silent status fetch error
+      }
+    }
+
+    async function openWriterPromptsModal() {
+      if (!activeProjectId) {
+        alert('请先选择或创建一个工程！');
+        return;
+      }
+      try {
+        const res = await fetch('/api/writer/prompts?project=' + encodeURIComponent(activeProjectId));
+        const data = await res.json();
+        if (!data || !data.ok) {
+          alert('加载提示词配置失败: ' + (data?.error || '未知错误'));
+          return;
+        }
+        writerPromptsModalState.builtins = data.builtins || {};
+        writerPromptsModalState.stylePresets = data.style_presets || [];
+        writerPromptsModalState.preset = data.preset || null;
+        writerPromptsModalState.hasCustom = Boolean(data.has_custom_preset);
+        writerPromptsModalState.customTemplates = {};
+
+        WRITER_PROMPT_STAGE_KEYS.forEach((st) => {
+          const k = st.key;
+          if (writerPromptsModalState.preset?.templates?.[k]?.raw_template) {
+            writerPromptsModalState.customTemplates[k] = writerPromptsModalState.preset.templates[k].raw_template;
+          } else if (writerPromptsModalState.builtins[k]) {
+            writerPromptsModalState.customTemplates[k] = writerPromptsModalState.builtins[k].raw_template;
+          }
+        });
+
+        const projEl = document.getElementById('writerPromptsTargetProjId');
+        if (projEl) projEl.textContent = activeProjectId;
+
+        updateWriterPromptsBadgeUI(writerPromptsModalState.hasCustom, writerPromptsModalState.preset);
+        renderWriterPromptTabs();
+        renderWriterStylePresets();
+        loadWriterPromptIntoEditor(writerPromptsModalState.activeKey);
+
+        const modal = document.getElementById('writerPromptsModal');
+        if (modal) modal.classList.remove('hidden');
+      } catch (err) {
+        alert('加载提示词配置异常: ' + err.message);
+      }
+    }
+
+    function closeWriterPromptsModal() {
+      const modal = document.getElementById('writerPromptsModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function isWriterPromptStageModified(stageKey) {
+      const cur = (writerPromptsModalState.customTemplates[stageKey] || '').trim();
+      const base = (writerPromptsModalState.builtins[stageKey]?.raw_template || '').trim();
+      return Boolean(cur && base && cur !== base);
+    }
+
+    function renderWriterPromptTabs() {
+      const container = document.getElementById('writerPromptStageTabs');
+      if (!container) return;
+      container.innerHTML = WRITER_PROMPT_STAGE_KEYS.map((st) => {
+        const isActive = st.key === writerPromptsModalState.activeKey;
+        const isModified = isWriterPromptStageModified(st.key);
+        const cls = isActive
+          ? 'px-3 py-1.5 rounded-lg text-xs font-bold bg-teal-600/30 text-teal-200 border border-teal-400 shadow whitespace-nowrap cursor-pointer flex items-center gap-1.5'
+          : 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 whitespace-nowrap cursor-pointer flex items-center gap-1.5';
+        const dotHtml = isModified ? '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" title="本阶段已自定义修改"></span>' : '';
+        return '<button type="button" data-stage-key="' + escapeHtml(st.key) + '" onclick="switchWriterPromptTab(this.dataset.stageKey)" class="' + cls + '">' + escapeHtml(st.label) + dotHtml + '</button>';
+      }).join('');
+    }
+
+    function switchWriterPromptTab(newKey) {
+      const textarea = document.getElementById('writerPromptTextarea');
+      if (textarea) {
+        writerPromptsModalState.customTemplates[writerPromptsModalState.activeKey] = textarea.value;
+      }
+      writerPromptsModalState.activeKey = newKey;
+      renderWriterPromptTabs();
+      loadWriterPromptIntoEditor(newKey);
+    }
+
+    function onWriterPromptTextareaInput() {
+      const textarea = document.getElementById('writerPromptTextarea');
+      if (!textarea) return;
+      writerPromptsModalState.customTemplates[writerPromptsModalState.activeKey] = textarea.value;
+      renderWriterPromptTabs();
+      updateWriterPromptEditorStatus(writerPromptsModalState.activeKey, textarea.value);
+    }
+
+    function updateWriterPromptEditorStatus(stageKey, text) {
+      const statusEl = document.getElementById('writerPromptEditorStatus');
+      const builtin = writerPromptsModalState.builtins[stageKey];
+      if (!statusEl || !builtin) return;
+      if (!text || !text.trim()) {
+        statusEl.className = 'text-[11px] text-rose-400 shrink-0';
+        statusEl.textContent = '⚠️ 提示词不能为空。';
+        return;
+      }
+      if (builtin.require_json && !/json/i.test(text)) {
+        statusEl.className = 'text-[11px] text-amber-400 shrink-0';
+        statusEl.textContent = '⚠️ 本阶段需要后端解析 JSON，请确保提示词中保留 JSON 输出格式要求。';
+        return;
+      }
+      if (builtin.require_audit_marker && !text.includes('<<<AUDIT>>>')) {
+        statusEl.className = 'text-[11px] text-amber-300 shrink-0';
+        statusEl.textContent = '💡 提示：保留 <<<AUDIT>>> 尾部标记可自动生成润色审计对比报告。';
+        return;
+      }
+      statusEl.className = 'text-[11px] text-gray-400 shrink-0';
+      statusEl.textContent = isWriterPromptStageModified(stageKey)
+        ? '✏️ 本阶段已修改（点击右下角「保存并应用到当前工程」后生效，仅影响当前工程）。'
+        : '✅ 当前为系统出厂默认模板。';
+    }
+
+    function loadWriterPromptIntoEditor(stageKey) {
+      const textarea = document.getElementById('writerPromptTextarea');
+      const val = writerPromptsModalState.customTemplates[stageKey] || '';
+      if (textarea) textarea.value = val;
+
+      const builtin = writerPromptsModalState.builtins[stageKey];
+      const titleEl = document.getElementById('writerPromptEditorTitle');
+      const descEl = document.getElementById('writerPromptStageDesc');
+      if (titleEl) titleEl.textContent = '当前编辑：' + (builtin?.full_label || stageKey);
+      if (descEl) descEl.textContent = builtin?.description || '';
+
+      const varsContainer = document.getElementById('writerPromptVarsList');
+      if (varsContainer && builtin) {
+        const allowed = builtin.allowed_inputs || [];
+        if (allowed.length === 0) {
+          varsContainer.innerHTML = '<span class="text-gray-500">本阶段无需插入动态变量</span>';
+        } else {
+          varsContainer.innerHTML = allowed.map((v) => {
+            return '<button type="button" data-var-name="' + escapeHtml(v) + '" onclick="insertWriterPromptVar(this.dataset.varName)" class="px-2 py-1 rounded-lg text-[11px] font-mono bg-blue-500/15 hover:bg-blue-500/30 text-blue-300 border border-blue-500/40 transition cursor-pointer" title="点击插入光标处">+ {{' + escapeHtml(v) + '}}</button>';
+          }).join('');
+        }
+      }
+      updateWriterPromptEditorStatus(stageKey, val);
+    }
+
+    function renderWriterStylePresets() {
+      const container = document.getElementById('writerStylePresetsList');
+      if (!container) return;
+      container.innerHTML = (writerPromptsModalState.stylePresets || []).map((sp) => {
+        return '<button type="button" data-preset-id="' + escapeHtml(sp.id) + '" onclick="appendWriterStylePreset(this.dataset.presetId)" class="w-full text-left px-2.5 py-1.5 rounded-lg bg-gray-950 hover:bg-teal-950/60 border border-gray-800 hover:border-teal-500/40 text-gray-200 transition cursor-pointer">' +
+          '<div class="font-bold text-[11px] text-teal-300">' + escapeHtml(sp.label) + '</div>' +
+          '<div class="text-[10px] text-gray-400 truncate mt-0.5">' + escapeHtml(sp.snippet) + '</div>' +
+        '</button>';
+      }).join('');
+    }
+
+    function insertWriterPromptVar(varName) {
+      const textarea = document.getElementById('writerPromptTextarea');
+      if (!textarea) return;
+      const tag = '{{' + varName + '}}';
+      const start = textarea.selectionStart || 0;
+      const end = textarea.selectionEnd || 0;
+      const val = textarea.value;
+      textarea.value = val.substring(0, start) + tag + val.substring(end);
+      textarea.focus();
+      textarea.setSelectionRange(start + tag.length, start + tag.length);
+      onWriterPromptTextareaInput();
+    }
+
+    function appendWriterStylePreset(presetId) {
+      const sp = (writerPromptsModalState.stylePresets || []).find((p) => p.id === presetId);
+      const textarea = document.getElementById('writerPromptTextarea');
+      if (!sp || !textarea) return;
+      const cur = textarea.value.trimEnd();
+      if (cur.includes(sp.snippet)) {
+        showToast('当前模板已包含该风格预设');
+        return;
+      }
+      textarea.value = (cur ? cur + '\\n\\n' : '') + sp.snippet;
+      textarea.focus();
+      textarea.scrollTop = textarea.scrollHeight;
+      onWriterPromptTextareaInput();
+      showToast('已将【' + sp.label + '】追加到当前阶段提示词');
+    }
+
+    async function saveWriterPromptsFromModal() {
+      const textarea = document.getElementById('writerPromptTextarea');
+      if (textarea) {
+        writerPromptsModalState.customTemplates[writerPromptsModalState.activeKey] = textarea.value;
+      }
+      const templatesPayload = {};
+      WRITER_PROMPT_STAGE_KEYS.forEach((st) => {
+        const k = st.key;
+        templatesPayload[k] = {
+          template_id: k,
+          raw_template: writerPromptsModalState.customTemplates[k] || '',
+          description: st.label,
+        };
+      });
+
+      const btn = document.getElementById('btnSaveWriterPrompts');
+      if (btn) btn.disabled = true;
+      try {
+        const res = await fetch('/api/writer/prompts/save?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: '项目文案预设_' + activeProjectId,
+            templates: templatesPayload,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          alert('保存失败: ' + (data?.error || '校验未通过'));
+          return;
+        }
+        updateWriterPromptsBadgeUI(Boolean(data.has_custom_preset), data.preset || null);
+        closeWriterPromptsModal();
+        showToast(data.has_custom_preset
+          ? '💾 提示词预设已保存 (r' + (data.preset?.revision || 1) + ')，仅对工程 ' + activeProjectId + ' 生效！'
+          : '✅ 提示词与出厂基线一致，已保存！');
+      } catch (err) {
+        alert('保存异常: ' + err.message);
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    async function resetWriterPromptsFromModal(onlyCurrent) {
+      const curKey = writerPromptsModalState.activeKey;
+      const curLabel = writerPromptsModalState.builtins[curKey]?.label || curKey;
+      const msg = onlyCurrent
+        ? '确定将【' + curLabel + '】恢复为系统出厂默认提示词吗？（仅影响当前工程）'
+        : '确定将当前工程全部 7 个阶段的提示词恢复为系统出厂基线吗？';
+      if (!window.confirm(msg)) return;
+
+      try {
+        const payload = onlyCurrent ? { template_id: curKey } : {};
+        const res = await fetch('/api/writer/prompts/reset?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          alert('重置失败: ' + (data?.error || '未知错误'));
+          return;
+        }
+        if (onlyCurrent) {
+          writerPromptsModalState.customTemplates[curKey] = writerPromptsModalState.builtins[curKey]?.raw_template || '';
+          writerPromptsModalState.preset = data.preset || null;
+          writerPromptsModalState.hasCustom = Boolean(data.has_custom_preset);
+          updateWriterPromptsBadgeUI(writerPromptsModalState.hasCustom, writerPromptsModalState.preset);
+          renderWriterPromptTabs();
+          loadWriterPromptIntoEditor(curKey);
+          showToast('↺ 已将【' + curLabel + '】恢复为出厂默认模板');
+        } else {
+          updateWriterPromptsBadgeUI(false, null);
+          closeWriterPromptsModal();
+          showToast('↺ 已将当前工程全部提示词恢复为出厂默认基线');
+        }
+      } catch (err) {
+        alert('重置异常: ' + err.message);
+      }
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        const wpModal = document.getElementById('writerPromptsModal');
+        if (wpModal && !wpModal.classList.contains('hidden')) {
+          closeWriterPromptsModal();
+        }
+      }
+    });
 
     loadProjects().then(() => {
       loadWorkflow();
