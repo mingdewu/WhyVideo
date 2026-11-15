@@ -35,14 +35,6 @@ function loadEnv() {
 }
 loadEnv();
 
-// 动态挂载开发态 Antigravity 调试副驾驶 (发布生产环境时直接删除 dev-bridge.mjs 即可无缝自动剥离)
-let devBridge = null;
-try {
-  devBridge = await import('./dev-bridge.mjs');
-} catch (e) {
-  devBridge = null;
-}
-
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
@@ -725,319 +717,6 @@ function extractJsonFromText(text) {
   }
 }
 
-function generateLocalMockWriterResponse(systemPrompt, userPrompt, mockStage = null) {
-  // 0. 自动事实考证与学术调研
-  if (mockStage === 'W1_research' || (!mockStage && (systemPrompt.includes('事实考证') || systemPrompt.includes('学术调研') || systemPrompt.includes('考证资料')))) {
-    const titleMatch = userPrompt.match(/【视频选题】：(.*?)\n/);
-    const title = titleMatch ? titleMatch[1].trim() : '知识长视频考证';
-    return `【参考资料 1 · 地理与物理底层机制】：
-经自然地理与客观环境考证，关于“${title}”的底层约束主要来自特定的地形条件、资源禀赋与物理参数。最初在自然形态上并不具备天然充裕性，必须依赖特定工程妥协与因果机制建立平衡。
-
-【参考资料 2 · 历史文献与起源演进】：
-最早有文献明确记载始于古代志书与官修档案记录。在此后的数个世纪中，经历了由偶然实践逐步转化为约定俗成的制度化范式，形成了最初的社会文化共识。
-
-【参考资料 3 · 商业、制度与社会运作】：
-近现代工业与商业体系形成后，商业流通网络对该体系进行了大规模的规模化重塑，促成了上下游供应链与产业分工的细化，使其从区域性实践扩散为全域性共识。
-
-【参考资料 4 · 现代固化与统计数据】：
-进入现代社会后，根据官方统计年鉴与调研数据，其已演变为深层社会惯性。然而，现代维护成本上升与认知代差也带来了新的结构性矛盾，促使各界重新审视其原本的因果起点与现实代价。`;
-  }
-  // 1. Brief 生成
-  if (mockStage === 'W2_brief' || (!mockStage && systemPrompt.includes('立项 brief'))) {
-    const titleMatch = userPrompt.match(/【视频题目】：(.*?)\n/);
-    const title = titleMatch ? titleMatch[1].trim() : '中文深度科普';
-    return JSON.stringify({
-      project_id: "local_mock_001",
-      title: title,
-      core_question: `为什么${title.replace(/^为什么/, '')}？背后的底层机制与历史脉络是什么？`,
-      short_answer: `这是一个由地理环境、制度变迁、技术突破与商业体系多重因素共同交织塑造的必然演进过程，核心在于其独特的自适应闭环机制。`,
-      target_duration_minutes: 25,
-      estimated_word_count: 6500,
-      planned_chapter_count: 6,
-      scope: {
-        time_range: "跨越近现代百年演进",
-        geographic_scope: "核心区域及全球影响",
-        included_dimensions: ["地理与自然机制", "技术与工艺突破", "商业与基建推动", "文化认同塑造"],
-        excluded_dimensions: ["未经考证的野史与猎奇八卦", "情绪化排外煽情"]
-      },
-      taboos_and_exclusions: ["零编造", "严禁模仿特定博主口吻", "确保客观中立事实论证"]
-    }, null, 2);
-  }
-
-  // 1.5 大纲构建（必须在证据卡之前判断，避免被 prompt 中的“证据卡列表”误触发）
-  if (mockStage === 'W4_outline' || (!mockStage && (systemPrompt.includes('大纲') || systemPrompt.includes('Outline') || systemPrompt.includes('结构化大纲')))) {
-    const titleMatch = userPrompt.match(/【视频题目】：(.*?)\n/) || userPrompt.match(/【立项 Brief】：[\s\S]*?"title":\s*"(.*?)"/);
-    const title = titleMatch ? titleMatch[1].trim() : '大纲（本地免Key生成）';
-    return JSON.stringify({
-      project_id: "local_mock_001",
-      title: title,
-      approval_status: "pending_user_review",
-      opening_hook: {
-        opening_question: `为什么关于“${title}”，大众认知往往与历史地理底层完全相反？`,
-        immediate_short_answer: "表面上看似偶然或生活习惯，实则是受限于特定地理资源、历史制度转折与现代商业推手长期作用下的必然结果。",
-        supporting_evidence_ids: ["EV-001"]
-      },
-      chapters: [
-        {
-          chapter_number: 1,
-          chapter_title: "破除表象认知与设立反差",
-          sub_question: "大众最普遍的常识误解是什么？真实的起点在何处？",
-          mechanism_or_background_summary: "梳理最初的自然与社会环境，打破民间浪漫化想象与绝对化标签。",
-          supporting_evidence_ids: ["EV-001", "EV-002"],
-          transition_to_next: "既然天然条件并不具备优势，究竟是什么关键力量推动了它的第一次演变？"
-        },
-        {
-          chapter_number: 2,
-          chapter_title: "底层地理与物理限制的突围",
-          sub_question: "在早期技术匮乏的时代，人们如何突破物理条件的封锁？",
-          mechanism_or_background_summary: "解析早期的工程妥协、资源禀赋限制与技术萌芽。",
-          supporting_evidence_ids: ["EV-001", "EV-002"],
-          transition_to_next: "但仅有早期的技术萌芽，还不足以形成全社会的共识，真正的催化剂是什么？"
-        },
-        {
-          chapter_number: 3,
-          chapter_title: "制度化确立与历史分水岭",
-          sub_question: "关键的历史转折点究竟在何时发生？制度如何将其固化？",
-          mechanism_or_background_summary: "考证文献中明确记载的政策法规、官修制度与权力阶层的推动。",
-          supporting_evidence_ids: ["EV-002", "EV-003"],
-          transition_to_next: "制度虽然奠定了基石，但如果没有商业网络的铺开，它依然只属于少数人。商业网络是如何介入的？"
-        },
-        {
-          chapter_number: 4,
-          chapter_title: "商业网络与产业供应链的爆发",
-          sub_question: "商业流通与大众市场如何彻底改变了这一事物的形态？",
-          mechanism_or_background_summary: "分析近现代商业化、规模化生产以及降低边际成本的供应链重塑。",
-          supporting_evidence_ids: ["EV-003", "EV-004"],
-          transition_to_next: "当它成为全社会的通用标准后，人们是如何将其升华为一种独特的认同与符号的？"
-        },
-        {
-          chapter_number: 5,
-          chapter_title: "文化符号化与现代生活惯性",
-          sub_question: "它是如何从具体的实用工具，演化为不可动摇的文化图腾与生活习惯的？",
-          mechanism_or_background_summary: "揭示传播媒介、美学构建与集体记忆对文化符号的再生产。",
-          supporting_evidence_ids: ["EV-004", "EV-005"],
-          transition_to_next: "但这套看似完美的自适应闭环，在当代快速变迁中，是否也付出了意想不到的代价？"
-        },
-        {
-          chapter_number: 6,
-          chapter_title: "现代固化后的现实代价与反思",
-          sub_question: "进入当代社会后，它面临着哪些维护成本上升与结构性矛盾？",
-          mechanism_or_background_summary: "结合最新的统计数据与现代社会学调研，剖析维护成本、老龄化或技术替代带来的新挑战。",
-          supporting_evidence_ids: ["EV-005"],
-          transition_to_next: "纵观这百余年的因果链条，这一切留给我们的终极答案是什么？"
-        }
-      ],
-      single_ending_plan: {
-        revisit_core_question: `回扣全片核心：为什么${title}？`,
-        final_takeaway: "它从来不是单一偶然的历史巧合，而是在地理环境、制度变迁、商业网络与现代文化共塑下生长的严密生态。"
-      }
-    }, null, 2);
-  }
-
-  // 2. 证据卡提取 (只在非大纲模式下匹配)
-  if (mockStage === 'W3_evidence' || (!mockStage && (systemPrompt.includes('证据卡') || systemPrompt.includes('Evidence Cards')) && !systemPrompt.includes('大纲'))) {
-    return JSON.stringify([
-      {
-        evidence_id: "EV-001",
-        claim_type: "verified_fact",
-        evidence_summary: "原始文献明确记录的核心历史基石与关键地理环境参数",
-        source_title: "权威历史典籍与国家地理档案",
-        reliability: "high"
-      },
-      {
-        evidence_id: "EV-002",
-        claim_type: "verified_fact",
-        evidence_summary: "关键技术与基础设施从萌芽到普及的制度化演变脉络",
-        source_title: "公共基础设施与产业发展年鉴",
-        reliability: "high"
-      },
-      {
-        evidence_id: "EV-003",
-        claim_type: "verified_fact",
-        evidence_summary: "经济周期与商业网络对其价值认同与传播的关键放大作用",
-        source_title: "经济史与商业社会学研究报告",
-        reliability: "high"
-      },
-      {
-        evidence_id: "EV-004",
-        claim_type: "author_interpretation",
-        evidence_summary: "从表面日常现象到深层制度惯性的认知转变机制",
-        source_title: "现代社会文化与符号学考证",
-        reliability: "medium"
-      },
-      {
-        evidence_id: "EV-005",
-        claim_type: "verified_fact",
-        evidence_summary: "现代社会固化后面临的维护成本、结构性矛盾与新挑战",
-        source_title: "当代统计局官方数据与专项调研文献",
-        reliability: "high"
-      }
-    ], null, 2);
-  }
-
-  // 3. 兜底大纲构建
-  if (systemPrompt.includes('大纲') || systemPrompt.includes('Outline')) {
-    return JSON.stringify({
-      project_id: "local_mock_001",
-      title: "大纲（本地免Key生成）",
-      approval_status: "pending_user_review",
-      opening_hook: {
-        opening_question: "为什么我们习以为常的常识，在历史底层其实完全相反？",
-        immediate_short_answer: "表面看是自然现象或偶然事件，实则是多重制度与技术协同塑造的长期产物。",
-        supporting_evidence_ids: ["EV-001"]
-      },
-      chapters: [
-        {
-          chapter_number: 1,
-          chapter_title: "破除表象认知与设立反差",
-          sub_question: "大众最普遍的误解是什么？真实的起点在何处？",
-          mechanism_or_background_summary: "梳理最初的自然与社会环境，打破民间浪漫化想象。",
-          supporting_evidence_ids: ["EV-001", "EV-002"],
-          transition_to_next: "既然天然条件并不优越，那究竟是什么力量推动了它的第一次质变？"
-        },
-        {
-          chapter_number: 2,
-          chapter_title: "底层地理与物理限制的突围",
-          sub_question: "在早期技术匮乏的时代，人们如何突破物理条件的封锁？",
-          mechanism_or_background_summary: "解析早期的工程妥协与技术萌芽。",
-          supporting_evidence_ids: ["EV-001", "EV-002"],
-          transition_to_next: "但仅有技术的萌芽，还不足以形成全社会的共识，真正的催化剂是什么？"
-        },
-        {
-          chapter_number: 3,
-          chapter_title: "制度转折与权力/基建的深度介入",
-          sub_question: "关键的制度推手如何将其上升为体系化工程？",
-          mechanism_or_background_summary: "制度规范的确立与行政资源的倾斜。",
-          supporting_evidence_ids: ["EV-002", "EV-003"],
-          transition_to_next: "当体系建立完成后，商业与大众文化又是如何推波助澜的？"
-        },
-        {
-          chapter_number: 4,
-          chapter_title: "商业化网络与符号价值的全面爆发",
-          sub_question: "它如何跨越地域，从局部经验演变为全国性乃至世界级符号？",
-          mechanism_or_background_summary: "大众传播媒介、商道贸易与资本网络的助推。",
-          supporting_evidence_ids: ["EV-003", "EV-004"],
-          transition_to_next: "然而在繁荣的顶峰，这套庞大的体系开始付出怎样的代价？"
-        },
-        {
-          chapter_number: 5,
-          chapter_title: "现代固化的代价与结构性挑战",
-          sub_question: "进入当代后，维持这套神话与现实运转面临何种高昂成本？",
-          mechanism_or_background_summary: "解析生态压力、过度开发与代际认知断层。",
-          supporting_evidence_ids: ["EV-004", "EV-005"],
-          transition_to_next: "走过这上百年的循环，它最终留给人类文明最深刻的启示是什么？"
-        },
-        {
-          chapter_number: 6,
-          chapter_title: "理性审视与终局闭环",
-          sub_question: "我们今天该如何重新定义它的本质？",
-          mechanism_or_background_summary: "剥离神话与符号外衣，回归人与自然、文明演进的理性洞见。",
-          supporting_evidence_ids: ["EV-001", "EV-005"],
-          transition_to_next: ""
-        }
-      ],
-      single_ending_plan: {
-        revisit_core_question: "回到开篇的核心设问：它之所以历经岁月屹立不倒，绝非偶然神力，而是人类文明在特定时空下的理性博弈与秩序构建。",
-        final_takeaway: "真正的文化符号从来不是凝固的过去，而是一面持续映照现实选择的镜子。"
-      }
-    }, null, 2);
-  }
-
-  // 4. 单章撰写
-  if (mockStage === 'W5_chapter' || (!mockStage && (systemPrompt.includes('单章') || systemPrompt.includes('四段式')))) {
-    return JSON.stringify({
-      chapter_number: 1,
-      chapter_title: "破除表象认知与设立反差",
-      sub_question: "大众最普遍的误解是什么？真实的起点在何处？",
-      sections: {
-        "1_question_or_contradiction": "我们通常认为这只是一个理所当然的自然事实，但如果你翻开最初的历史档案，会发现一个令人吃惊的反差：在那个时代，所有人都避之不及。",
-        "2_mechanism_or_background": "这种认知的颠覆，根本原因在于物理条件的严酷制约与早期生产力的落后。当资源无法支撑盲目扩张时，人们不得不寻找替代解法。",
-        "3_sourced_concrete_examples": "根据 EV-001 的确凿文献记录，当时这里的年通行量极其有限，早期的探险者留下的并非赞叹，而是对恶劣生存环境的详细生存警告。",
-        "4_mini_summary_and_transition": "表面的浪漫想象就此被事实击碎。但一个更有趣的谜题随之浮出水面：既然先天条件如此恶劣，那究竟是谁、又是在哪一年，亲手扭转了这套叙事？"
-      },
-      full_chapter_narration: "我们通常认为这只是一个理所当然的自然事实，但如果你翻开最初的历史档案，会发现一个令人吃惊的反差：在那个时代，所有人都避之不及。这种认知的颠覆，根本原因在于物理条件的严酷制约与早期生产力的落后。当资源无法支撑盲目扩张时，人们不得不寻找替代解法。根据 EV-001 的确凿文献记录，当时这里的年通行量极其有限，早期的探险者留下的并非赞叹，而是对恶劣生存环境的详细生存警告。表面的浪漫想象就此被事实击碎。但一个更有趣的谜题随之浮出水面：既然先天条件如此恶劣，那究竟是谁、又是在哪一年，亲手扭转了这套叙事？",
-      used_evidence_ids: ["EV-001"],
-      word_count: 320
-    }, null, 2);
-  }
-
-  // 5. 全文统稿
-  if (mockStage === 'W6_finalize' || (!mockStage && (systemPrompt.includes('全文统稿') || systemPrompt.includes('final-script')))) {
-    return JSON.stringify({
-      project_id: "local_mock_001",
-      title: "定稿文案（本地免Key生成）",
-      total_word_count: 3600,
-      estimated_duration_minutes: 15.0,
-      revision_count: 1,
-      editorial_changes_log: {
-        removed_duplicate_arguments: ["移除了第3章与第4章对商业利益的重复定性描述"],
-        removed_duplicate_examples: ["统一将通行数据案例集中保留在第1章事实破局处"],
-        unified_terms_and_names: ["统一历史地理名称与度量衡口语化读法"],
-        removed_false_endings_count: 3
-      },
-      script_segments: {
-        opening: "在开始今天的故事之前，不妨先想一个问题：为什么我们今天对这个事物的全部认知，在一百年前其实截然相反？",
-        chapters: [
-          {
-            chapter_number: 1,
-            chapter_title: "破除表象认知与设立反差",
-            narration_text: "我们通常认为这只是一个理所当然的自然事实，但如果你翻开最初的历史档案，会发现一个令人吃惊的反差。"
-          }
-        ],
-        ending: "回到最初的起点：真正的文化符号从来不是凝固的过去，而是一面持续映照现实选择的镜子。"
-      }
-    }, null, 2);
-  }
-
-  // 6. 去 AI 味润色 / De-AI Humanizer（本地免 Key 规则清洗，严禁回显任何 Prompt 标签）
-  if (mockStage === 'W7_humanize' || (!mockStage && (systemPrompt.includes('去 AI 味') || systemPrompt.includes('去AI味') || systemPrompt.includes('De-AI Humanizer') || systemPrompt.includes('口语化')))) {
-    let rawBody = userPrompt;
-    const tagMatch = userPrompt.match(/<<<SCRIPT_CONTENT>>>\s*([\s\S]*?)\s*<<<END_SCRIPT_CONTENT>>>/);
-    if (tagMatch) {
-      rawBody = tagMatch[1].trim();
-    } else {
-      rawBody = userPrompt
-        .replace(/^[\s\S]*?【待修复的第\s*\d+\/\d+\s*部分文案】：\s*/m, '')
-        .replace(/^[\s\S]*?【待修复的完整文案全文】：\s*/m, '')
-        .trim();
-    }
-    // 清除历史可能残留的 Prompt 污染前缀
-    rawBody = rawBody
-      .replace(/(?:^|\n)(?:【第\s*\d+\s*章：风格定位】\n?)?:?【(?:幽默风趣主播型|睿智悬疑反转型|亲切老友大白话型)[^】]*】：[^\n]*\n*/g, '')
-      .replace(/(?:^|\n)【待修复的第\s*\d+\/\d+\s*部分文案】：\s*\n*/g, '')
-      .trim();
-
-    const isSuspense = userPrompt.includes('睿智悬疑');
-    const isColloquial = userPrompt.includes('亲切老友');
-
-    const cleaned = rawBody
-      .replace(/总而言之[，,、]?/g, isSuspense ? '说穿了，' : '说白了，')
-      .replace(/不可否认的是[，,、]?/g, isSuspense ? '摆在眼前的事实是，' : '确实，')
-      .replace(/值得注意的是[，,、]?/g, isSuspense ? '可真正诡异的地方在于，' : '有意思的是，')
-      .replace(/在历史的长河中[，,、]?/g, '翻开旧账本，')
-      .replace(/然而[，,]/g, isColloquial ? '不过说真的，' : '可偏偏，')
-      .replace(/由此可见[，,、]?/g, '这么一算，')
-      .replace(/不仅如此[，,、]?/g, '更绝的是，')
-      .replace(/显而易见[，,、]?/g, '明摆着，');
-
-    return JSON.stringify({
-      humanized_text: cleaned,
-      cleaned_script: cleaned,
-      stats: {
-        original_chars: rawBody.length,
-        humanized_chars: cleaned.length,
-        compression_rate: rawBody.length > 0 ? `${Math.max(0, Math.round(((rawBody.length - cleaned.length) / rawBody.length) * 100))}%` : '0%',
-        removed_ai_phrases: ['总而言之', '不可否认的是', '值得注意的是', '在历史的长河中', '由此可见'],
-        split_long_sentences_count: Math.max(5, Math.round(cleaned.length / 260)),
-        humorous_analogies_count: 0
-      },
-      audit_report: "⚠️ 当前工程使用【本地免 Key 规则引擎】（仅清除 AI 八股词并做口语替换，不改变字数规模）；如需 AI 深度重写，请在「⚙️ AI 写作模型与网关配置」填入有效 API Key。"
-    }, null, 2);
-  }
-
-  return "{}";
-}
-
 async function fetchWikipediaExtract(query) {
   try {
     const cleanQuery = query.replace(/^(为什么|为何|为何要|怎么|日本|中国|美国|如何)/g, '').replace(/[？?，,。！!].*$/, '').trim() || query;
@@ -1063,19 +742,14 @@ async function researchFactMaterials(title, { model, apiKey, baseUrl, projectDir
     wiki_context: wikiContext || '',
   });
   const user = `【视频选题】：${title}\n${wikiContext ? wikiContext : ''}\n请展开深入事实调查并整理输出详实考证资料：`;
-  const text = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500, mockStage: 'W1_research' });
+  const text = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500 });
   return text && text.trim() ? text.trim() : `【自动事实考证资料】：关于“${title}”的地理底层机制、历史起源演进与现代社会运转档案。`;
 }
 
-async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, baseUrl, maxTokens = 3500, mockStage = null } = {}) {
+async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, baseUrl, maxTokens = 3500 } = {}) {
   let curApiKey = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
   let curBase = (baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
   let curModel = (model || 'deepseek/deepseek-chat').trim();
-
-  // 若为本地免 Key 调试模式或本地 Mock 模式
-  if (curApiKey === 'antigravity-local-dev' || curApiKey === 'antigravity-dev' || curModel.includes('antigravity') || (!curApiKey && (curBase.includes('localhost') || curBase.includes('127.0.0.1') || curBase.includes('免Key') || curBase.includes('51000')))) {
-    return generateLocalMockWriterResponse(systemPrompt, userPrompt, mockStage);
-  }
 
   // 若无显式传入 key，尝试从工程目录中寻找任意已配置的有效 key
   if (!curApiKey) {
@@ -1100,8 +774,8 @@ async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, bas
   }
 
   if (!curApiKey) {
-    // 降级使用本地生成
-    return generateLocalMockWriterResponse(systemPrompt, userPrompt, mockStage);
+    globalThis.__lastWriterLlmError = '未配置 API Key，请先在「⚙️ AI 模型与网关配置」中填入有效的 API Key';
+    return null;
   }
 
   // 针对 Google 官方端点的模型自适应转换
@@ -1390,7 +1064,7 @@ async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, m
 【用户口语指令】："${p}"
 请以视听导演的角度，首先用人话回答用户你将如何剪辑与调节（写入 ai_speech_reply），然后输出广义调节参数：`;
 
-  if (apiKey && apiKey !== 'antigravity-local-dev' && !baseUrl.includes('localhost:4000/api/dev')) {
+  if (apiKey) {
     try {
       let sendModel = model;
       if (baseUrl.includes('googleapis.com')) {
@@ -1530,7 +1204,7 @@ function renderRemotionStill(projectId, sceneId) {
 
 async function callOpenRouterDirector(cfg, scene, customPrompt, templateStyle) {
   const apiKey = (cfg.apiKey || '').trim();
-  if (!apiKey || apiKey === 'antigravity-local-dev') {
+  if (!apiKey) {
     const kws = scene.content_keywords || [];
     const narration = scene.narration_text || '';
     return {
@@ -2716,6 +2390,98 @@ function saveWriterProjectData(projectId, part, payload) {
           ...(ending ? { ending } : {}),
         };
       }
+      if (!parsedSegments && existing?.script_segments) {
+        const refSegs = [];
+        if (existing.script_segments.opening) {
+          refSegs.push({ type: 'opening', text: existing.script_segments.opening });
+        }
+        if (Array.isArray(existing.script_segments.chapters)) {
+          for (const ch of existing.script_segments.chapters) {
+            refSegs.push({
+              type: 'chapter',
+              chapter_number: ch.chapter_number,
+              chapter_title: ch.chapter_title,
+              text: ch.narration_text || '',
+            });
+          }
+        }
+        if (existing.script_segments.ending) {
+          refSegs.push({ type: 'ending', text: existing.script_segments.ending });
+        }
+
+        if (refSegs.length > 1 || (refSegs.length === 1 && refSegs[0].chapter_title && refSegs[0].chapter_title !== '完整正文')) {
+          if (refSegs.length === 1) {
+            parsedSegments = {
+              chapters: [{ chapter_number: refSegs[0].chapter_number || 1, chapter_title: refSegs[0].chapter_title, narration_text: rawContent }],
+            };
+          } else {
+            let units = rawContent.split(/\n{2,}/).map((u) => u.trim()).filter(Boolean);
+            let joiner = '\n\n';
+            if (units.length < refSegs.length) {
+              units = rawContent.split(/(?<=[。！？!?])\s*/).map((u) => u.trim()).filter(Boolean);
+              joiner = '';
+            }
+            if (units.length >= refSegs.length) {
+              const refLens = refSegs.map((s) => Math.max(1, (s.text || '').replace(/\s+/g, '').length));
+              const refTotal = refLens.reduce((a, b) => a + b, 0);
+              const refCumRatios = [];
+              let rAcc = 0;
+              for (const rl of refLens) {
+                rAcc += rl;
+                refCumRatios.push(rAcc / refTotal);
+              }
+
+              const unitCumLens = [];
+              let uAcc = 0;
+              for (const u of units) {
+                uAcc += Math.max(1, u.replace(/\s+/g, '').length);
+                unitCumLens.push(uAcc);
+              }
+              const unitTotal = unitCumLens[unitCumLens.length - 1] || 1;
+
+              const assignedTexts = [];
+              let startIdx = 0;
+              for (let sIdx = 0; sIdx < refSegs.length - 1; sIdx++) {
+                const targetLen = refCumRatios[sIdx] * unitTotal;
+                const maxEndIdx = units.length - (refSegs.length - sIdx);
+                let bestIdx = startIdx;
+                let bestDiff = Infinity;
+                for (let uIdx = startIdx; uIdx <= maxEndIdx; uIdx++) {
+                  const diff = Math.abs(unitCumLens[uIdx] - targetLen);
+                  if (diff < bestDiff) {
+                    bestDiff = diff;
+                    bestIdx = uIdx;
+                  }
+                }
+                assignedTexts.push(units.slice(startIdx, bestIdx + 1).join(joiner));
+                startIdx = bestIdx + 1;
+              }
+              assignedTexts.push(units.slice(startIdx).join(joiner));
+
+              let newOpening = '';
+              let newEnding = '';
+              const newChapters = [];
+              refSegs.forEach((seg, idx) => {
+                const txt = (assignedTexts[idx] || '').trim();
+                if (seg.type === 'opening') newOpening = txt;
+                else if (seg.type === 'ending') newEnding = txt;
+                else {
+                  newChapters.push({
+                    chapter_number: seg.chapter_number || newChapters.length + 1,
+                    chapter_title: seg.chapter_title || `第${newChapters.length + 1}章`,
+                    narration_text: txt,
+                  });
+                }
+              });
+              parsedSegments = {
+                ...(newOpening ? { opening: newOpening } : {}),
+                chapters: newChapters,
+                ...(newEnding ? { ending: newEnding } : {}),
+              };
+            }
+          }
+        }
+      }
       const wordCount = rawContent.replace(/【[^】]+】|={10,}|\s+/g, '').length;
       toSave = {
         ...existing,
@@ -3139,7 +2905,7 @@ const server = http.createServer(async (req, res) => {
         materials,
       });
       const user = `【视频题目】：${title}\n【预期时长】：${durationMinutes} 分钟\n【参考考证资料】：\n${materials}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500, mockStage: 'W2_brief' });
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500 });
       const parsed = extractJsonFromText(aiText);
       if (parsed) {
         parsed.project_id = queryProject;
@@ -3148,7 +2914,7 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ ok: true, brief: parsed, researchedMaterials, rawAi: aiText }));
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的 Brief JSON', rawAi: aiText }));
+      return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '大模型未返回符合规范的 Brief JSON', rawAi: aiText }));
     }
 
     // 0.9 AI 从原始资料或现有文案提取原子化证据卡 (半自动智能考证：缺资料自动联网考证补充)
@@ -3177,7 +2943,7 @@ const server = http.createServer(async (req, res) => {
         materials,
       });
       const user = `【视频题目】：${title}\n【考证资料内容】：\n${materials}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 3500, mockStage: 'W3_evidence' });
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 3500 });
       let list = extractJsonFromText(aiText);
       if (Array.isArray(list) && list.length > 0) {
         saveWriterProjectData(queryProject, 'evidenceCards', list);
@@ -3185,7 +2951,7 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ ok: true, evidenceCards: list, researchedMaterials }));
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: false, error: '大模型未返回证据卡 JSON 数组', rawAi: aiText }));
+      return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '大模型未返回证据卡 JSON 数组', rawAi: aiText }));
     }
 
     // 0.10 AI 基于证据卡构建 5~7 章大纲 (半自动智能协同：自动兜底证据卡与大纲结构)
@@ -3205,7 +2971,7 @@ const server = http.createServer(async (req, res) => {
           const materials = await researchFactMaterials(title, { model, apiKey, baseUrl, projectDir: paths.projectDir });
           const sysEv = renderWriterPrompt(paths.projectDir, 'W3_evidence', { title, materials });
           const userEv = '【视频题目】：' + title + '\n【考证资料】：\n' + materials;
-          const aiEv = await callOpenRouterText(sysEv, userEv, { model, apiKey, baseUrl, maxTokens: 2500, mockStage: 'W3_evidence' });
+          const aiEv = await callOpenRouterText(sysEv, userEv, { model, apiKey, baseUrl, maxTokens: 2500 });
           evidenceCards = extractJsonFromText(aiEv) || [];
           if (evidenceCards.length > 0) {
             saveWriterProjectData(queryProject, 'evidenceCards', evidenceCards);
@@ -3221,7 +2987,7 @@ const server = http.createServer(async (req, res) => {
         evidence_cards_json: evidenceCardsJson,
       });
       const user = `【立项 Brief】：\n${briefJson}\n\n【可用证据卡列表】：\n${evidenceCardsJson}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000, mockStage: 'W4_outline' });
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000 });
       let outline = extractJsonFromText(aiText);
       if (outline && !outline.chapters && outline.outline && Array.isArray(outline.outline.chapters)) {
         outline = outline.outline;
@@ -3237,7 +3003,7 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ ok: true, outline, autoGeneratedEvidence }));
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的 Outline JSON', rawAi: aiText }));
+      return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '大模型未返回符合规范的 Outline JSON', rawAi: aiText }));
     }
 
     // 0.11 AI 单章受控撰写 (四段式结构)
@@ -3261,7 +3027,7 @@ const server = http.createServer(async (req, res) => {
         evidence_cards_json: evidenceCardsJson,
       });
       const user = `【本章大纲规划】：\n${targetChapterJson}\n\n【关联证据卡库】：\n${evidenceCardsJson}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000, mockStage: 'W5_chapter' });
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000 });
       const chData = extractJsonFromText(aiText);
       if (chData && chData.sections) {
         chData.chapter_number = Number(chapterNumber);
@@ -3274,7 +3040,7 @@ const server = http.createServer(async (req, res) => {
         return res.end(JSON.stringify({ ok: true, chapter: chData }));
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: false, error: '大模型未返回符合规范的章节 JSON', rawAi: aiText }));
+      return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '大模型未返回符合规范的章节 JSON', rawAi: aiText }));
     }
 
     // 0.12 AI 全文统稿去伪结尾与定稿
@@ -3288,7 +3054,7 @@ const server = http.createServer(async (req, res) => {
         chapters_json: chaptersJson,
       });
       const user = `【大纲结构】：\n${outlineJson}\n\n【全部已撰写章节】：\n${chaptersJson}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 8192, mockStage: 'W6_finalize' });
+      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 8192 });
       let finalScript = extractJsonFromText(aiText);
       if (!finalScript || !finalScript.script_segments) {
         // 长篇 JSON 被截断时自动平滑兜底拼合各章节，确保统稿永不卡死
@@ -3361,12 +3127,14 @@ const server = http.createServer(async (req, res) => {
         styleGuide = '【亲切老友大白话型】：彻底拔除任何书面公文八股与大词，语言极度朴实自然、真诚真切，如同身边一个见多识广的老友在向你娓娓道来，听感如沐春风。';
       }
 
-      // 按章节分隔线与【章节头】拆分，单块独立处理或小块合并（<= 2200字），彻底防止吞章或截断
+      // 按章节分隔线、段落拆分，单块独立处理或小块合并（<= 2200字），彻底防止吞章或截断
       const sepBlocks = content.split(/\n+={10,}\n+/).map((b) => b.trim()).filter(Boolean);
       const rawBlocks = [];
       for (const sb of sepBlocks) {
         if ((sb.match(/^【[^】\n]+】/gm) || []).length > 1) {
           sb.split(/\n+(?=【[^】\n]+】)/).map((s) => s.trim()).filter(Boolean).forEach((s) => rawBlocks.push(s));
+        } else if (sb.length > 2200) {
+          sb.split(/\n{2,}/).map((s) => s.trim()).filter(Boolean).forEach((s) => rawBlocks.push(s));
         } else {
           rawBlocks.push(sb);
         }
@@ -3376,7 +3144,7 @@ const server = http.createServer(async (req, res) => {
       let curLen = 0;
       for (const blk of rawBlocks) {
         if (curLen > 0 && (curLen + blk.length > 2200 || blk.length > 1200)) {
-          chunks.push(curChunk.join('\n\n========================================\n\n'));
+          chunks.push(curChunk.join('\n\n'));
           curChunk = [blk];
           curLen = blk.length;
         } else {
@@ -3384,7 +3152,7 @@ const server = http.createServer(async (req, res) => {
           curLen += blk.length;
         }
       }
-      if (curChunk.length > 0) chunks.push(curChunk.join('\n\n========================================\n\n'));
+      if (curChunk.length > 0) chunks.push(curChunk.join('\n\n'));
       if (chunks.length === 0) chunks.push(content.trim());
 
       const sanitizeLeakedPrompt = (txt) => {
@@ -3450,7 +3218,6 @@ const server = http.createServer(async (req, res) => {
             apiKey: projectApiKey,
             baseUrl: projectBaseUrl,
             maxTokens: 6000,
-            mockStage: 'W7_humanize',
           });
           const parsed = parseChunkOutput(aiText);
           if (!parsed.text || parsed.text.length < 10) {
@@ -3473,7 +3240,7 @@ const server = http.createServer(async (req, res) => {
           if (a?.audit_report) lastReport = a.audit_report;
         }
 
-        const humanizedText = outParts.join('\n\n========================================\n\n');
+        const humanizedText = outParts.join('\n\n');
         const stats = {
           original_chars: content.length,
           humanized_chars: humanizedText.length,
@@ -3685,13 +3452,11 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const { provider = 'openrouter', apiKey, baseUrl, model } = body;
 
-      // 本地免 Key 开发模式 / Antigravity 调试模式
-      if (!apiKey || apiKey === 'antigravity-local-dev' || provider === 'antigravity' || (baseUrl && (baseUrl.includes('localhost') || baseUrl.includes('127.0.0.1')))) {
+      if (!apiKey || !apiKey.trim()) {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({
-          ok: true,
-          latencyMs: 1,
-          message: '✅ Antigravity 本地协同开发引擎已就绪！开发调试全程零费用，无需外部 API Key！'
+          ok: false,
+          error: '请先填入有效的 API Key'
         }));
       }
 
@@ -3764,19 +3529,6 @@ const server = http.createServer(async (req, res) => {
             ok: true,
             latencyMs,
             message: `Google Gemini 官方 API 连接成功！（密钥有效，耗时 ${latencyMs}ms）`,
-          }));
-        } else if (baseUrl && (baseUrl.includes('127.0.0.1:51000') || baseUrl.includes('localhost:51000'))) {
-          // 本地 Antigravity 网关测试
-          const cleanBase = baseUrl.trim().replace(/\/+$/, '');
-          const testRes = await fetch(`${cleanBase.replace(/\/v1beta\/?$/, '')}/health`, {
-            headers: { 'Authorization': `Bearer ${apiKey.trim()}` }
-          });
-          const latencyMs = Date.now() - startTime;
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          return res.end(JSON.stringify({
-            ok: testRes.ok,
-            latencyMs,
-            message: testRes.ok ? `本地 Antigravity 模型网关连接成功！（耗时 ${latencyMs}ms）` : '本地网关返回异常',
           }));
         } else if (provider === 'remotion') {
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -3975,76 +3727,6 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ ok: true, config: updated, message: '模型网关配置已保存！' }));
     }
 
-    // 4.25 开发态 Antigravity 调试副驾驶端点 (生产发布若移除 dev-bridge.mjs 则安全忽略)
-    if (req.method === 'GET' && pathname === '/api/dev/status') {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({
-        ok: true,
-        enabled: Boolean(devBridge && devBridge.IS_DEV_MODE),
-        mode: 'antigravity-dev-copilot',
-        message: devBridge ? '开发态 Antigravity 调试助手已就绪' : '生产模式（开发态接口已剥离）'
-      }));
-    }
-
-    if (req.method === 'GET' && pathname === '/api/dev/audit') {
-      if (!devBridge) {
-        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, error: '开发态组件已剥离' }));
-      }
-      const curPaths = getPaths(queryProject);
-      if (!fs.existsSync(curPaths.manifestPath)) {
-        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, error: '未找到分镜清单' }));
-      }
-      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
-      const report = devBridge.auditScenes(manifest);
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: true, report }));
-    }
-
-    if (req.method === 'POST' && pathname === '/api/dev/chat') {
-      if (!devBridge) {
-        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, error: '开发态组件已剥离' }));
-      }
-      const body = await readBody(req);
-      const { projectId = queryProject, prompt } = body;
-      const curPaths = getPaths(projectId);
-      let promptCfg = {};
-      if (fs.existsSync(curPaths.promptConfigPath)) {
-        try { promptCfg = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8')); } catch (e) {}
-      }
-      try {
-        const result = await devBridge.executeDevChat({
-          projectId,
-          prompt,
-          visualConfig: promptCfg
-        });
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: true, ...result }));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, error: err.message }));
-      }
-    }
-
-    if (req.method === 'POST' && pathname === '/api/dev/apply-patch') {
-      if (!devBridge) {
-        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, error: '开发态组件已剥离' }));
-      }
-      const body = await readBody(req);
-      const { projectId = queryProject, sceneId, patch } = body;
-      try {
-        const result = devBridge.applyScenePatch(projectId, sceneId, patch);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: true, ...result }));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, error: err.message }));
-      }
-    }
-
     // 4.5 智能分镜与指示词提炼 API (调用 OpenRouter 统一网关指定的模型)
     if (req.method === 'POST' && pathname === '/api/extract-prompt') {
       const body = await readBody(req);
@@ -4115,29 +3797,6 @@ const server = http.createServer(async (req, res) => {
           videoPrompt += '，电影质感，超清4K，细腻写实，真实环境光影';
         }
 
-        // 本地免 Key 模式：调用 Remotion 离线动效引擎就绪
-        if (!normalizedCfg.apiKey || normalizedCfg.apiKey === 'antigravity-local-dev' || (normalizedCfg.baseUrl && normalizedCfg.baseUrl.includes('localhost'))) {
-          s.visual_type = 'photo_motion';
-          s.target_visual_mode = 'video';
-          s.status = 'READY_APPROVED';
-          s.review_status = 'APPROVED';
-          s.ai_visual_prompt = videoPrompt;
-          syncTableToManifest(targetManifest);
-          fs.writeFileSync(curPaths.manifestPath, JSON.stringify(targetManifest, null, 2), 'utf8');
-          recompileProject(targetProject);
-          const stillRelPath = renderRemotionCardStill(curPaths, s.scene_id, targetProject);
-          if (stillRelPath) {
-            s.preview_image_url = `/public/${targetProject}/${stillRelPath}?t=${Date.now()}`;
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          return res.end(JSON.stringify({
-            ok: true,
-            manifest: targetManifest,
-            previewUrl: s.preview_image_url,
-            message: `🎬 镜头 ${s.scene_id} 运镜画面已由 Remotion 本地动效引擎就绪！若需生成云端实体 MP4 视频，可在右上角填入对应视频模型 API Key。`
-          }));
-        }
-
         try {
           const videoUrl = await callGatewayVideoGeneration(
             {
@@ -4201,30 +3860,6 @@ const server = http.createServer(async (req, res) => {
 
         const kws = Array.isArray(s.content_keywords) && s.content_keywords.length > 0 ? s.content_keywords : [];
         const imgPrompt = (customPrompt || `${s.narration_text}，${kws.join('，')}`) + '，超清写实摄影，8k电影画质，真实光影';
-
-        // 本地免 Key 模式：无需 API Key，提示在 Antigravity 对话框中调用内置生图引擎
-        if (!normalizedCfg.apiKey || normalizedCfg.apiKey === 'antigravity-local-dev' || (normalizedCfg.baseUrl && normalizedCfg.baseUrl.includes('localhost'))) {
-          s.visual_type = 'photo_motion';
-          s.scene_type = 'photo_motion';
-          s.target_visual_mode = 'image';
-          s.status = 'READY_APPROVED';
-          s.review_status = 'APPROVED';
-          s.ai_visual_prompt = imgPrompt;
-          syncTableToManifest(targetManifest);
-          fs.writeFileSync(curPaths.manifestPath, JSON.stringify(targetManifest, null, 2), 'utf8');
-          recompileProject(targetProject);
-          const stillRelPath = renderRemotionCardStill(curPaths, s.scene_id, targetProject);
-          if (stillRelPath) {
-            s.preview_image_url = `/public/${targetProject}/${stillRelPath}?t=${Date.now()}`;
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          return res.end(JSON.stringify({
-            ok: true,
-            manifest: targetManifest,
-            previewUrl: s.preview_image_url,
-            message: `💡 镜头 ${s.scene_id} 已设定实景摄影构图。您可直接在 Antigravity 聊天窗口对我说：『请为镜头 ${s.scene_id} 生成 16:9 实景图』，我将调用内置生图引擎生成后自动存入工程，全程零费用！`
-          }));
-        }
 
         try {
           const remoteImgUrl = await callGatewayImageGeneration(
@@ -4306,8 +3941,8 @@ const server = http.createServer(async (req, res) => {
         const layoutStyle = templateStylePrompts[chosenTemplate] || templateStylePrompts.data_card;
         const cardImgPrompt = `${activePrompt}，${layoutStyle}，16:9 商业演讲信息图PPT动态卡片，高端海报质感，排版清晰美观，8k超高分辨率`;
 
-        // 本地免 Key 模式：调用 Remotion 原生离线卡片引擎进行即时渲染
-        if (!normalizedCfg.apiKey || normalizedCfg.apiKey === 'antigravity-local-dev' || (normalizedCfg.baseUrl && normalizedCfg.baseUrl.includes('localhost'))) {
+        // 未配置外部生图 API Key 时：调用 Remotion 原生离线卡片引擎进行即时渲染
+        if (!normalizedCfg.apiKey) {
           s.source_mode = 'ai_ppt_slide';
           s.visual_type = chosenTemplate;
           s.scene_type = chosenTemplate;
@@ -4319,7 +3954,7 @@ const server = http.createServer(async (req, res) => {
             subtitle: s.narration_text.slice(0, 24),
             custom_prompt: activePrompt,
             template_style: chosenTemplate,
-            generated_model: 'Antigravity Local Engine',
+            generated_model: 'Remotion Native Card',
             generated_at: new Date().toISOString()
           };
           syncTableToManifest(targetManifest);
@@ -5676,7 +5311,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                 </div>
                 <div class="flex items-center gap-2 flex-wrap">
                   <button type="button" onclick="acceptHumanizedScript()" id="btnAcceptHumanize" class="px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black shadow transition cursor-pointer">
-                    ✅ 确认采纳并保存
+                    ✅ 确认替换定稿文案
                   </button>
                   <button type="button" onclick="revertHumanizedScript()" id="btnRevertScript" class="px-2.5 py-1 rounded-lg bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-[11px] font-bold text-rose-300 transition cursor-pointer hidden">
                     ↩️ 放弃并还原原稿
@@ -5761,12 +5396,6 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span>🪐 一键载入全家桶预设：</span>
             </div>
             <div class="flex flex-wrap items-center gap-1">
-              <button type="button" onclick="applyModelPreset('antigravity-local')" class="px-2 py-0.5 rounded-lg text-[10px] font-black bg-cyan-600/40 hover:bg-cyan-600/70 text-cyan-200 border border-cyan-400/60 transition shadow-sm">
-                <span>🧪 本地 Antigravity 网关</span>
-              </button>
-              <button type="button" onclick="applyModelPreset('antigravity-dev')" class="px-2 py-0.5 rounded-lg text-[10px] font-black bg-emerald-600/40 hover:bg-emerald-600/70 text-emerald-200 border border-emerald-400/60 transition shadow-sm">
-                <span>🆓 本地免 Key 极速开发</span>
-              </button>
               <button type="button" onclick="applyModelPreset('gemini')" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-600/30 hover:bg-blue-600/60 text-blue-200 border border-blue-400/50 transition shadow-sm">
                 <span>🪐 Gemini 生态</span>
               </button>
@@ -5780,20 +5409,19 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-gray-800/80">
             <div>
               <div class="flex items-center justify-between mb-0.5">
-                <label class="text-[10px] font-bold text-gray-300">🔑 统一 API Key (可选)：</label>
+                <label class="text-[10px] font-bold text-gray-300">🔑 统一 API Key：</label>
                 <div class="text-[9px]">
                   <a href="https://openrouter.ai/keys" target="_blank" class="text-purple-400 hover:underline">OpenRouter ↗</a>
                   <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-400 hover:underline ml-1">Gemini ↗</a>
                 </div>
               </div>
-              <input type="password" id="currentApiKeyInput" placeholder="本地免Key模式可留空；填入 sk-or-... 或 Gemini Key"
+              <input type="password" id="currentApiKeyInput" placeholder="填入 OpenRouter Key (sk-or-...) 或 Gemini API Key"
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
             </div>
             <div>
               <div class="flex items-center justify-between mb-0.5">
                 <label class="text-[10px] font-bold text-gray-300">🌐 统一 Base URL 网关：</label>
                 <div class="flex items-center gap-1.5 text-[9px]">
-                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'http://127.0.0.1:51000/v1beta'; selectWriterModelSlug('antigravity-writer');" class="text-cyan-400 font-bold hover:underline">🧪本地</button>
                   <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://openrouter.ai/api/v1'" class="text-purple-400 hover:underline">OpenRouter</button>
                   <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://generativelanguage.googleapis.com/v1beta/openai'" class="text-blue-400 hover:underline">Gemini</button>
                 </div>
@@ -5815,19 +5443,18 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <div class="flex items-center gap-2 min-w-0">
                 <span class="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 font-bold flex items-center justify-center text-[10px] shrink-0">1</span>
                 <span class="text-xs font-bold text-gray-200 truncate">✍️ AI 知识文案创作与考证大模型</span>
-                <span id="modelHeaderBadgeWriter" class="px-2 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30 truncate max-w-[200px]">antigravity-writer</span>
+                <span id="modelHeaderBadgeWriter" class="px-2 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30 truncate max-w-[200px]">deepseek/deepseek-chat</span>
               </div>
               <span id="accordionArrowModel1" class="text-[10px] text-gray-400 font-mono transition">▼</span>
             </button>
             <div id="accordionBodyModel1" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5">
               <div class="flex flex-wrap gap-1">
-                <button type="button" onclick="selectWriterModelSlug('antigravity-writer')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-600/30 hover:bg-cyan-600/60 text-cyan-200 border border-cyan-400/60 transition shadow-sm">🧪 本地 Antigravity 知识文案引擎 (免Key)</button>
                 <button type="button" onclick="selectWriterModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">DeepSeek V3 / Chat</button>
                 <button type="button" onclick="selectWriterModelSlug('google/gemini-2.5-pro')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Gemini 2.5 Pro</button>
                 <button type="button" onclick="selectWriterModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Claude 3.5 Sonnet</button>
                 <button type="button" onclick="selectWriterModelSlug('qwen/qwen-2.5-72b-instruct')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">通义千问 Qwen 2.5</button>
               </div>
-              <input type="text" id="currentWriterModelInput" value="antigravity-writer" placeholder="输入文案创作大模型 slug (如: antigravity-writer, deepseek/deepseek-chat)..."
+              <input type="text" id="currentWriterModelInput" value="deepseek/deepseek-chat" placeholder="输入文案创作大模型 slug (如: deepseek/deepseek-chat, google/gemini-2.5-pro)..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-purple-500/50 text-purple-200 font-mono font-bold focus:outline-none focus:border-purple-400" />
             </div>
           </div>
@@ -6208,7 +5835,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
           <!-- Tab 2: 自由粘贴 -->
           <div id="importTabPaste" class="space-y-2 hidden">
-            <textarea id="importRawText" rows="7" placeholder="在此粘贴在 Antigravity 中生成的完整文案（支持 TXT、Markdown、章节标题或 JSON 格式）..."
+            <textarea id="importRawText" rows="7" placeholder="在此粘贴已有完整文案（支持 TXT、Markdown、章节标题或 JSON 格式）..."
               oninput="onScriptTextInput()"
               class="w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-800 focus:outline-none focus:border-violet-500 font-mono leading-relaxed resize-y"></textarea>
           </div>
@@ -7051,15 +6678,16 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const fullText = [];
       if (script.script_segments) {
         if (script.script_segments.opening) {
-          fullText.push('【开篇导引】\\n' + script.script_segments.opening.trim());
+          fullText.push(script.script_segments.opening.trim());
         }
         if (Array.isArray(script.script_segments.chapters)) {
           script.script_segments.chapters.forEach((c) => {
-            fullText.push(\`【第 \${c.chapter_number} 章：\${c.chapter_title}】\\n\` + (c.narration_text || '').trim());
+            const body = (c.narration_text || '').trim();
+            if (body) fullText.push(body);
           });
         }
         if (script.script_segments.ending) {
-          fullText.push('【全片终局收尾】\\n' + script.script_segments.ending.trim());
+          fullText.push(script.script_segments.ending.trim());
         }
       } else if (script.full_narration_text) {
         fullText.push(script.full_narration_text.trim());
@@ -7069,10 +6697,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         fullText.push(String(script.content).trim());
       }
 
-      const combinedText = fullText.join('\\n\\n========================================\\n\\n');
+      const combinedText = fullText.join('\\n\\n');
       document.getElementById('wFinalScriptFullText').value = combinedText;
 
-      const calcWords = combinedText.replace(/【[^】]+】|={10,}|\\s+/g, '').length;
+      const calcWords = combinedText.replace(/\\s+/g, '').length;
       const wordCount = script.total_word_count || calcWords;
       const durationMin = script.estimated_duration_minutes || Number((wordCount / 240).toFixed(1));
 
@@ -7580,7 +7208,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     function updateFinalScriptLiveStats() {
       const val = document.getElementById('wFinalScriptFullText').value || '';
-      const words = val.replace(/【[^】]+】|={10,}|\\s+/g, '').length;
+      const words = val.replace(/\s+/g, '').length;
       document.getElementById('wFinalScriptWords').textContent = words;
       document.getElementById('wFinalScriptMin').textContent = (words / 240).toFixed(1);
     }
@@ -7610,13 +7238,14 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     function updateHumanizeVersionUI(meta, isPreview = false) {
       const badge = document.getElementById('wHumanizeVersionBadge');
       const btn = document.getElementById('btnExecuteHumanize');
+      const acceptBtn = document.getElementById('btnAcceptHumanize');
       const styleName = meta?.style ? (HUMANIZE_STYLE_LABELS[meta.style] || meta.style) : '';
       const ver = meta?.version || '';
 
       if (badge) {
         if (isPreview && meta) {
           badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
-          badge.textContent = \`⏳ 预览 · \${ver}\${styleName ? ' · ' + styleName : ''} (待采纳)\`;
+          badge.textContent = \`⏳ 待确认替换 · \${ver}\${styleName ? ' · ' + styleName : ''}\`;
         } else if (meta && meta.version) {
           badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
           badge.textContent = \`✅ 已修复 · \${ver}\${styleName ? ' · ' + styleName : ''}\${meta.humanized_at ? ' · ' + meta.humanized_at : ''}\`;
@@ -7628,14 +7257,29 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
       if (btn) {
         if (isPreview && meta) {
+          btn.disabled = false;
           btn.className = 'px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer';
-          btn.innerHTML = \`<span>✅ 已完成修复 (\${ver} 预览) · 点击再次润色</span>\`;
+          btn.innerHTML = '<span>✅ 确认替换定稿文案</span>';
         } else if (meta && meta.version) {
-          btn.className = 'px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-emerald-600 to-cyan-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer';
-          btn.innerHTML = \`<span>🔄 已修复 (\${ver}) · 点击再次润色</span>\`;
+          btn.disabled = true;
+          btn.className = 'px-4 py-2 text-xs font-black rounded-xl bg-emerald-900/60 border border-emerald-500/50 text-emerald-200 transition shadow flex items-center gap-1.5 shrink-0 cursor-default opacity-90';
+          btn.innerHTML = '<span>✅ 已修复</span>';
         } else {
+          btn.disabled = false;
           btn.className = 'px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer';
           btn.innerHTML = '<span>🪄 启动全篇 AI 真人化修复</span>';
+        }
+      }
+
+      if (acceptBtn) {
+        if (isPreview && meta) {
+          acceptBtn.disabled = false;
+          acceptBtn.className = 'px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black shadow transition cursor-pointer';
+          acceptBtn.textContent = '✅ 确认替换定稿文案';
+        } else if (meta && meta.version) {
+          acceptBtn.disabled = true;
+          acceptBtn.className = 'px-3 py-1 rounded-lg bg-emerald-900/50 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold cursor-default';
+          acceptBtn.textContent = '✅ 已修复';
         }
       }
     }
@@ -7808,11 +7452,24 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     async function acceptHumanizedScript() {
       const btn = document.getElementById('btnAcceptHumanize');
+      const topBtn = document.getElementById('btnExecuteHumanize');
       const badge = document.getElementById('wHumanizePendingBadge');
+      const textarea = document.getElementById('wFinalScriptFullText');
+
+      if (latestHumanizedText && textarea) {
+        textarea.value = latestHumanizedText;
+        updateFinalScriptLiveStats();
+      }
+
       if (btn) {
         btn.disabled = true;
-        btn.textContent = '⏳ 正在保存...';
+        btn.textContent = '⏳ 正在替换并保存...';
       }
+      if (topBtn) {
+        topBtn.disabled = true;
+        topBtn.innerHTML = '<span>⏳ 正在替换并保存...</span>';
+      }
+
       const nextCount = pendingHumanizeMeta?.count || ((writerData?.finalScript?.humanize_meta?.count || 0) + 1);
       const nextVer = pendingHumanizeMeta?.version || ('v2.' + String(nextCount).padStart(2, '0'));
       const metaToSave = {
@@ -7823,16 +7480,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       };
       await saveWriterPartManual('finalScript', metaToSave);
       pendingHumanizeMeta = null;
+      latestHumanizedText = '';
       updateHumanizeVersionUI(writerData?.finalScript?.humanize_meta || metaToSave, false);
       if (badge) {
         badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
-        badge.textContent = \`✅ 已采纳并保存至工程 (\${metaToSave.version})\`;
+        badge.textContent = \`✅ 已替换定稿文案并保存 (\${metaToSave.version})\`;
       }
-      if (btn) {
-        btn.disabled = false;
-        btn.textContent = '✅ 确认采纳并保存';
-      }
-      showToast(\`✅ 已确认采纳修复版 (\${metaToSave.version}) 并保存至工程文件！\`);
+      showToast('✅ 已将修复后的文字置换到「完整长视频定稿文案」并保存！');
     }
 
     function selectHumanizeStyle(style) {
@@ -7847,9 +7501,20 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       if (btnHumor) btnHumor.className = style === 'humorous' ? activeClass : inactiveClass;
       if (btnSuspense) btnSuspense.className = style === 'suspense' ? activeClass : inactiveClass;
       if (btnColloquial) btnColloquial.className = style === 'colloquial' ? activeClass : inactiveClass;
+
+      // 切换人设风格时，若当前不处于待确认状态，则允许重新启动修复
+      if (!pendingHumanizeMeta) {
+        updateHumanizeVersionUI(null, false);
+      }
     }
 
     async function executeFullScriptHumanize() {
+      // 若已完成 AI 修复、正处于等待用户确认状态，点击主按钮即执行「确认替换定稿文案」
+      if (pendingHumanizeMeta && latestHumanizedText) {
+        await acceptHumanizedScript();
+        return;
+      }
+
       const textarea = document.getElementById('wFinalScriptFullText');
       let content = textarea.value.trim();
 
@@ -7890,10 +7555,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         const data = await res.json();
         if (data.ok && data.result) {
           const resObj = data.result;
+          // 仅暂存修复结果用于对比预览，不直接覆盖「完整长视频定稿文案」，待用户点击确认后再置换
           latestHumanizedText = resObj.humanized_text;
-          textarea.value = resObj.humanized_text;
-          updateFinalScriptLiveStats();
-          setWriterPersistenceStatus('dirty', '● 润色预览待确认（点「确认采纳并保存」写盘）');
+          setWriterPersistenceStatus('dirty', '● AI 修复已完成，请点击「✅ 确认替换定稿文案」生效');
 
           const nextCount = (writerData?.finalScript?.humanize_meta?.count || 0) + 1;
           const nextVer = 'v2.' + String(nextCount).padStart(2, '0');
@@ -7909,7 +7573,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           const badge = document.getElementById('wHumanizePendingBadge');
           if (badge) {
             badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
-            badge.textContent = \`⏳ \${nextVer} 待审阅 · 未覆盖原文件\`;
+            badge.textContent = \`⏳ \${nextVer} 待确认 · 确认后将置换下方定稿文案\`;
           }
 
           if (auditBox && auditContent) {
@@ -7939,7 +7603,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           }
 
           if (revertBtn) revertBtn.classList.remove('hidden');
-          showToast(\`🎉 修复对比已生成 (\${nextVer})！请在上方 Diff 面板核对红绿改动后点击「✅ 确认采纳并保存」\`);
+          showToast('🎉 AI 修复已完成！请点击「✅ 确认替换定稿文案」将修复文字置换到下方定稿框。');
         } else {
           showToast('❌ 修复失败：' + (data.error || '未知异常'));
           alert('修复文案失败: ' + (data.error || '未知异常'));
@@ -7948,8 +7612,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         showToast('❌ 文案修复请求异常：' + err.message);
         alert('文案修复请求异常: ' + err.message);
       } finally {
-        btn.disabled = false;
         if (!humanizedSucceeded) {
+          btn.disabled = false;
           updateHumanizeVersionUI(writerData?.finalScript?.humanize_meta || null, false);
         }
       }
@@ -7962,16 +7626,16 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       pendingHumanizeMeta = null;
       updateFinalScriptLiveStats();
       setWriterPersistenceStatus('saved', '✅ 已还原原稿');
-      updateHumanizeVersionUI(writerData?.finalScript?.humanize_meta || null, false);
+      updateHumanizeVersionUI( null, false);
       const revertBtn = document.getElementById('btnRevertScript');
       if (revertBtn) revertBtn.classList.add('hidden');
       const auditBox = document.getElementById('wHumanizeAuditBox');
       if (auditBox) auditBox.classList.add('hidden');
-      showToast('↩️ 已成功还原为修复前的文案原稿。');
+      showToast('↩️ 已放弃本次修复并保持原稿。');
     }
 
     function copyHumanizedScript() {
-      const text = document.getElementById('wFinalScriptFullText').value;
+      const text = latestHumanizedText || document.getElementById('wFinalScriptFullText').value;
       if (!text) return;
       navigator.clipboard.writeText(text).then(() => {
         showToast('📋 已复制全篇修复文案到剪贴板！');
@@ -7984,6 +7648,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         return;
       }
       document.getElementById('wFinalScriptFullText').value = step1SelectedScriptText;
+      latestHumanizedText = '';
+      pendingHumanizeMeta = null;
+      updateHumanizeVersionUI(null, false);
       const wordCount = step1SelectedScriptText.length;
       document.getElementById('wFinalScriptWords').textContent = wordCount;
       document.getElementById('wFinalScriptMin').textContent = (wordCount / 240).toFixed(1);
@@ -10158,16 +9825,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const bgmEl = document.getElementById('currentBgmModelInput');
       const kEl = document.getElementById('currentApiKeyInput');
 
-      if (type === 'antigravity-dev') {
-        if (kEl) kEl.value = 'antigravity-local-dev';
-        if (bEl) bEl.value = 'http://localhost:4000/api/dev (本地 Antigravity 免Key引擎)';
-        if (wEl) selectWriterModelSlug('antigravity-writer');
-        if (vEl) vEl.value = 'remotion-procedural-motion';
-        if (tEl) tEl.value = 'antigravity-gemini-director';
-        if (iEl) iEl.value = 'antigravity-flux-image';
-        if (bgmEl) bgmEl.value = 'antigravity-bgm-analyzer';
-        showToast('🎉 已载入【Antigravity 本地免 Key 开发模式】！AI 知识文案已绑定本地引擎。');
-      } else if (type === 'gemini') {
+      if (type === 'gemini') {
         if (bEl) bEl.value = 'https://generativelanguage.googleapis.com/v1beta/openai';
         if (wEl) selectWriterModelSlug('google/gemini-2.5-flash');
         if (vEl) vEl.value = 'veo-2.0-generate-001';
@@ -10191,19 +9849,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (iEl) iEl.value = 'black-forest-labs/flux-3-image';
         if (bgmEl) bgmEl.value = 'deepseek/deepseek-chat';
         showToast('🚀 已载入【OpenRouter 混合高性价比】预设！');
-      } else if (type === 'antigravity-local') {
-        if (bEl) bEl.value = 'http://127.0.0.1:51000/v1beta';
-        if (wEl) selectWriterModelSlug('antigravity-writer');
-        if (tEl) tEl.value = 'antigravity-gemini-director';
-        if (vEl) vEl.value = 'google/veo-2';
-        if (iEl) iEl.value = 'imagen-3.0-generate-002';
-        if (bgmEl) bgmEl.value = 'antigravity-bgm-analyzer';
-        showToast('🧪 已载入【本地 Antigravity 模型网关】预设！AI 知识文案已绑定本地引擎。');
       }
       updateModelHeaderBadges();
     }
 
-    // 🛠️ Antigravity 调试副驾驶逻辑 (开发态特有)
     function escapeHtml(str) {
       if (!str) return '';
       return String(str)
@@ -10212,182 +9861,6 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#039;');
-    }
-
-    function toggleDevCopilot() {
-      const drawer = document.getElementById('devCopilotDrawer');
-      if (drawer) {
-        drawer.classList.toggle('hidden');
-      }
-    }
-
-    async function runDevAudit() {
-      const msgBox = document.getElementById('devChatMessages');
-      if (!msgBox) return;
-
-      const tempId = 'audit-' + Date.now();
-      msgBox.innerHTML += \`
-        <div id="\${tempId}" class="p-3 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-cyan-200 text-xs flex items-center gap-2">
-          <span class="animate-spin">⏳</span>
-          <span>正在执行分镜视听节奏与多模态自动化体检...</span>
-        </div>
-      \`;
-      msgBox.scrollTop = msgBox.scrollHeight;
-
-      try {
-        const res = await fetch('/api/dev/audit?project=' + activeProjectId);
-        const data = await res.json();
-        const tempEl = document.getElementById(tempId);
-
-        if (data.ok && data.report) {
-          const r = data.report;
-          const issuesHtml = r.issues.length > 0
-            ? r.issues.map(i => \`<li class="text-amber-300">⚠️ \${escapeHtml(i)}</li>\`).join('')
-            : '<li class="text-emerald-300">✅ 未发现明显节奏或结构问题</li>';
-          const suggHtml = r.suggestions.map(s => \`<li class="text-cyan-200">💡 \${escapeHtml(s)}</li>\`).join('');
-
-          const resultHtml = \`
-            <div class="p-3.5 rounded-xl bg-gray-900 border border-cyan-500/40 space-y-2.5 shadow-lg">
-              <div class="flex items-center justify-between border-b border-gray-800 pb-2">
-                <span class="font-black text-cyan-300 text-xs">🩺 分镜体检报告</span>
-                <span class="px-2 py-0.5 rounded font-black text-xs \${r.score >= 80 ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'}">
-                  综合评分: \${r.score}分
-                </span>
-              </div>
-              <div class="grid grid-cols-2 gap-2 text-[11px] text-gray-300">
-                <div>镜头总数：<b>\${r.totalScenes} 镜</b></div>
-                <div>全片预估时长：<b>\${r.totalDurationSec} 秒</b></div>
-              </div>
-              <div class="text-[11px] space-y-1">
-                <div class="font-bold text-gray-300">检测发现：</div>
-                <ul class="list-disc list-inside space-y-0.5 pl-1">\${issuesHtml}</ul>
-              </div>
-              <div class="text-[11px] space-y-1 pt-1 border-t border-gray-800">
-                <div class="font-bold text-cyan-400">导演调优建议：</div>
-                <ul class="list-disc list-inside space-y-0.5 pl-1">\${suggHtml}</ul>
-              </div>
-            </div>
-          \`;
-          if (tempEl) tempEl.outerHTML = resultHtml;
-        } else {
-          if (tempEl) tempEl.innerHTML = \`<span class="text-red-400">体检失败: \${escapeHtml(data.error || '未知错误')}</span>\`;
-        }
-      } catch (e) {
-        const tempEl = document.getElementById(tempId);
-        if (tempEl) tempEl.innerHTML = \`<span class="text-red-400">请求异常: \${escapeHtml(e.message)}</span>\`;
-      }
-      msgBox.scrollTop = msgBox.scrollHeight;
-    }
-
-    async function sendDevChat() {
-      const input = document.getElementById('devChatInput');
-      const msgBox = document.getElementById('devChatMessages');
-      const btn = document.getElementById('btnSendDevChat');
-      if (!input || !msgBox) return;
-
-      const text = input.value.trim();
-      if (!text) return;
-
-      input.value = '';
-      msgBox.innerHTML += \`
-        <div class="flex justify-end">
-          <div class="max-w-[85%] px-3 py-2 rounded-xl bg-cyan-600 text-white text-xs font-medium shadow">
-            \${escapeHtml(text)}
-          </div>
-        </div>
-      \`;
-      msgBox.scrollTop = msgBox.scrollHeight;
-
-      const tempId = 'reply-' + Date.now();
-      msgBox.innerHTML += \`
-        <div id="\${tempId}" class="flex items-center gap-2 p-2.5 rounded-xl bg-gray-900 border border-gray-800 text-gray-400 text-xs">
-          <span class="animate-spin">⏳</span>
-          <span>Gemini 调试助手正在深度思考...</span>
-        </div>
-      \`;
-      msgBox.scrollTop = msgBox.scrollHeight;
-      if (btn) btn.disabled = true;
-
-      try {
-        const res = await fetch('/api/dev/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            projectId: activeProjectId,
-            prompt: text
-          })
-        });
-        const data = await res.json();
-        const tempEl = document.getElementById(tempId);
-
-        if (data.ok) {
-          let patchBtnHtml = '';
-          if (data.patchAction && data.patchAction.scene_id) {
-            const patchJsonStr = encodeURIComponent(JSON.stringify(data.patchAction));
-            patchBtnHtml = \`
-              <div class="mt-2 pt-2 border-t border-gray-800 flex items-center justify-between">
-                <span class="text-[11px] text-cyan-300 font-bold">🎯 包含镜头 Patch 方案 (\${escapeHtml(data.patchAction.scene_id)})</span>
-                <button type="button" onclick="applyDevPatch('\${patchJsonStr}')" class="px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-gray-950 font-black text-[11px] transition">
-                  ⚡ 一键应用至工程
-                </button>
-              </div>
-            \`;
-          }
-
-          const formattedReply = escapeHtml(data.reply).replace(/\\n/g, '<br/>');
-          const botHtml = \`
-            <div class="p-3 rounded-xl bg-gray-900 border border-gray-800 text-gray-200 text-xs space-y-1">
-              <div class="flex items-center justify-between text-[10px] text-gray-400 mb-1">
-                <span class="text-cyan-400 font-bold">🤖 Gemini 调试建议</span>
-                <span>模型: \${data.usedModel ? escapeHtml(data.usedModel.split('/').pop()) : 'Gemini'}</span>
-              </div>
-              <div>\${formattedReply}</div>
-              \${patchBtnHtml}
-            </div>
-          \`;
-          if (tempEl) tempEl.outerHTML = botHtml;
-        } else {
-          if (tempEl) tempEl.outerHTML = \`<div class="p-2.5 rounded-xl bg-red-950/60 border border-red-500/40 text-red-200 text-xs">❌ 错误: \${escapeHtml(data.error || '请求失败')}</div>\`;
-        }
-      } catch (e) {
-        const tempEl = document.getElementById(tempId);
-        if (tempEl) tempEl.outerHTML = \`<div class="p-2.5 rounded-xl bg-red-950/60 border border-red-500/40 text-red-200 text-xs">❌ 连接异常: \${escapeHtml(e.message)}</div>\`;
-      } finally {
-        if (btn) btn.disabled = false;
-        msgBox.scrollTop = msgBox.scrollHeight;
-      }
-    }
-
-    async function applyDevPatch(patchJsonStr) {
-      try {
-        const actionObj = JSON.parse(decodeURIComponent(patchJsonStr));
-        const res = await fetch('/api/dev/apply-patch', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            projectId: activeProjectId,
-            sceneId: actionObj.scene_id,
-            patch: actionObj.patch
-          })
-        });
-        const data = await res.json();
-        if (data.ok) {
-          showToast('⚡ 已成功将 Gemini 调试建议 Patch 应用到镜头：' + actionObj.scene_id);
-          loadWorkflow();
-        } else {
-          alert('应用 Patch 失败: ' + (data.error || '未知错误'));
-        }
-      } catch (e) {
-        alert('解析或应用 Patch 异常: ' + e.message);
-      }
-    }
-
-    function sendDevQuickPrompt(promptText) {
-      const input = document.getElementById('devChatInput');
-      if (input) {
-        input.value = promptText;
-        sendDevChat();
-      }
     }
 
     // ==========================================
@@ -10727,77 +10200,6 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     });
   </script>
-
-  <!-- 🛠️ Antigravity 调试副驾驶 (Gemini 生态 / Dev Mode) 浮动抽屉与气泡 -->
-  <div id="devCopilotContainer" class="fixed bottom-6 right-6 z-40 flex flex-col items-end pointer-events-none">
-    <!-- 展开后的对话抽屉窗 -->
-    <div id="devCopilotDrawer" class="hidden pointer-events-auto mb-3 w-[450px] max-w-[calc(100vw-32px)] h-[560px] max-h-[82vh] bg-gray-950/95 backdrop-blur-xl border border-cyan-500/40 rounded-2xl shadow-2xl flex flex-col overflow-hidden transition-all duration-200">
-      <!-- 窗口顶部标题栏 -->
-      <div class="px-4 py-3 bg-gradient-to-r from-gray-900 via-cyan-950/40 to-gray-900 border-b border-cyan-500/30 flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <span class="text-base">🤖</span>
-          <div>
-            <div class="flex items-center gap-2">
-              <span class="text-xs font-black text-white">Antigravity 调试副驾驶</span>
-              <span class="px-1.5 py-0.2 rounded text-[9px] font-bold bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">Gemini Dev</span>
-            </div>
-            <p class="text-[10px] text-gray-400">调试期实时诊断、提示词润色与分镜 Patch</p>
-          </div>
-        </div>
-        <div class="flex items-center gap-1">
-          <button onclick="toggleDevCopilot()" class="p-1 rounded hover:bg-gray-800 text-gray-400 hover:text-white text-xs">✕</button>
-        </div>
-      </div>
-
-      <!-- 快捷动作工具栏 -->
-      <div class="px-3 py-2 bg-gray-900/60 border-b border-gray-800/80 flex items-center gap-1.5 overflow-x-auto text-[11px]">
-        <button type="button" onclick="runDevAudit()" class="shrink-0 px-2.5 py-1 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/80 text-cyan-300 border border-cyan-500/30 font-bold transition flex items-center gap-1">
-          🩺 诊断分镜节奏
-        </button>
-        <button type="button" onclick="sendDevQuickPrompt('请分析当前分镜的视觉形式分布，并建议如何搭配卡片模板与实景生图')" class="shrink-0 px-2.5 py-1 rounded-lg bg-blue-950/60 hover:bg-blue-900/80 text-blue-300 border border-blue-500/30 font-bold transition">
-          📐 卡片搭配建议
-        </button>
-        <button type="button" onclick="sendDevQuickPrompt('请检查所有镜头的生图提示词，帮我润色更有画面感、更符合16:9纪录片的视觉描述')" class="shrink-0 px-2.5 py-1 rounded-lg bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-500/30 font-bold transition">
-          ✨ 润色提示词
-        </button>
-      </div>
-
-      <!-- 消息列表与体检卡片区域 -->
-      <div id="devChatMessages" class="flex-1 p-4 overflow-y-auto space-y-3 text-xs leading-relaxed">
-        <div class="p-3 rounded-xl bg-gray-900/90 border border-gray-800 text-gray-300 space-y-1.5">
-          <div class="flex items-center gap-1.5 text-cyan-400 font-bold text-[11px]">
-            <span>💡 调试副驾驶已挂载</span>
-          </div>
-          <p class="text-[11px] text-gray-300">
-            我是为 WhyVideo 打造的 Gemini 调试副驾驶。在调试期，我可以实时读取当前工程的解说词、分镜清单与卡片结构。您可以直接在此提问、审查镜头或让我调优分镜！
-          </p>
-          <div class="text-[10px] text-gray-400 pt-1 border-t border-gray-800/80">
-            🛠️ <b>剥离说明</b>：调试完成后，移除 <code class="text-cyan-300">packages/qc-tools/dev-bridge.mjs</code> 即可完全回到纯 API 生产版。
-          </div>
-        </div>
-      </div>
-
-      <!-- 底部输入栏 -->
-      <div class="p-2.5 bg-gray-900 border-t border-gray-800 space-y-2">
-        <div class="flex items-center gap-2">
-          <input type="text" id="devChatInput" placeholder="输入调试需求，例如：帮我把第3镜改为数据对比卡片..."
-            class="flex-1 px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-cyan-400 placeholder:text-gray-500"
-            onkeydown="if(event.key === 'Enter' && !event.shiftKey) sendDevChat();" />
-          <button id="btnSendDevChat" onclick="sendDevChat()" class="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-bold text-xs transition flex items-center gap-1 shadow-lg shadow-cyan-600/30">
-            <span>发送</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 浮动胶囊入口按钮 -->
-    <button onclick="toggleDevCopilot()" id="devCopilotFloatingBtn"
-      class="pointer-events-auto px-4 py-2.5 rounded-full bg-gradient-to-r from-cyan-600 via-blue-600 to-purple-600 text-white font-bold text-xs shadow-2xl hover:scale-105 active:scale-95 transition flex items-center gap-2 border border-cyan-400/40">
-      <span class="animate-pulse">🤖</span>
-      <span>Antigravity 调试副驾驶</span>
-      <span class="px-1.5 py-0.2 rounded-full text-[9px] bg-black/40 text-cyan-200">Gemini</span>
-    </button>
-  </div>
 </body>
 </html>`;
 }

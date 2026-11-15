@@ -188,12 +188,16 @@ export const WRITER_PROMPT_REGISTRY = {
     allowed_inputs: ['outline_json', 'chapters_json'],
     require_json: true,
     require_audit_marker: false,
-    raw_template: `你是一名资深长视频总编审。你的任务是对全片章节进行全文统稿编辑（Full Script Editing）。
+    raw_template: `你是一名资深长视频总编审。你的任务是对全片章节进行全文统稿编辑（Full Script Editing），将其熔炼为一篇可直接用于真人配音（TTS）与分镜制作的纯口播定稿。
 核心规则：
 1. 删除跨章节重复论点与重复例子；
 2. 统一全片术语、年代读法与口语化节奏；
 3. 识别并删除中间各章节末尾的“伪结尾”，全片只保留一个正式终局结尾；
-4. 输出标准 final-script.json 结构：
+4. 【彻底消除标题与书面壳子，转为纯口播流】：
+   - 严禁在 opening、narration_text、ending 的正文中出现任何“第一章”“第二节”“Part 1”“一、”“1.”等章节标题、小标题、Markdown 标题符（# / ## / **）或分隔线（=== / ---）；
+   - 将原本靠标题隔开的内容，改写为自然的口语承接与过渡句（如“说到这儿，你可能就要问了……”），确保从头到尾一气呵成、直接送去配音也不会读出任何标题词；
+   - 章节归属名仅保留在 JSON 的 chapter_title 元数据字段中，供后台分镜分组使用，绝不可混入 narration_text 正文；
+5. 输出标准 final-script.json 结构：
 {
   "project_id": "xxx",
   "title": "视频标题",
@@ -207,15 +211,15 @@ export const WRITER_PROMPT_REGISTRY = {
     "removed_false_endings_count": 2
   },
   "script_segments": {
-    "opening": "开篇旁白正文",
+    "opening": "纯口播开篇旁白正文（不含任何标题与符号）",
     "chapters": [
       {
         "chapter_number": 1,
-        "chapter_title": "第1章标题",
-        "narration_text": "本章正文"
+        "chapter_title": "第1章标题（仅作后台分镜归属标签）",
+        "narration_text": "纯口播本章正文（不含任何大小标题、序号、Markdown符号或分隔线，且与前后章口语自然衔接）"
       }
     ],
-    "ending": "全片唯一终局收尾正文"
+    "ending": "纯口播全片唯一终局收尾正文（不含任何标题与符号）"
   }
 }`,
   },
@@ -238,7 +242,7 @@ export const WRITER_PROMPT_REGISTRY = {
 3. 【脱脂去冗余】：删掉重复啰嗦的学术修饰与车轱辘话，保留硬核因果链，提升节奏感。
 4. 【注入人设语境】：严格按照【风格定位】进行语气、比喻与情感重构。
 5. 【绝对保真】：所有真实年份、人名、地名、数据必须 100% 保留，不可篡改事实。
-6. 【保留章节结构】：原样保留文本中出现的【开篇导引】、【第 X 章：...】、【全片终局收尾】等标题行。
+6. 【纯口播连贯化，消除标题外壳】：彻底消除文本中残留的任何章节大标题、小标题、序号（如“第一章”“一、”）、Markdown 符号（# / **）或分隔符（=== / ---），用自然的口语过渡衔接上下文，确保整篇输出可直接送去真人配音。
 
 【输出格式要求（极其重要）】：
 请直接输出改写后的纯文本旁白正文（不要用 JSON 包裹整篇正文，不要输出任何前言开场白），并在全文末尾最后一行附带一句极简审计标记：

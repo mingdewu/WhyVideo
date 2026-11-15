@@ -28,7 +28,7 @@ function getEffectiveLlmConfig(projectId) {
   return { apiKey, baseUrl, model };
 }
 
-// 纯文本规则解析降级引擎 (免 Key 或离线时 100% 极速稳定命中)
+// 纯文本规则解析降级引擎 (离线时 100% 极速稳定命中)
 function parsePromptWithRules(prompt, hasAsset, assetType) {
   const p = prompt.trim();
   const lower = p.toLowerCase();
@@ -177,7 +177,7 @@ function parsePromptWithRules(prompt, hasAsset, assetType) {
 async function parsePromptWithAiOrRules(prompt, hasAsset, assetType, projectId) {
   const { apiKey, baseUrl, model } = getEffectiveLlmConfig(projectId);
 
-  if (apiKey && apiKey !== "antigravity-local-dev" && !baseUrl.includes("localhost")) {
+  if (apiKey) {
     try {
       const systemPrompt = `你是一个专业的 Remotion 视频代码与动效参数编译器。
 用户拖入了素材或输入了自然语言剪辑/排版意向。
