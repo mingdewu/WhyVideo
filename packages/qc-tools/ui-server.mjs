@@ -936,9 +936,234 @@ async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, bas
   }
 }
 
-// 纯文本规则解析引擎 (支持视频裁剪、画面滤镜、文字弹幕/艺术字、图片运镜及程序化场景切换)
+// ⏱️ 自然语言时间点与时间段解析工具（支持“第1分5秒到1分15秒”、“01:05~01:15”、“一分五秒到一分十五秒”、“65秒到75秒”等）
+function chineseNumToInt(rawStr) {
+  const s = String(rawStr || '').trim();
+  if (!s) return NaN;
+  if (/^\d+(?:\.\d+)?$/.test(s)) return parseFloat(s);
+  const digitMap = { '零': 0, '〇': 0, '一': 1, '二': 2, '两': 2, '三': 3, '四': 4, '五': 5, '六': 6, '七': 7, '八': 8, '九': 9 };
+  const unitMap = { '十': 10, '百': 100 };
+  let total = 0;
+  let current = 0;
+  for (const ch of s) {
+    if (digitMap[ch] !== undefined) {
+      current = digitMap[ch];
+    } else if (unitMap[ch] !== undefined) {
+      const unit = unitMap[ch];
+      if (current === 0) current = 1;
+      total += current * unit;
+      current = 0;
+    } else {
+      return NaN;
+    }
+  }
+  return total + current;
+}
+
+function normalizeChineseTimeNumbers(text) {
+  return String(text || '').replace(/[零〇一二两三四五六七八九十百]+(?=\s*(?:小时|时|分钟|分|秒))/g, (m) => {
+    const val = chineseNumToInt(m);
+    return Number.isNaN(val) ? m : String(val);
+  });
+}
+
+function parseSingleTimeTokenSec(token) {
+  if (!token) return null;
+  const s = normalizeChineseTimeNumbers(String(token).trim());
+
+  // 1. 冒号格式 HH:MM:SS 或 MM:SS (如 01:05, 1:15, 00:01:05.5)
+  const colonMatch = s.match(/^(?:(\d{1,2})\s*[:：]\s*)?(\d{1,2})\s*[:：]\s*(\d{1,2}(?:\.\d+)?)$/);
+  if (colonMatch) {
+    const h = colonMatch[1] ? parseFloat(colonMatch[1]) : 0;
+    const m = parseFloat(colonMatch[2]);
+    const sec = parseFloat(colonMatch[3]);
+    return Number((h * 3600 + m * 60 + sec).toFixed(1));
+  }
+
+  // 2. 中文或英文单位格式 (如 1小时2分5秒, 1分5秒, 1分05秒, 1分半, 2分钟, 1m15s)
+  if (/(?:小时|时|分钟|分|m)/i.test(s)) {
+    const hMatch = s.match(/(\d+(?:\.\d+)?)\s*(?:小时|时|h)/i);
+    const mMatch = s.match(/(\d+(?:\.\d+)?)\s*(?:分钟|分|m)(?!s)/i);
+    const sMatch = s.match(/(?:分钟|分|m)\s*(?:零|0)?\s*(\d+(?:\.\d+)?)\s*(?:秒|s)?/i) || s.match(/(\d+(?:\.\d+)?)\s*(?:秒|s)/i);
+    const isHalfMin = /(?:分钟|分)\s*半/.test(s);
+    if (hMatch || mMatch) {
+      const h = hMatch ? parseFloat(hMatch[1]) : 0;
+      const m = mMatch ? parseFloat(mMatch[1]) : 0;
+      const sec = isHalfMin ? 30 : (sMatch ? parseFloat(sMatch[1]) : 0);
+      return Number((h * 3600 + m * 60 + sec).toFixed(1));
+    }
+  }
+
+  // 3. 纯秒数 (如 65秒, 65.5s, 65)
+  const secMatch = s.match(/^(\d+(?:\.\d+)?)\s*(?:秒|s)?$/i);
+  if (secMatch) {
+    return Number(parseFloat(secMatch[1]).toFixed(1));
+  }
+  return null;
+}
+
+function parseTimeRangeFromText(promptText, defaultClipLenSec = 10) {
+  const raw = String(promptText || '').trim();
+  if (!raw) return null;
+  const norm = normalizeChineseTimeNumbers(raw);
+
+  // 时间表达式原子模式：匹配 01:05 / 1分05秒 / 1分半 / 1m15s / 65秒 / 65
+  const timeAtom = '(?:\\d{1,2}\\s*[:：]\\s*\\d{1,2}(?:\\s*[:：]\\s*\\d{1,2}(?:\\.\\d+)?)?|\\d+(?:\\.\\d+)?\\s*(?:小时|时|h)\\s*(?:\\d+(?:\\.\\d+)?\\s*(?:分钟|分|m)\\s*)?(?:\\d+(?:\\.\\d+)?\\s*(?:秒|s)?)?|\\d+(?:\\.\\d+)?\\s*(?:分钟|分|m)\\s*(?:半|(?:零)?\\s*\\d+(?:\\.\\d+)?\\s*(?:秒|s)?)?|\\d+(?:\\.\\d+)?\\s*(?:秒|s)?)';
+
+  // 1. 范围模式：从/第 X 到/至/~/- 第 Y
+  const rangeRegex = new RegExp(`(?:从|取|只要|下载|截取|剪辑|剪)?\\s*(?:第)?\\s*(${timeAtom})\\s*(?:到|至|~|～|-|—|–|到第|至第)\\s*(?:第)?\\s*(${timeAtom})`, 'i');
+  const rangeMatch = norm.match(rangeRegex);
+  if (rangeMatch) {
+    const rawStart = rangeMatch[1].trim();
+    const rawEnd = rangeMatch[2].trim();
+    // 要求至少一端带有明确时间单位（分/秒/:/m/s）或上下文含时间词，避免把“16:9”误判为时间
+    const isAspect = /^16\s*[:：]\s*9$|^9\s*[:：]\s*16$|^4\s*[:：]\s*3$/.test(rawStart) || /^16\s*[:：]\s*9$|^9\s*[:：]\s*16$|^4\s*[:：]\s*3$/.test(rawEnd);
+    const hasTimeHint = /(?:分|秒|[:：]|m|s|下载|截取|剪|片段)/i.test(norm);
+    if (!isAspect && hasTimeHint) {
+      let startSec = parseSingleTimePointHelper(rawStart);
+      let endSec = parseSingleTimePointHelper(rawEnd);
+      // 口语习惯修正：如“1分5秒到15秒”，自动补齐同分钟 1分15秒 (75s)
+      if (startSec !== null && endSec !== null) {
+        const startHasMin = /(?:分钟|分|[:：]|m)/i.test(rawStart);
+        const endHasMin = /(?:分钟|分|[:：]|m)/i.test(rawEnd);
+        if (startHasMin && !endHasMin && startSec >= 60 && endSec < 60 && (Math.floor(startSec / 60) * 60 + endSec) > startSec) {
+          endSec = Number((Math.floor(startSec / 60) * 60 + endSec).toFixed(1));
+        }
+        if (endSec > startSec) {
+          return {
+            startSec: Math.max(0, Number(startSec.toFixed(1))),
+            endSec: Number(endSec.toFixed(1)),
+          };
+        }
+      }
+    }
+  }
+
+  // 2. 起点 + 持续时长模式：如“从1分5秒开始截取10秒” / “第65秒起剪8秒”
+  const startDurRegex = new RegExp(`(?:从|第)\\s*(${timeAtom})\\s*(?:开始|起)?\\s*(?:截取|剪辑|剪|下载|持续|取)?\\s*(\\d+(?:\\.\\d+)?)\\s*(?:秒|s)`, 'i');
+  const startDurMatch = norm.match(startDurRegex);
+  if (startDurMatch) {
+    const startSec = parseSingleTimePointHelper(startDurMatch[1]);
+    const durSec = parseFloat(startDurMatch[2]);
+    if (startSec !== null && durSec > 0) {
+      return {
+        startSec: Math.max(0, Number(startSec.toFixed(1))),
+        endSec: Number((startSec + durSec).toFixed(1)),
+      };
+    }
+  }
+
+  // 3. “前 X 秒” / “取前 X 秒”
+  const headMatch = norm.match(/(?:取|只要|下载|截取)?\s*前\s*(\d+(?:\.\d+)?)\s*(?:秒|s)/i);
+  if (headMatch) {
+    const dur = parseFloat(headMatch[1]);
+    if (dur > 0) {
+      return { startSec: 0, endSec: Number(dur.toFixed(1)) };
+    }
+  }
+
+  return null;
+}
+
+function parseSingleTimePointHelper(token) {
+  return parseSingleTimeTokenSec(token);
+}
+
+function formatSecToMMSS(sec) {
+  const num = Math.max(0, Number(sec || 0));
+  const totalInt = Math.floor(num);
+  const frac = Number((num - totalInt).toFixed(1));
+  const h = Math.floor(totalInt / 3600);
+  const m = Math.floor((totalInt % 3600) / 60);
+  const s = totalInt % 60;
+  const sStr = String(s).padStart(2, '0') + (frac > 0 ? `.${Math.round(frac * 10)}` : '');
+  if (h > 0) {
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${sStr}`;
+  }
+  return `${String(m).padStart(2, '0')}:${sStr}`;
+}
+
+function formatSecToFileTag(sec) {
+  const num = Math.max(0, Number(sec || 0));
+  const totalInt = Math.floor(num);
+  const m = Math.floor(totalInt / 60);
+  const s = totalInt % 60;
+  return `${String(m).padStart(2, '0')}m${String(s).padStart(2, '0')}s`;
+}
+
+// 自动扫描并同步当前工程专属 public/assets 目录下的本地视频/图片素材到 asset-index.json
+function syncLocalProjectAssets(projectId) {
+  const curPaths = getPaths(projectId);
+  const videoDir = path.join(curPaths.publicDir, 'assets', 'video');
+  const imageDir = path.join(curPaths.publicDir, 'assets', 'images');
+  try {
+    fs.mkdirSync(videoDir, { recursive: true });
+    fs.mkdirSync(imageDir, { recursive: true });
+  } catch (e) {}
+
+  const assetIndex = fs.existsSync(curPaths.assetIndexPath)
+    ? JSON.parse(fs.readFileSync(curPaths.assetIndexPath, 'utf8'))
+    : { project_id: projectId, assets: [] };
+  if (!Array.isArray(assetIndex.assets)) assetIndex.assets = [];
+
+  const knownPaths = new Set(assetIndex.assets.map((a) => a.path));
+  let mutated = false;
+
+  const scanFolder = (dirPath, relPrefix, mediaType) => {
+    if (!fs.existsSync(dirPath)) return;
+    const files = fs.readdirSync(dirPath).filter((f) => !f.startsWith('.'));
+    for (const f of files) {
+      const ext = path.extname(f).toLowerCase();
+      if (mediaType === 'video' && !['.mp4', '.mov', '.webm', '.mkv'].includes(ext)) continue;
+      if (mediaType === 'image' && !['.jpg', '.jpeg', '.png', '.webp'].includes(ext)) continue;
+      const relPath = `${relPrefix}/${f}`;
+      if (knownPaths.has(relPath)) continue;
+      const fullPath = path.join(dirPath, f);
+      try {
+        const st = fs.statSync(fullPath);
+        if (!st.isFile() || st.size === 0) continue;
+      } catch (e) {
+        continue;
+      }
+      const newAssetId = `${mediaType === 'video' ? 'AST-VID-' : 'AST-IMG-'}${String(assetIndex.assets.length + 1).padStart(3, '0')}`;
+      assetIndex.assets.push({
+        asset_id: newAssetId,
+        path: relPath,
+        file_path: `projects/${projectId}/public/${relPath}`,
+        file_name: f,
+        type: mediaType,
+        media_type: mediaType,
+        duration_seconds: mediaType === 'video' ? 10.0 : null,
+        duration_sec: mediaType === 'video' ? 10.0 : null,
+        resolution: '1920x1080',
+        license_status: 'approved',
+        source_url: `local_asset://${f}`,
+        tags: ['本工程本地素材', projectId],
+      });
+      knownPaths.add(relPath);
+      mutated = true;
+    }
+  };
+
+  scanFolder(videoDir, 'assets/video', 'video');
+  scanFolder(imageDir, 'assets/images', 'image');
+
+  if (mutated) {
+    try {
+      fs.writeFileSync(curPaths.assetIndexPath, JSON.stringify(assetIndex, null, 2), 'utf8');
+    } catch (e) {}
+  }
+
+  for (const a of assetIndex.assets) {
+    a.exists_on_disk = Boolean(a.path && fs.existsSync(path.join(curPaths.publicDir, a.path)));
+  }
+  return assetIndex;
+}
+
+// 纯文本规则解析引擎 (支持视频裁剪、远程片段下载跳转、画面滤镜、文字弹幕/艺术字、图片运镜及程序化场景切换)
 function parsePromptWithRules(prompt, hasAsset, assetType) {
   const p = (prompt || '').trim();
+  const parsedRange = parseTimeRangeFromText(p);
 
   // 1. 判断是否需要切换为程序化场景（表格/图表/流程图/对比）
   const isTableOrData = /数据|表格|分析|占比|指标|统计|金额|增长/.test(p);
@@ -946,7 +1171,7 @@ function parsePromptWithRules(prompt, hasAsset, assetType) {
   const isVersus = /对比|对决|pk|差异|优缺点|双方/.test(p);
   const isKinetic = /快闪|冲击|标语|口号/.test(p);
 
-  if (!hasAsset || (!p.includes('剪') && !p.includes('秒') && !p.includes('放') && !p.includes('亮') && (isTableOrData || isFlowOrTimeline || isVersus || isKinetic))) {
+  if (!parsedRange && (!hasAsset || (!p.includes('剪') && !p.includes('秒') && !p.includes('分') && !p.includes('放') && !p.includes('亮') && (isTableOrData || isFlowOrTimeline || isVersus || isKinetic)))) {
     if (isFlowOrTimeline) {
       return {
         action: 'switch_procedural',
@@ -997,20 +1222,9 @@ function parsePromptWithRules(prompt, hasAsset, assetType) {
     }
   }
 
-  // 2. 视频裁剪 (如 "8-15秒", "7到12秒", "从第5秒开始剪3秒", "剪辑8-15秒")
-  let trim_start_sec = 0;
-  let trim_end_sec = undefined;
-
-  const rangeMatch = p.match(/(?:从)?(?:第)?\s*(\d+(?:\.\d+)?)\s*(?:秒)?\s*(?:到|至|-|~)\s*(?:第)?\s*(\d+(?:\.\d+)?)\s*(?:秒)?/i);
-  if (rangeMatch) {
-    trim_start_sec = parseFloat(rangeMatch[1]);
-    trim_end_sec = parseFloat(rangeMatch[2]);
-  } else {
-    const singleMatch = p.match(/(\d+(?:\.\d+)?)\s*秒/);
-    if (singleMatch && (p.includes('前') || p.includes('截取') || p.includes('持续'))) {
-      trim_end_sec = parseFloat(singleMatch[1]);
-    }
-  }
+  // 2. 视频裁剪与远程下载片段区间 (如 "第1分5秒到1分15秒", "01:05~01:15", "8-15秒", "从第5秒开始剪3秒")
+  let trim_start_sec = parsedRange ? parsedRange.startSec : undefined;
+  let trim_end_sec = parsedRange ? parsedRange.endSec : undefined;
 
   // 3. 滤镜提取 (如 "变亮一点", "对比度高", "复古", "黑白")
   const filters = {};
@@ -1084,8 +1298,8 @@ function parsePromptWithRules(prompt, hasAsset, assetType) {
   return {
     action: 'media_modifiers',
     media_modifiers: {
-      trim_start_sec: trim_start_sec || undefined,
-      trim_end_sec: trim_end_sec || undefined,
+      trim_start_sec: trim_start_sec !== undefined ? trim_start_sec : undefined,
+      trim_end_sec: trim_end_sec !== undefined ? trim_end_sec : undefined,
       filters: Object.keys(filters).length > 0 ? filters : undefined,
       motion,
       text_overlays: text_overlays.length > 0 ? text_overlays : undefined,
@@ -1096,25 +1310,36 @@ function parsePromptWithRules(prompt, hasAsset, assetType) {
 // 🪐 大模型 API 智能 Remotion 动效与剪辑编译器
 async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, modelConfig = {}) {
   const p = (userPrompt || '').trim();
+  const detRange = parseTimeRangeFromText(p);
   const apiKey = (modelConfig.apiKey || process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY || '').trim();
   const baseUrl = (modelConfig.baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
   const model = (modelConfig.textModel || modelConfig.model || 'deepseek/deepseek-chat').trim();
   const durationSec = Number((scene.duration_ms / 1000).toFixed(1));
 
-  const systemPrompt = `你是一位精通 Remotion 视频代码与视听美学的专业剪辑总监。
-任务：面对用户针对当前镜头输入的任意口语化、自然语言要求，执行两项核心任务：
-1. 【用人话向用户说出你的剪辑构思与操作细节】（专业、亲和的剪辑师口吻，写入 ai_speech_reply）；
-2. 【输出广义的视频调节参数】（直接写入 media_modifiers，供 Remotion 视频引擎精准渲染执行）。
+  const systemPrompt = `你是一位精通 Remotion 视频代码、FFmpeg 局部流式下载与视听美学的专业剪辑总监。
+核心任务
+面对用户针对当前镜头输入的任意口语化、自然语言要求，执行两项核心任务：
+1. 【用人话向用户说出你的剪辑/下载构思与操作细节】（专业、亲和的剪辑师口吻，写入 ai_speech_reply）；
+2. 【输出广义的视频调节与片段截取参数】（直接写入 media_modifiers，供自动化管线与 Remotion 精准执行）。
 
-【Remotion 执行参数规范 (必须且仅返回纯净 JSON，严禁任何额外文本或 markdown 代码块标记)】：
+重要规则
+- 时间单位强制统一：无论用户在指令中如何表达时间（如“第1分5秒到1分15秒”、“01:05~01:15”、“65秒”），必须将其全部换算为绝对秒数（浮点数），分别写入 trim_start_sec / trim_end_sec 或字幕的 start_sec / duration_sec 中。
+- Action 设定：只要涉及视频调节或区间截取，action 必须设为 "media_modifiers"！
+- 极度纯净输出：必须且仅返回原生 JSON 字符串。必须以 { 开头，以 } 结尾。严禁使用 \`\`\`json 这样的 Markdown 代码块标记，严禁在 JSON 结构外输出任何解释性文本。
+
+返回参数规范 (JSON)
 {
-  "ai_speech_reply": "用自然口语向用户说出你所做的具体剪辑操作与视听构想（例如：'好的！已为你截取素材第4~11秒高潮段，整体色温调为冷调泛蓝，中间关键动作以 0.7 倍速慢放，并在第 1.5 秒从左侧弹出视觉大字……'）",
+  "ai_speech_reply": "用自然口语向用户说出你所做的具体剪辑、下载片段跳转操作或音效处理（例如：'好的！已将你的口令转换为片段跳转指令：提取原视频 65s 至 75s 的画面，加入缓慢推镜头并强化胶片质感，同时微调了环境音量……'）",
   "action": "media_modifiers",
   "scene_type": "data_card" | "timeline" | "versus_dual" | "kinetic_text",
   "media_modifiers": {
-    "trim_start_sec": 裁剪起始秒数 (数字或 null),
-    "trim_end_sec": 裁剪结束秒数 (数字或 null),
+    "trim_start_sec": 裁剪或局部下载起始绝对秒数 (数字或 null，如 1分5秒 则填 65.0),
+    "trim_end_sec": 裁剪或局部下载结束绝对秒数 (数字或 null，如 1分15秒 则填 75.0),
     "playback_rate": 视频播放倍率 (正常为 1.0, 慢动作如 0.5 ~ 0.8, 快放如 1.5 ~ 2.0),
+    "audio": {
+      "mute_original": 屏蔽原视频环境音 (true 或 false),
+      "volume_level": 原声保留时的音量大小 (0.0 ~ 1.0)
+    },
     "filters": {
       "brightness": 亮度系数 (如变亮 1.25, 强曝光 1.5, 压暗 0.8),
       "contrast": 对比度 (如增强 1.2),
@@ -1122,15 +1347,16 @@ async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, m
       "hue_rotate_deg": 色相偏移角度 (用于任意变色，如变冷蓝 180, 泛金/偏黄 45, 偏绿 90 等),
       "sepia": 复古胶片度 (0.0 ~ 1.0),
       "grayscale": 黑白灰度 (0.0 ~ 1.0),
-      "blur_px": 虚化/模糊像素
+      "blur_px": 虚化/模糊像素 (数字，0及以上)
     },
     "motion": {
       "motion_type": "zoom_in (慢推聚焦)" | "zoom_out (拉远展现)" | "pan_left (左移)" | "pan_right (右移)" | "shake (微颤/顿挫打击感)" | "static (沉稳固定)",
-      "duration_sec": 运镜持续时长秒数,
-      "scale_from": 画面起始缩放比例,
-      "scale_to": 画面结束缩放比例,
-      "translate_x_px": X轴平移位移像素,
-      "translate_y_px": Y轴平移位移像素
+      "easing_curve": "linear (匀速)" | "ease_in_out (平滑缓动)" | "spring_bounce (弹性跳动)",
+      "duration_sec": 运镜持续时长秒数 (数字，如 5.0),
+      "scale_from": 画面起始缩放比例 (数字，如 1.0),
+      "scale_to": 画面结束缩放比例 (数字，如 1.15),
+      "translate_x_px": X轴平移位移像素 (数字),
+      "translate_y_px": Y轴平移位移像素 (数字)
     },
     "text_overlays": [
       {
@@ -1138,8 +1364,8 @@ async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, m
         "style": "dramatic_shock (震撼大字)" | "warning_badge (警示标注)" | "neon_glow (霓虹发光)" | "minimal_clean (极简高级)",
         "animation": "slide_from_left (左侧滑入)" | "pop_bounce (弹跳放大)" | "fade_in (渐显浮现)" | "shock_shake (震颤冲击)",
         "position": "center" | "center_left" | "top_left" | "bottom_center",
-        "start_frame": 10,
-        "duration_frames": 90
+        "start_sec": 文本出现的起始绝对秒数 (数字，如 66.0),
+        "duration_sec": 文本停留的持续时长秒数 (数字，如 3.0)
       }
     ]
   }
@@ -1148,9 +1374,10 @@ async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, m
   const userContext = `【分镜序号】：${scene.scene_id}
 【解说台词】：${scene.narration_text || ''}
 【分镜时长】：${durationSec}秒
-【素材状态】：${hasAsset ? (assetType === 'image' ? '当前已绑定图片（支持运镜推拉平移、滤镜调色、艺术字动效）' : '当前已绑定视频（支持时间截取、变速播放、视频调色、艺术字动效）') : '无素材（支持文字动效与程序化卡片）'}
+【素材状态】：${hasAsset ? (assetType === 'image' ? '当前已绑定图片（支持运镜推拉平移、滤镜调色、艺术字动效）' : '当前已绑定本地短视频（支持基于本段短视频加字幕/艺术字、变速播放、视频调色、二次微调截取，或指定新的原片下载区间）') : '尚未绑定本地视频（用户可预先指定要从网络视频下载第几分几秒到第几分几秒，以及叠加滤镜/字幕动效）'}
+${detRange ? `【系统已精准识别出的时间段】：起始 ${detRange.startSec}秒 (${formatSecToMMSS(detRange.startSec)}) ~ 结束 ${detRange.endSec}秒 (${formatSecToMMSS(detRange.endSec)})` : ''}
 【用户口语指令】："${p}"
-请以视听导演的角度，首先用人话回答用户你将如何剪辑与调节（写入 ai_speech_reply），然后输出广义调节参数：`;
+请以视听导演的角度，首先用人话回答用户你将如何执行片段跳转下载或剪辑调节（写入 ai_speech_reply），然后输出广义调节参数：`;
 
   if (apiKey) {
     try {
@@ -1185,12 +1412,20 @@ async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, m
         const match = content.match(/\{[\s\S]*\}/);
         if (match) {
           const parsed = JSON.parse(match[0]);
+          if (detRange && parsed.action !== 'media_modifiers') {
+            parsed.action = 'media_modifiers';
+            parsed.media_modifiers = parsed.media_modifiers || {};
+          }
           if (parsed.media_modifiers) {
             const m = parsed.media_modifiers;
             if (m.timeline) {
               if (m.timeline.trim_start_sec !== undefined) m.trim_start_sec = m.timeline.trim_start_sec;
               if (m.timeline.trim_end_sec !== undefined) m.trim_end_sec = m.timeline.trim_end_sec;
               if (m.timeline.playback_rate !== undefined) m.playback_rate = m.timeline.playback_rate;
+            }
+            if (detRange) {
+              m.trim_start_sec = detRange.startSec;
+              m.trim_end_sec = detRange.endSec;
             }
             if (m.visual_tone) {
               m.filters = { ...(m.filters || {}), ...m.visual_tone };
@@ -1200,6 +1435,13 @@ async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, m
             }
             if (m.text_and_overlays) {
               m.text_overlays = m.text_and_overlays;
+            }
+            if (Array.isArray(m.text_overlays)) {
+              m.text_overlays = m.text_overlays.map((ov) => ({
+                ...ov,
+                start_frame: ov.start_frame !== undefined ? ov.start_frame : Math.max(0, Math.round(Number(ov.start_sec || 0) * 30)),
+                duration_frames: ov.duration_frames !== undefined ? ov.duration_frames : Math.max(15, Math.round(Number(ov.duration_sec || 3) * 30)),
+              }));
             }
           }
           return {
@@ -1217,9 +1459,12 @@ async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, m
 
   // 本地通用降级解析（无网络/离线时的稳健保障）
   const fallback = parsePromptWithRules(p, hasAsset, assetType);
+  const fallbackReply = detRange
+    ? `好的！已将你的口令「${p}」转化为片段截取指令：${formatSecToMMSS(detRange.startSec)} (${detRange.startSec}s) ~ ${formatSecToMMSS(detRange.endSec)} (${detRange.endSec}s)，共 ${(detRange.endSec - detRange.startSec).toFixed(1)} 秒。现在填入视频 URL 点击「⬇️ 下载」即可只下载该片段！`
+    : `已根据你的指令「${p}」调节了视频画面与剪辑参数。`;
   return {
     ...fallback,
-    ai_speech_reply: `已根据你的指令「${p}」调节了视频画面与剪辑参数。`,
+    ai_speech_reply: fallbackReply,
     isAi: false,
     modelUsed: '本地解析引擎',
   };
@@ -2514,6 +2759,38 @@ function saveWriterProjectData(projectId, part, payload) {
       } catch (e) {}
     }
     fs.writeFileSync(paths.briefPath, JSON.stringify(toSaveBrief, null, 2), 'utf8');
+    // 同步标题到 project-config.json 与尚未编排的占位 scene-manifest.json，避免界面显示旧模板标题
+    const newTitle = (toSaveBrief.title || '').trim();
+    if (newTitle) {
+      const projConfigPath = path.join(paths.dataDir, 'project-config.json');
+      if (fs.existsSync(projConfigPath)) {
+        try {
+          const cfg = JSON.parse(fs.readFileSync(projConfigPath, 'utf8'));
+          if (cfg.title !== newTitle) {
+            cfg.title = newTitle;
+            fs.writeFileSync(projConfigPath, JSON.stringify(cfg, null, 2), 'utf8');
+          }
+        } catch (e) {}
+      }
+      if (fs.existsSync(paths.manifestPath)) {
+        try {
+          const mf = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
+          const isSinglePlaceholder =
+            Array.isArray(mf.scenes) &&
+            mf.scenes.length === 1 &&
+            typeof mf.scenes[0]?.narration_text === 'string' &&
+            mf.scenes[0].narration_text.includes('点击修改文案');
+          if (isSinglePlaceholder) {
+            mf.project_title = newTitle;
+            mf.title = newTitle;
+            mf.scenes[0].narration_text = `${newTitle}（请在文案创作台完成定稿并同步，或点击修改文案）`;
+            if (mf.scenes[0].ppt_slide_spec) mf.scenes[0].ppt_slide_spec.theme_title = newTitle;
+            if (mf.scenes[0].procedural_props) mf.scenes[0].procedural_props.headline = newTitle;
+            fs.writeFileSync(paths.manifestPath, JSON.stringify(mf, null, 2), 'utf8');
+          }
+        } catch (e) {}
+      }
+    }
     return { ok: true, message: '立项 Brief 已保存' };
   }
   if (part === 'materials') {
@@ -3744,9 +4021,7 @@ const server = http.createServer(async (req, res) => {
       if (ensureTableFields(manifest)) {
         fs.writeFileSync(paths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
       }
-      const assetIndex = fs.existsSync(paths.assetIndexPath)
-        ? JSON.parse(fs.readFileSync(paths.assetIndexPath, 'utf8'))
-        : { assets: [] };
+      const assetIndex = syncLocalProjectAssets(queryProject);
       const promptConfig = fs.existsSync(paths.promptConfigPath)
         ? JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8'))
         : {
@@ -3939,9 +4214,10 @@ const server = http.createServer(async (req, res) => {
 
       const startTime = Date.now();
       try {
-        if (provider === 'siliconflow') {
+        if (provider === 'siliconflow' || (baseUrl && baseUrl.includes('siliconflow.cn'))) {
           const cleanBase = (baseUrl || 'https://api.siliconflow.cn/v1').trim().replace(/\/+$/, '');
           const testRes = await fetch(`${cleanBase}/models`, {
+            signal: AbortSignal.timeout(15000),
             headers: { 'Authorization': `Bearer ${apiKey.trim()}` }
           });
           const latencyMs = Date.now() - startTime;
@@ -3963,6 +4239,7 @@ const server = http.createServer(async (req, res) => {
         } else if (provider === 'runway') {
           const cleanBase = (baseUrl || 'https://api.dev.runwayml.com/v1').trim().replace(/\/+$/, '');
           const testRes = await fetch(`${cleanBase}/tasks`, {
+            signal: AbortSignal.timeout(15000),
             headers: {
               'Authorization': `Bearer ${apiKey.trim()}`,
               'X-Runway-Version': '2024-09-13'
@@ -3990,7 +4267,7 @@ const server = http.createServer(async (req, res) => {
           const rootBase = cleanBase.replace(/\/openai\/?$/, '');
           const testUrl = `${rootBase}/models?key=${apiKey.trim()}`;
 
-          const testRes = await fetch(testUrl);
+          const testRes = await fetch(testUrl, { signal: AbortSignal.timeout(15000) });
           const latencyMs = Date.now() - startTime;
           if (!testRes.ok) {
             const errText = await testRes.text();
@@ -4020,6 +4297,7 @@ const server = http.createServer(async (req, res) => {
           const targetUrl = `${cleanBase}/chat/completions`;
           const testRes = await fetch(targetUrl, {
             method: 'POST',
+            signal: AbortSignal.timeout(15000),
             headers: {
               'Content-Type': 'application/json',
               'Authorization': `Bearer ${apiKey.trim()}`,
@@ -4056,32 +4334,127 @@ const server = http.createServer(async (req, res) => {
           }));
         }
       } catch (err) {
+        const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({
           ok: false,
           latencyMs: Date.now() - startTime,
-          error: `无法连接到服务: ${err.message}`
+          error: isTimeout ? '连接超时（超过 15 秒未响应），请检查本机网络或代理是否能访问 OpenRouter' : `无法连接到服务: ${err.message}`
         }));
       }
+    }
+
+    // 4.12 测试 Tavily API 连接
+    if (req.method === 'POST' && pathname === '/api/test-tavily') {
+      const body = await readBody(req);
+      const curPaths = getPaths(body.projectId || queryProject);
+      const effectiveKey = String(body.apiKey || '').trim() || getWriterTavilyKey(curPaths.projectDir);
+      if (!effectiveKey) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '请先填入有效的 Tavily API Key' }));
+      }
+      const startTime = Date.now();
+      try {
+        const testRes = await fetch('https://api.tavily.com/search', {
+          method: 'POST',
+          signal: AbortSignal.timeout(15000),
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${effectiveKey}`,
+          },
+          body: JSON.stringify({ query: 'WhyVideo test', search_depth: 'basic', max_results: 1 }),
+        });
+        const latencyMs = Date.now() - startTime;
+        if (!testRes.ok) {
+          const errText = await testRes.text();
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({
+            ok: false,
+            latencyMs,
+            error: `Tavily 校验失败 (HTTP ${testRes.status}): ${errText.slice(0, 200)}`,
+          }));
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({
+          ok: true,
+          latencyMs,
+          message: `Tavily 连接成功！（检索接口正常，耗时 ${latencyMs}ms）`,
+        }));
+      } catch (err) {
+        const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({
+          ok: false,
+          latencyMs: Date.now() - startTime,
+          error: isTimeout ? 'Tavily 连接超时（15秒），请检查网络或代理设置' : `Tavily 连接失败: ${err.message}`,
+        }));
+      }
+    }
+
+    // 4.13 检测本机 哼哼猫桌面端 (meowload CLI) 连接状态
+    if (req.method === 'POST' && pathname === '/api/test-meowload') {
+      const startTime = Date.now();
+      const candidates = ['/usr/local/bin/meowload', '/opt/homebrew/bin/meowload'];
+      let cliPath = candidates.find((p) => fs.existsSync(p)) || '';
+      if (!cliPath) {
+        const whichRes = spawnSync('which', ['meowload'], { encoding: 'utf8' });
+        if (whichRes.status === 0 && whichRes.stdout.trim()) cliPath = whichRes.stdout.trim();
+      }
+      const latencyMs = Date.now() - startTime;
+      if (!cliPath) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({
+          ok: false,
+          latencyMs,
+          error: '未检测到本机哼哼猫桌面端 CLI (meowload)，请确认已安装并登录本机哼哼猫桌面端',
+        }));
+      }
+      const verRes = spawnSync(cliPath, ['--version'], { encoding: 'utf8', timeout: 5000 });
+      const verText = (verRes.stdout || verRes.stderr || '').trim().split('\n')[0] || '';
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({
+        ok: true,
+        latencyMs: Date.now() - startTime,
+        cliPath,
+        message: `本机哼哼猫已连接 (${cliPath}${verText ? ' · ' + verText : ''})`,
+      }));
     }
 
     // 4.15 获取 OpenRouter 真实支持的最新模型列表
     if (req.method === 'GET' && pathname === '/api/openrouter-models') {
       try {
+        const headers = {
+          'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+          'X-Title': 'WhyVideo Studio'
+        };
+        const curPaths = getPaths(queryProject);
+        let savedKey = '';
+        if (fs.existsSync(curPaths.promptConfigPath)) {
+          try { savedKey = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8'))?.apiKey || ''; } catch (e) {}
+        }
+        const reqKey = String(urlObj.searchParams.get('apiKey') || savedKey || '').trim();
+        if (reqKey && reqKey.startsWith('sk-or-')) {
+          headers['Authorization'] = `Bearer ${reqKey}`;
+        }
         const resModels = await fetch('https://openrouter.ai/api/v1/models', {
-          headers: {
-            'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
-            'X-Title': 'WhyVideo Studio'
-          }
+          signal: AbortSignal.timeout(15000),
+          headers
         });
         if (resModels.ok) {
           const mJson = await resModels.json();
-          const list = (mJson.data || []).map((m) => ({
-            id: m.id,
-            name: m.name || m.id,
-            description: m.description ? m.description.slice(0, 80) : '',
-            context_length: m.context_length
-          }));
+          const priorityPrefixes = ['deepseek/', 'google/', 'anthropic/', 'openai/', 'qwen/', 'meta-llama/', 'x-ai/', 'mistralai/'];
+          const rankOf = (id) => {
+            const idx = priorityPrefixes.findIndex((p) => String(id || '').startsWith(p));
+            return idx === -1 ? 99 : idx;
+          };
+          const list = (mJson.data || [])
+            .map((m) => ({
+              id: m.id,
+              name: m.name || m.id,
+              description: m.description ? m.description.slice(0, 80) : '',
+              context_length: m.context_length
+            }))
+            .sort((a, b) => rankOf(a.id) - rankOf(b.id) || String(a.id).localeCompare(String(b.id)));
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
           return res.end(JSON.stringify({ ok: true, models: list }));
         }
@@ -4596,16 +4969,37 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ ok: true, uploadedAsset: newAsset, manifest, assetIndex }));
     }
 
-    // 6.5 通过本机哼哼猫桌面端 (meowload CLI) 或 REST API 解析网络链接并下载视频/图片素材到本地
+    const downloadProgressMap = globalThis.__whyvideoDownloadProgressMap || (globalThis.__whyvideoDownloadProgressMap = new Map());
+
+    if (req.method === 'GET' && pathname === '/api/download-progress') {
+      const jobId = String(url.searchParams.get('jobId') || '').trim();
+      const job = downloadProgressMap.get(jobId) || { percent: 0, text: '准备中...', done: false, error: null };
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, ...job }));
+    }
+
+    // 6.5 仅通过本机哼哼猫桌面端 (meowload CLI) 解析网络链接并按指定片段下载视频/图片素材到当前工程专属 assets 目录（绝不调用远程收费 API）
     if (req.method === 'POST' && pathname === '/api/download-url-asset') {
       const body = await readBody(req);
-      const { sceneId, url: rawInputUrl, projectId } = body;
+      const { sceneId, url: rawInputUrl, projectId, clipStartSec: reqStartSec, clipEndSec: reqEndSec, rawPrompt, jobId } = body;
       const targetProject = projectId || queryProject;
       const curPaths = getPaths(targetProject);
+      const updateDlProgress = (percent, text, extra = {}) => {
+        if (!jobId) return;
+        downloadProgressMap.set(String(jobId), {
+          percent: Math.max(0, Math.min(100, Math.round(percent))),
+          text: text || '',
+          done: Boolean(extra.done),
+          error: extra.error || null,
+          updatedAt: Date.now(),
+        });
+      };
+      updateDlProgress(2, '正在校验视频链接...');
 
       const urlMatch = String(rawInputUrl || '').match(/https?:\/\/[^\s"'<>]+/i);
       const targetUrl = urlMatch ? urlMatch[0].trim() : String(rawInputUrl || '').trim();
       if (!targetUrl) {
+        updateDlProgress(0, '链接无效', { done: true, error: '请输入有效的网络视频或帖子链接' });
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ ok: false, error: '请输入有效的网络视频或帖子链接（支持 YouTube、B站、抖音、TikTok、小红书等）' }));
       }
@@ -4621,19 +5015,53 @@ const server = http.createServer(async (req, res) => {
       };
 
       const meowloadCli = resolveMeowloadCli();
-      const meowloadKey = getMeowloadApiKey(curPaths.projectDir);
 
-      if (!meowloadCli && !meowloadKey) {
+      if (!meowloadCli) {
+        updateDlProgress(0, '未检测到本机哼哼猫客户端', { done: true, error: '未检测到本机哼哼猫客户端 CLI (meowload)' });
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({
           ok: false,
-          error: '未检测到本机哼哼猫客户端 CLI (meowload)，且未配置哼哼猫 API Key。请安装并登录哼哼猫桌面端，或在右上角「🪐 AI 全流程模型调度中心」填入 API Key。'
+          error: '未检测到本机哼哼猫客户端 CLI (meowload)。请确认已安装并登录本机哼哼猫桌面端。'
         }));
       }
 
       try {
-        const safeScene = String(sceneId || 'scene').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+        const manifestPre = fs.existsSync(curPaths.manifestPath)
+          ? JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'))
+          : { scenes: [] };
+        const sceneIdx = (manifestPre.scenes || []).findIndex((s) => s.scene_id === sceneId);
+        const scenePre = sceneIdx >= 0 ? manifestPre.scenes[sceneIdx] : null;
+        const seqNumStr = String(sceneIdx >= 0 ? sceneIdx + 1 : 1).padStart(2, '0');
+        const seqLabel = `序列${seqNumStr}`;
+        const safeProject = String(targetProject || 'proj').replace(/[^a-zA-Z0-9_\u4e00-\u9fa5-]/g, '_');
+
+        // 解析用户指定的片段截取区间（优先级：请求显式传入 > 口令实时解析 > 镜头已编译的 download_clip_*）
+        let clipStart = (reqStartSec !== undefined && reqStartSec !== null && reqStartSec !== '') ? Number(reqStartSec) : null;
+        let clipEnd = (reqEndSec !== undefined && reqEndSec !== null && reqEndSec !== '') ? Number(reqEndSec) : null;
+        if (clipStart === null || clipEnd === null || Number.isNaN(clipStart) || Number.isNaN(clipEnd) || clipEnd <= clipStart) {
+          const parsedFromPrompt = parseTimeRangeFromText(rawPrompt || '');
+          if (parsedFromPrompt) {
+            clipStart = parsedFromPrompt.startSec;
+            clipEnd = parsedFromPrompt.endSec;
+          } else if (
+            scenePre &&
+            scenePre.download_clip_start_sec !== undefined &&
+            scenePre.download_clip_end_sec !== undefined &&
+            Number(scenePre.download_clip_end_sec) > Number(scenePre.download_clip_start_sec)
+          ) {
+            clipStart = Number(scenePre.download_clip_start_sec);
+            clipEnd = Number(scenePre.download_clip_end_sec);
+          }
+        }
+
+        const hasClipRange = clipStart !== null && clipEnd !== null && !Number.isNaN(clipStart) && !Number.isNaN(clipEnd) && clipEnd > clipStart;
+        const startSec = hasClipRange ? Math.max(0, Number(clipStart.toFixed(1))) : 0;
+        const endSec = hasClipRange ? Number(clipEnd.toFixed(1)) : 0;
+        const rangeFileTag = hasClipRange ? `_${formatSecToFileTag(startSec)}-${formatSecToFileTag(endSec)}` : '';
+        const rangeDisplayTag = hasClipRange ? `${formatSecToMMSS(startSec)}~${formatSecToMMSS(endSec)}` : '';
+
         let isVideo = true;
+        let folder = 'assets/video';
         let siteName = 'web';
         let postTitle = '';
         let relPath = '';
@@ -4647,212 +5075,133 @@ const server = http.createServer(async (req, res) => {
           siteName = u.hostname.replace(/^www\./, '').split('.')[0] || 'web';
         } catch (e) {}
 
-        if (meowloadCli) {
-          // 优先使用本机已登录会员的哼哼猫桌面端 CLI，零 API 积分消耗
-          const tmpDir = path.join(curPaths.publicDir, 'assets', `.meow_tmp_${Date.now()}`);
-          fs.mkdirSync(tmpDir, { recursive: true });
+        // 仅使用本机已登录会员的哼哼猫桌面端 CLI，通过 --output-dir 定向到当前工程临时目录（绝不调用远程收费 API）
+        const tmpDir = path.join(curPaths.publicDir, 'assets', `meow_tmp_${Date.now()}`);
+        fs.mkdirSync(tmpDir, { recursive: true });
+        updateDlProgress(8, '正在连接本机哼哼猫桌面端解析并下载...');
 
-          const runCliDownload = () => new Promise((resolve, reject) => {
-            const proc = spawn(meowloadCli, ['download', targetUrl, '--media_type', 'video,image', '--output-dir', tmpDir], {
-              stdio: ['ignore', 'pipe', 'pipe'],
-            });
-            let outLog = '';
-            let errLog = '';
-            proc.stdout.on('data', (d) => { outLog += d.toString(); });
-            proc.stderr.on('data', (d) => { errLog += d.toString(); });
-
-            const timer = setTimeout(() => {
-              try { proc.kill('SIGKILL'); } catch (e) {}
-              reject(new Error('本机哼哼猫下载超时（超过 5 分钟）'));
-            }, 300000);
-
-            proc.on('error', (err) => {
-              clearTimeout(timer);
-              reject(err);
-            });
-            proc.on('close', (code) => {
-              clearTimeout(timer);
-              if (code === 0) {
-                resolve({ outLog, errLog });
-              } else {
-                const msg = (errLog || outLog || '').trim().split('\n').pop() || `退出码 ${code}`;
-                reject(new Error(`本机哼哼猫客户端下载失败: ${msg}（请确认桌面端已启动并登录会员账号）`));
-              }
-            });
+        const runCliDownload = () => new Promise((resolve, reject) => {
+          const proc = spawn(meowloadCli, ['download', targetUrl, '--media_type', 'video,image', '--output-dir', tmpDir], {
+            stdio: ['ignore', 'pipe', 'pipe'],
           });
-
-          try {
-            await runCliDownload();
-            const files = fs.readdirSync(tmpDir)
-              .filter((f) => !f.startsWith('.'))
-              .map((f) => ({ name: f, fullPath: path.join(tmpDir, f), stat: fs.statSync(path.join(tmpDir, f)) }))
-              .filter((item) => item.stat.isFile() && item.stat.size > 0);
-
-            const videoFile = files.find((f) => /\.(mp4|mov|webm|mkv)$/i.test(f.name));
-            const imageFile = files.find((f) => /\.(jpg|jpeg|png|webp)$/i.test(f.name));
-            const picked = videoFile || imageFile || files[0];
-
-            if (!picked) {
-              throw new Error('哼哼猫桌面端未在目录中输出有效媒体文件，请检查该链接是否受限或桌面端是否已登录');
+          let outLog = '';
+          let errLog = '';
+          let simPct = 10;
+          const simTimer = setInterval(() => {
+            if (simPct < 70) {
+              simPct += 3;
+              updateDlProgress(simPct, `本机哼哼猫下载中 (${simPct}%)...`);
             }
+          }, 800);
 
-            isVideo = Boolean(videoFile) || !/\.(jpg|jpeg|png|webp)$/i.test(picked.name);
-            const rawExt = path.extname(picked.name).replace(/^\./, '').toLowerCase() || (isVideo ? 'mp4' : 'jpg');
-            const baseName = path.basename(picked.name, path.extname(picked.name));
-            postTitle = baseName.slice(0, 60);
-
-            const folder = isVideo ? 'assets/video' : 'assets/images';
-            const safeFile = `${safeScene}_meow_${siteName}_${Date.now()}.${rawExt}`;
-            relPath = `${folder}/${safeFile}`;
-            diskPath = path.join(curPaths.publicDir, relPath);
-            fs.mkdirSync(path.dirname(diskPath), { recursive: true });
-            fs.renameSync(picked.fullPath, diskPath);
-          } finally {
-            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
-          }
-        } else {
-          // 若本机未安装桌面端 CLI，则回退使用 REST API
-          downloadSourceMode = 'rest_api';
-          const isYouTube = /(?:youtube\.com|youtu\.be)\//i.test(targetUrl);
-          let extractData = null;
-
-          const callMeowloadEndpoint = async (endpoint) => {
-            const resp = await fetch(`https://api.meowload.net/openapi/v1${endpoint}`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${meowloadKey}`,
-                'Accept-Language': 'zh',
-              },
-              body: JSON.stringify({ url: targetUrl }),
-            });
-            const json = await resp.json().catch(() => ({}));
-            return { ok: resp.ok, status: resp.status, data: json };
+          const handleChunk = (chunkStr) => {
+            const pctMatches = [...chunkStr.matchAll(/(\d{1,3}(?:\.\d+)?)\s*%/g)];
+            if (pctMatches.length > 0) {
+              const rawPct = parseFloat(pctMatches[pctMatches.length - 1][1]);
+              if (!Number.isNaN(rawPct) && rawPct >= 0 && rawPct <= 100) {
+                const mapped = 10 + Math.round(rawPct * 0.65);
+                if (mapped > simPct) simPct = mapped;
+                updateDlProgress(simPct, `本机哼哼猫下载中 (${Math.round(rawPct)}%)...`);
+              }
+            }
           };
 
-          if (isYouTube) {
-            const proxyRes = await callMeowloadEndpoint('/youtube/proxy-download');
-            if (proxyRes.ok && Array.isArray(proxyRes.data?.medias) && proxyRes.data.medias.length > 0) {
-              extractData = proxyRes.data;
+          proc.stdout.on('data', (d) => {
+            const s = d.toString();
+            outLog += s;
+            handleChunk(s);
+          });
+          proc.stderr.on('data', (d) => {
+            const s = d.toString();
+            errLog += s;
+            handleChunk(s);
+          });
+
+          const timer = setTimeout(() => {
+            clearInterval(simTimer);
+            try { proc.kill('SIGKILL'); } catch (e) {}
+            reject(new Error('本机哼哼猫下载超时（超过 5 分钟）'));
+          }, 300000);
+
+          proc.on('error', (err) => {
+            clearInterval(simTimer);
+            clearTimeout(timer);
+            reject(err);
+          });
+          proc.on('close', (code) => {
+            clearInterval(simTimer);
+            clearTimeout(timer);
+            if (code === 0) {
+              resolve({ outLog, errLog });
             } else {
-              const postRes = await callMeowloadEndpoint('/extract/post');
-              if (!postRes.ok) {
-                throw new Error(postRes.data?.message || `哼哼猫提取失败 (HTTP ${postRes.status})`);
-              }
-              extractData = postRes.data;
+              const msg = (errLog || outLog || '').trim().split('\n').pop() || `退出码 ${code}`;
+              reject(new Error(`本机哼哼猫客户端下载失败: ${msg}（请确认桌面端已启动并登录会员账号）`));
             }
-          } else {
-            const postRes = await callMeowloadEndpoint('/extract/post');
-            if (!postRes.ok) {
-              throw new Error(postRes.data?.message || `哼哼猫提取失败 (HTTP ${postRes.status})`);
-            }
-            extractData = postRes.data;
+          });
+        });
+
+        try {
+          await runCliDownload();
+          updateDlProgress(78, '下载完成，正在检查媒体文件...');
+          const files = fs.readdirSync(tmpDir)
+            .filter((f) => !f.startsWith('.'))
+            .map((f) => ({ name: f, fullPath: path.join(tmpDir, f), stat: fs.statSync(path.join(tmpDir, f)) }))
+            .filter((item) => item.stat.isFile() && item.stat.size > 0);
+
+          const videoFile = files.find((f) => /\.(mp4|mov|webm|mkv)$/i.test(f.name));
+          const imageFile = files.find((f) => /\.(jpg|jpeg|png|webp)$/i.test(f.name));
+          const picked = videoFile || imageFile || files[0];
+
+          if (!picked) {
+            throw new Error('哼哼猫桌面端未在目录中输出有效媒体文件，请检查该链接是否受限或桌面端是否已登录');
           }
 
-          const medias = Array.isArray(extractData?.medias) ? extractData.medias : [];
-          if (medias.length === 0) {
-            throw new Error('该链接未提取到可下载的视频或图片媒体资源');
-          }
+          isVideo = Boolean(videoFile) || !/\.(jpg|jpeg|png|webp)$/i.test(picked.name);
+          const rawExt = isVideo ? 'mp4' : (path.extname(picked.name).replace(/^\./, '').toLowerCase() || 'jpg');
+          const baseName = path.basename(picked.name, path.extname(picked.name));
+          postTitle = baseName.slice(0, 60);
 
-          const media = medias.find((m) => m.media_type === 'video')
-            || medias.find((m) => m.media_type === 'image')
-            || medias[0];
-          isVideo = media.media_type !== 'image';
-          siteName = extractData.site || siteName;
-          postTitle = (extractData.title || extractData.text || `${siteName}_${extractData.id || Date.now()}`).slice(0, 60);
-          detectedDuration = Number(media.duration) > 0 ? Number(media.duration) : (isVideo ? 15.0 : null);
-
-          const folder = isVideo ? 'assets/video' : 'assets/images';
-          const ext = isVideo ? 'mp4' : 'jpg';
-          const safeFile = `${safeScene}_meow_${siteName}_${Date.now()}.${ext}`;
+          folder = isVideo ? 'assets/video' : 'assets/images';
+          const safeFile = `${safeProject}_${seqLabel}${rangeFileTag}_${siteName}_${String(Date.now()).slice(-6)}.${rawExt}`;
           relPath = `${folder}/${safeFile}`;
           diskPath = path.join(curPaths.publicDir, relPath);
           fs.mkdirSync(path.dirname(diskPath), { recursive: true });
 
-          const mediaHeaders = (media.headers && typeof media.headers === 'object') ? media.headers : {};
-          const downloadBinary = async (dlUrl, destFile, isProxyUrl = false) => {
-            const reqHeaders = {
-              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-              ...(isProxyUrl ? {} : mediaHeaders),
-            };
-            const dlResp = await fetch(dlUrl, { headers: reqHeaders });
-            if (!dlResp.ok) {
-              throw new Error(`下载媒体流失败 (HTTP ${dlResp.status})`);
-            }
-            const buf = Buffer.from(await dlResp.arrayBuffer());
-            fs.writeFileSync(destFile, buf);
-          };
-
-          if (isVideo) {
-            const variants = Array.isArray(media.variants) ? media.variants : [];
-            const candidates = variants.filter((v) => v && (v.video_proxy_url || v.video_url));
-            candidates.sort((a, b) => {
-              const aProxy = a.video_proxy_url ? 1 : 0;
-              const bProxy = b.video_proxy_url ? 1 : 0;
-              if (aProxy !== bProxy) return bProxy - aProxy;
-              const aQ = Number(a.quality || 0);
-              const bQ = Number(b.quality || 0);
-              const aIn1080 = aQ > 0 && aQ <= 1080 ? 1 : 0;
-              const bIn1080 = bQ > 0 && bQ <= 1080 ? 1 : 0;
-              if (aIn1080 !== bIn1080) return bIn1080 - aIn1080;
-              if (Boolean(a.is_default) !== Boolean(b.is_default)) return a.is_default ? -1 : 1;
-              return bQ - aQ;
-            });
-
-            const chosenVariant = candidates[0] || null;
-            let downloaded = false;
-
-            if (chosenVariant) {
-              const vUrl = chosenVariant.video_proxy_url || chosenVariant.video_url;
-              const vIsProxy = Boolean(chosenVariant.video_proxy_url);
-              const hasSplitAudio = Boolean(chosenVariant.video_url && chosenVariant.audio_url);
-              const aUrl = chosenVariant.audio_proxy_url || chosenVariant.audio_url;
-              const aIsProxy = Boolean(chosenVariant.audio_proxy_url);
-
-              if (hasSplitAudio && aUrl) {
-                const tmpVideo = `${diskPath}.tmp_v.mp4`;
-                const tmpAudio = `${diskPath}.tmp_a.m4a`;
-                try {
-                  await downloadBinary(vUrl, tmpVideo, vIsProxy);
-                  await downloadBinary(aUrl, tmpAudio, aIsProxy);
-                  let ffRes = spawnSync('ffmpeg', ['-y', '-i', tmpVideo, '-i', tmpAudio, '-c', 'copy', diskPath], { encoding: 'utf8' });
-                  if (ffRes.status !== 0 || !fs.existsSync(diskPath)) {
-                    ffRes = spawnSync('ffmpeg', ['-y', '-i', tmpVideo, '-i', tmpAudio, '-c:v', 'copy', '-c:a', 'aac', diskPath], { encoding: 'utf8' });
-                  }
-                  if (fs.existsSync(diskPath) && fs.statSync(diskPath).size > 0) {
-                    downloaded = true;
-                  }
-                } catch (splitErr) {
-                  console.warn('[MeowLoad] 分轨下载或合并失败，回退直链下载:', splitErr.message);
-                } finally {
-                  try { if (fs.existsSync(tmpVideo)) fs.unlinkSync(tmpVideo); } catch (e) {}
-                  try { if (fs.existsSync(tmpAudio)) fs.unlinkSync(tmpAudio); } catch (e) {}
-                }
-              } else if (vUrl && !hasSplitAudio) {
-                try {
-                  await downloadBinary(vUrl, diskPath, vIsProxy);
-                  downloaded = true;
-                } catch (varErr) {
-                  console.warn('[MeowLoad] 变体直链下载失败，回退主 resource_url:', varErr.message);
-                }
-              }
-            }
-
-            if (!downloaded) {
-              const fallbackUrl = media.resource_proxy_url || media.resource_url;
-              if (!fallbackUrl) throw new Error('未找到可用的视频下载直链');
-              await downloadBinary(fallbackUrl, diskPath, Boolean(media.resource_proxy_url));
+          if (isVideo && hasClipRange) {
+            updateDlProgress(84, `正在用 FFmpeg 截取 ${rangeDisplayTag} 片段...`);
+            // 仅截取 startSec ~ endSec 片段写入工程专属 assets/video 目录，原完整临时文件在 finally 中立即销毁，绝不占满硬盘
+            const ffTrim = spawnSync(
+              'ffmpeg',
+              [
+                '-y',
+                '-ss', String(startSec),
+                '-to', String(endSec),
+                '-i', picked.fullPath,
+                '-c:v', 'libx264',
+                '-preset', 'veryfast',
+                '-crf', '20',
+                '-c:a', 'aac',
+                '-movflags', '+faststart',
+                diskPath,
+              ],
+              { encoding: 'utf8' }
+            );
+            if (ffTrim.status !== 0 || !fs.existsSync(diskPath) || fs.statSync(diskPath).size === 0) {
+              throw new Error(`视频片段截取 (${rangeDisplayTag}) 失败，请检查指定秒数是否超出原视频总长度`);
             }
           } else {
-            const imgUrl = media.resource_proxy_url || media.resource_url;
-            if (!imgUrl) throw new Error('未找到可用的图片下载直链');
-            await downloadBinary(imgUrl, diskPath, Boolean(media.resource_proxy_url));
+            fs.renameSync(picked.fullPath, diskPath);
           }
+          updateDlProgress(94, '正在写入工程素材库并绑定镜头...');
+        } finally {
+          try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
         }
 
-        // 用 ffprobe 探测本地视频真实时长与分辨率
+        // 用 ffprobe 探测本地已落盘短视频真实时长与分辨率
         if (isVideo) {
-          if (detectedDuration === null) detectedDuration = 15.0;
+          if (detectedDuration === null) {
+            detectedDuration = hasClipRange ? Number((endSec - startSec).toFixed(1)) : 15.0;
+          }
           try {
             const probe = spawnSync(
               'ffprobe',
@@ -4876,16 +5225,19 @@ const server = http.createServer(async (req, res) => {
 
         const assetIndex = fs.existsSync(curPaths.assetIndexPath)
           ? JSON.parse(fs.readFileSync(curPaths.assetIndexPath, 'utf8'))
-          : { assets: [] };
+          : { project_id: targetProject, assets: [] };
         const newAssetId = `${isVideo ? 'AST-VID-' : 'AST-IMG-'}${String(assetIndex.assets.length + 1).padStart(3, '0')}`;
         const ext = path.extname(relPath).replace(/^\./, '') || (isVideo ? 'mp4' : 'jpg');
-        const displayFileName = `[${siteName}] ${(postTitle || 'media').replace(/[\r\n]+/g, ' ').slice(0, 28)}.${ext}`;
+        const cleanTitle = (postTitle || siteName || '素材').replace(/[\r\n]+/g, ' ').slice(0, 22);
+        const displayFileName = `[${targetProject}·${seqLabel}]${hasClipRange ? ` (${rangeDisplayTag})` : ''} ${cleanTitle}.${ext}`;
 
         const newAsset = {
           asset_id: newAssetId,
           path: relPath,
           file_path: `projects/${targetProject}/public/${relPath}`,
           file_name: displayFileName,
+          sequence_label: `${targetProject}·${seqLabel}`,
+          clip_range: hasClipRange ? { start_sec: startSec, end_sec: endSec, label: rangeDisplayTag } : null,
           type: isVideo ? 'video' : 'image',
           media_type: isVideo ? 'video' : 'image',
           duration_seconds: detectedDuration,
@@ -4893,10 +5245,17 @@ const server = http.createServer(async (req, res) => {
           resolution: detectedResolution,
           license_status: 'approved',
           source_url: targetUrl,
-          tags: ['网络链接下载', downloadSourceMode === 'desktop_app' ? '哼哼猫桌面端' : '哼哼猫API', siteName, sceneId],
+          tags: [
+            '网络链接下载',
+            hasClipRange ? `片段:${rangeDisplayTag}` : '完整下载',
+            `${targetProject}·${seqLabel}`,
+            siteName,
+            sceneId,
+          ],
         };
         assetIndex.assets.push(newAsset);
         fs.writeFileSync(curPaths.assetIndexPath, JSON.stringify(assetIndex, null, 2), 'utf8');
+        const syncedAssetIndex = syncLocalProjectAssets(targetProject);
 
         const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
         const scene = manifest.scenes.find((s) => s.scene_id === sceneId);
@@ -4908,30 +5267,125 @@ const server = http.createServer(async (req, res) => {
           scene.status = 'READY_APPROVED';
           if (isVideo) {
             const reqSec = Number((scene.duration_ms / 1000).toFixed(1));
+            const playEndSec = detectedDuration ? Math.min(reqSec, detectedDuration) : reqSec;
+            // 本地文件本身已经是截取后的短视频，因此本地播放从 0.0s 开始，作为后续加字幕/动效的基准
             scene.trim_start_sec = 0.0;
-            scene.trim_end_sec = reqSec;
-            scene.trim_prompt = `默认前 ${reqSec} 秒`;
+            scene.trim_end_sec = playEndSec;
+            if (scene.media_modifiers) {
+              delete scene.media_modifiers.trim_start_sec;
+              delete scene.media_modifiers.trim_end_sec;
+            }
+            if (hasClipRange) {
+              scene.downloaded_clip_info = {
+                source_start_sec: startSec,
+                source_end_sec: endSec,
+                label: rangeDisplayTag,
+                local_duration_sec: detectedDuration,
+                sequence_label: `${targetProject}·${seqLabel}`,
+              };
+              delete scene.download_clip_start_sec;
+              delete scene.download_clip_end_sec;
+              scene.trim_prompt = `已截取原片 ${rangeDisplayTag} (本地长 ${detectedDuration}s)`;
+              scene.ai_speech_reply = `✅ 已为你从原视频只截取并下载了 ${rangeDisplayTag} 片段（共 ${detectedDuration}s），命名为「${displayFileName}」并存入本工程专属目录 projects/${targetProject}/public/${folder}/！现在可以在上方口令框针对这段短视频继续加字幕、滤镜或运镜动效。`;
+            } else {
+              scene.downloaded_clip_info = null;
+              scene.trim_prompt = `默认前 ${playEndSec} 秒`;
+            }
           }
         }
         syncTableToManifest(manifest);
         fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
         recompileProject(targetProject);
+        updateDlProgress(100, '下载并绑定完成 (100%)', { done: true });
 
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({
           ok: true,
           uploadedAsset: newAsset,
           manifest,
-          assetIndex,
-          message: `✅ 已通过${downloadSourceMode === 'desktop_app' ? '哼哼猫桌面端(会员)' : '哼哼猫API'}下载到本地 (${detectedResolution}${detectedDuration ? `, ${detectedDuration}s` : ''}) 并绑定至镜头 ${sceneId}！`
+          assetIndex: syncedAssetIndex,
+          message: hasClipRange
+            ? `✅ 已精准截取原视频 ${rangeDisplayTag} 片段 (${detectedDuration}s) 存入 projects/${targetProject}/public/assets/video/ 并绑定至 ${seqLabel}！`
+            : `✅ 已下载到本地 projects/${targetProject}/public/assets/ (${detectedResolution}${detectedDuration ? `, ${detectedDuration}s` : ''}) 并绑定至 ${seqLabel}！`
         }));
       } catch (err) {
+        updateDlProgress(0, err.message, { done: true, error: err.message });
         res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({
           ok: false,
           error: `链接解析下载失败: ${err.message}`
         }));
       }
+    }
+
+    // 6.6 从当前工程已下载/上传的本地素材列表中直接选用绑定到指定镜头
+    if (req.method === 'POST' && pathname === '/api/bind-project-asset') {
+      const body = await readBody(req);
+      const { sceneId, assetId, projectId } = body;
+      const targetProject = projectId || queryProject;
+      const curPaths = getPaths(targetProject);
+
+      const syncedAssetIndex = syncLocalProjectAssets(targetProject);
+      const pickedAsset = (syncedAssetIndex.assets || []).find((a) => a.asset_id === assetId);
+      if (!pickedAsset) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '未在本工程素材库中找到该素材' }));
+      }
+
+      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      const scene = manifest.scenes.find((s) => s.scene_id === sceneId);
+      if (!scene) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '未找到指定分镜' }));
+      }
+
+      const isVideo = pickedAsset.type === 'video' || /\.(mp4|mov|webm|mkv)$/i.test(pickedAsset.path || '');
+      scene.source_mode = 'manual_upload';
+      scene.visual_type = isVideo ? 'broll_video' : 'photo_motion';
+      scene.scene_type = scene.visual_type;
+      scene.final_asset_id = pickedAsset.asset_id;
+      scene.status = 'READY_APPROVED';
+      if (isVideo) {
+        const reqSec = Number((scene.duration_ms / 1000).toFixed(1));
+        const dur = Number(pickedAsset.duration_seconds) > 0 ? Number(pickedAsset.duration_seconds) : reqSec;
+        scene.trim_start_sec = 0.0;
+        scene.trim_end_sec = Math.min(reqSec, dur);
+        scene.trim_prompt = pickedAsset.clip_range?.label
+          ? `复用片段 ${pickedAsset.clip_range.label} (本地长 ${dur}s)`
+          : `默认前 ${Math.min(reqSec, dur)} 秒`;
+      }
+
+      syncTableToManifest(manifest);
+      fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+      recompileProject(targetProject);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({
+        ok: true,
+        manifest,
+        assetIndex: syncedAssetIndex,
+        message: `✅ 已将本工程素材「${pickedAsset.file_name || pickedAsset.asset_id}」绑定至镜头 ${sceneId}！`,
+      }));
+    }
+
+    // 6.7 清除预设的局部下载时间段限制（恢复整片下载）
+    if (req.method === 'POST' && pathname === '/api/clear-download-range') {
+      const body = await readBody(req);
+      const { sceneId, projectId } = body;
+      const targetProject = projectId || queryProject;
+      const curPaths = getPaths(targetProject);
+
+      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      const scene = manifest.scenes.find((s) => s.scene_id === sceneId);
+      if (scene) {
+        delete scene.download_clip_start_sec;
+        delete scene.download_clip_end_sec;
+      }
+      syncTableToManifest(manifest);
+      fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, manifest }));
     }
 
     // 7. 一句话 AI 剪辑指令
@@ -4953,20 +5407,11 @@ const server = http.createServer(async (req, res) => {
       let startSec = 0.0;
       let endSec = reqSec;
       const pStr = (prompt || '').trim();
+      const parsedRange = parseTimeRangeFromText(pStr, reqSec);
 
-      const rangeMatch = pStr.match(/(?:从)?(?:第)?\s*(\d+(?:\.\d+)?)\s*(?:秒)?\s*(?:到|至|-|~)\s*(?:第)?\s*(\d+(?:\.\d+)?)\s*(?:秒)?/i);
-      const startMatch = pStr.match(/(?:从|第)\s*(\d+(?:\.\d+)?)\s*(?:秒)?(?:开始|起)?/i);
-      const headMatch = pStr.match(/取前\s*(\d+(?:\.\d+)?)\s*秒/i);
-
-      if (rangeMatch) {
-        startSec = parseFloat(rangeMatch[1]);
-        endSec = parseFloat(rangeMatch[2]);
-      } else if (headMatch) {
-        startSec = 0.0;
-        endSec = parseFloat(headMatch[1]);
-      } else if (startMatch) {
-        startSec = parseFloat(startMatch[1]);
-        endSec = startSec + reqSec;
+      if (parsedRange) {
+        startSec = parsedRange.startSec;
+        endSec = parsedRange.endSec;
       } else if (pStr.includes('后半段') || pStr.includes('结尾') || pStr.includes('后')) {
         startSec = Math.max(0, 15.0 - reqSec);
         endSec = 15.0;
@@ -5000,7 +5445,7 @@ const server = http.createServer(async (req, res) => {
       );
     }
 
-    // 7.5 自然语言 AI 剪辑、动效与艺术字综合编译接口
+    // 7.5 自然语言 AI 剪辑、动效、艺术字与局部下载指令综合编译接口
     if (req.method === 'POST' && pathname === '/api/ai-intent') {
       const body = await readBody(req);
       const { sceneId, prompt, projectId, hasAsset, assetType } = body;
@@ -5016,6 +5461,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       const pStr = (prompt || '').trim();
+      const detRange = parseTimeRangeFromText(pStr);
       let promptCfg = {};
       if (fs.existsSync(curPaths.promptConfigPath)) {
         try { promptCfg = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8')); } catch (e) {}
@@ -5023,17 +5469,50 @@ const server = http.createServer(async (req, res) => {
       const normalizedCfg = normalizePromptConfig(promptCfg);
       const parsed = await callLlmRemotionCompiler(pStr, scene, Boolean(hasAsset), assetType || 'video', normalizedCfg);
 
+      const assetIndex = fs.existsSync(curPaths.assetIndexPath)
+        ? JSON.parse(fs.readFileSync(curPaths.assetIndexPath, 'utf8'))
+        : { assets: [] };
+      const boundAsset = scene.final_asset_id
+        ? (assetIndex.assets || []).find((a) => a.asset_id === scene.final_asset_id)
+        : null;
+      const hasBoundManualVideo = Boolean(boundAsset && scene.source_mode === 'manual_upload');
+
       if (parsed.action === 'media_modifiers' && parsed.media_modifiers) {
+        const modCopy = { ...parsed.media_modifiers };
+        const rawStart = detRange ? detRange.startSec : modCopy.trim_start_sec;
+        const rawEnd = detRange ? detRange.endSec : modCopy.trim_end_sec;
+        const hasValidRange = rawStart !== undefined && rawStart !== null && rawEnd !== undefined && rawEnd !== null && Number(rawEnd) > Number(rawStart);
+
+        if (hasValidRange) {
+          const sSec = Math.max(0, Number(Number(rawStart).toFixed(1)));
+          const eSec = Number(Number(rawEnd).toFixed(1));
+          // 始终将解析出的秒数绑定为下载按钮的片段跳转指令，方便用户随后点「⬇️ 下载」时直接局部下载
+          scene.download_clip_start_sec = sSec;
+          scene.download_clip_end_sec = eSec;
+
+          const localDur = Number(boundAsset?.duration_seconds || 0);
+          const isForRemoteDownload = !hasBoundManualVideo
+            || /下载|原视频|原片|拉取|链接/.test(pStr)
+            || (localDur > 0 && eSec > localDur + 0.5);
+
+          if (isForRemoteDownload) {
+            delete modCopy.trim_start_sec;
+            delete modCopy.trim_end_sec;
+            const rangeStr = `${formatSecToMMSS(sSec)} (${sSec}s) ~ ${formatSecToMMSS(eSec)} (${eSec}s)`;
+            parsed.summary = `🎯 已生成下载片段跳转指令：${rangeStr} [共 ${(eSec - sSec).toFixed(1)}s]，现在填入 URL 点击「⬇️ 下载」将只下载该片段！`;
+            parsed.ai_speech_reply = `🎯 已将你的口令编译为局部下载指令：点击下方「⬇️ 下载片段 (${formatSecToMMSS(sSec)}~${formatSecToMMSS(eSec)})」按钮时，将直接从原视频跳转抓取第 ${formatSecToMMSS(sSec)}（${sSec}秒）至 ${formatSecToMMSS(eSec)}（${eSec}秒）这 ${(eSec - sSec).toFixed(1)} 秒存入本工程 assets/video 目录，不占额外内存与空间！`;
+          } else {
+            scene.trim_start_sec = sSec;
+            scene.trim_end_sec = eSec;
+            modCopy.trim_start_sec = sSec;
+            modCopy.trim_end_sec = eSec;
+          }
+        }
+
         scene.media_modifiers = {
           ...(scene.media_modifiers || {}),
-          ...parsed.media_modifiers,
+          ...modCopy,
         };
-        if (parsed.media_modifiers.trim_start_sec !== undefined) {
-          scene.trim_start_sec = parsed.media_modifiers.trim_start_sec;
-        }
-        if (parsed.media_modifiers.trim_end_sec !== undefined) {
-          scene.trim_end_sec = parsed.media_modifiers.trim_end_sec;
-        }
         scene.ai_intent_prompt = pStr;
         scene.ai_speech_reply = parsed.ai_speech_reply || parsed.summary || '';
       } else if (parsed.action === 'switch_procedural') {
@@ -5079,6 +5558,8 @@ const server = http.createServer(async (req, res) => {
         scene.trim_prompt = undefined;
         scene.ai_intent_prompt = undefined;
         scene.ai_speech_reply = undefined;
+        scene.download_clip_start_sec = undefined;
+        scene.download_clip_end_sec = undefined;
       }
       syncTableToManifest(manifest);
       fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
@@ -5479,23 +5960,20 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         <div class="min-h-[60px] w-full flex items-start justify-end">
           <!-- 视觉分镜制作台快捷操作组 -->
           <div id="producerHeaderActions" class="w-full flex flex-wrap content-start justify-end items-center gap-2.5">
+            <button onclick="toggleVisualModelModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="打开 AI 全流程模型调度中心">
+              🪐 AI 全流程模型调度中心
+            </button>
             <button onclick="toggleAudioModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
               🎙️ 配音引擎配置
             </button>
             <button onclick="toggleBgmModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-gray-950 transition shadow-lg flex items-center gap-1.5 cursor-pointer">
               🎵 AI 自适应 BGM 工作台
             </button>
-            <button onclick="autoGenerateAllPromptsForPage()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-teal-600 to-emerald-600 hover:from-teal-500 hover:to-emerald-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="根据本页所有镜头的旁白内容，一键自动填入最佳运镜与视觉指示词">
-              ✨ 一键提炼全页指示词
-            </button>
-            <button onclick="generateAllPpt()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
-              ⚡ 批量生成全部 AI 画面
-            </button>
             <button onclick="saveAll()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 transition shadow-lg cursor-pointer">
               💾 保存镜头表并同步 Remotion
             </button>
             <a href="http://localhost:3100" target="_blank" class="px-3.5 py-1.5 text-xs font-semibold rounded-xl card hover:border-blue-500 text-blue-300 transition">
-              🎬 Remotion 预览 (:3100) ↗
+              🎬 打开 Remotion 预览 (:3100) ↗
             </a>
           </div>
 
@@ -6366,6 +6844,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span>🪐 一键载入全家桶预设：</span>
             </div>
             <div class="flex flex-wrap items-center gap-1">
+              <button type="button" onclick="refreshAllOpenRouterModels(true)" id="btnRefreshOrModels" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-600/30 hover:bg-emerald-600/60 text-emerald-200 border border-emerald-400/50 transition shadow-sm cursor-pointer">
+                <span>🔄 刷新 OpenRouter 模型列表</span>
+              </button>
               <button type="button" onclick="applyModelPreset('gemini')" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-600/30 hover:bg-blue-600/60 text-blue-200 border border-blue-400/50 transition shadow-sm">
                 <span>🪐 Gemini 生态</span>
               </button>
@@ -6401,21 +6882,31 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                   class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
                 <button type="button" onclick="testCurrentProviderConnection()" id="btnTestProvider" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-purple-900/60 border border-purple-500/40 text-purple-200 transition shrink-0 cursor-pointer">⚡测试</button>
               </div>
+              <div id="testConnStatus" class="hidden text-[11px] leading-snug pt-0.5"></div>
             </div>
           </div>
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-gray-800/80">
             <div>
               <label for="currentTavilyKeyInput" class="text-[10px] font-bold text-gray-300 block mb-0.5">🔎 Tavily 搜索 API Key（资料考证）</label>
-              <input type="password" id="currentTavilyKeyInput" autocomplete="off" placeholder="填写 Tavily Key；留空则保留已存 Key"
-                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-cyan-400" />
+              <div class="flex items-center gap-1">
+                <input type="password" id="currentTavilyKeyInput" autocomplete="off" placeholder="填写 Tavily Key；留空则保留已存 Key"
+                  class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-cyan-400" />
+                <button type="button" onclick="testTavilyConnection()" id="btnTestTavily" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-cyan-900/60 border border-cyan-500/40 text-cyan-200 transition shrink-0 cursor-pointer">⚡测试</button>
+              </div>
+              <div id="testTavilyStatus" class="hidden text-[11px] leading-snug pt-0.5"></div>
             </div>
             <div>
               <div class="flex items-center justify-between mb-0.5">
-                <label for="currentMeowloadKeyInput" class="text-[10px] font-bold text-teal-300">🐱 哼哼猫 API Key（全网视频链接下载）</label>
-                <a href="https://www.henghengmao.com/user/developer" target="_blank" class="text-[9px] text-teal-400 hover:underline">获取 Key ↗</a>
+                <label class="text-[10px] font-bold text-teal-300">🐱 本机哼哼猫桌面端（全网视频本地下载）</label>
+                <span class="text-[9px] text-teal-400/80">本地 CLI · 无需 API Key</span>
               </div>
-              <input type="password" id="currentMeowloadKeyInput" autocomplete="off" placeholder="填写哼哼猫 API Key；留空则保留已存 Key"
-                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-teal-500/50 text-white font-mono focus:outline-none focus:border-teal-400" />
+              <div class="flex items-center gap-1">
+                <div class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-teal-500/40 text-teal-200/90 font-mono truncate">
+                  💻 连接本机哼哼猫客户端 (meowload CLI)
+                </div>
+                <button type="button" onclick="testMeowloadConnection()" id="btnTestMeowload" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-teal-900/60 border border-teal-500/40 text-teal-200 transition shrink-0 cursor-pointer">⚡检测连接</button>
+              </div>
+              <div id="testMeowloadStatus" class="hidden text-[11px] leading-snug pt-0.5"></div>
             </div>
           </div>
         </div>
@@ -6433,13 +6924,12 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span id="accordionArrowModel1" class="text-[10px] text-gray-400 font-mono transition">▼</span>
             </button>
             <div id="accordionBodyModel1" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5">
-              <div class="flex flex-wrap gap-1">
-                <button type="button" onclick="selectWriterModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">DeepSeek V3 / Chat</button>
-                <button type="button" onclick="selectWriterModelSlug('google/gemini-2.5-pro')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Gemini 2.5 Pro</button>
-                <button type="button" onclick="selectWriterModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Claude 3.5 Sonnet</button>
-                <button type="button" onclick="selectWriterModelSlug('qwen/qwen-2.5-72b-instruct')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">通义千问 Qwen 2.5</button>
-              </div>
-              <input type="text" id="currentWriterModelInput" value="deepseek/deepseek-chat" placeholder="输入文案创作大模型 slug (如: deepseek/deepseek-chat, google/gemini-2.5-pro)..."
+              <datalist id="openrouterModelsList"></datalist>
+              <select id="writerModelSelect" onchange="if(this.value) selectWriterModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-purple-500/40 text-purple-100 font-mono focus:outline-none focus:border-purple-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentWriterModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" placeholder="从上方下拉选择，或手动输入/搜索模型 slug..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-purple-500/50 text-purple-200 font-mono font-bold focus:outline-none focus:border-purple-400" />
             </div>
           </div>
@@ -6455,15 +6945,11 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span id="accordionArrowModel2" class="text-[10px] text-gray-400 font-mono transition">▶</span>
             </button>
             <div id="accordionBodyModel2" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
-              <div class="flex flex-wrap gap-1">
-                <button type="button" onclick="selectVideoModelSlug('minimax/hailuo-3')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">MiniMax 海螺 H3</button>
-                <button type="button" onclick="selectVideoModelSlug('minimax/hailuo-3-max')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">MiniMax H3 Max</button>
-                <button type="button" onclick="selectVideoModelSlug('bytedance/seedance-2.0')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">字节 Seedance 2.0</button>
-                <button type="button" onclick="selectVideoModelSlug('alibaba/wan-2.6')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">阿里万象 Wan 2.6</button>
-                <button type="button" onclick="selectVideoModelSlug('kwaivgi/kling-v3.0-std')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">快手可灵 Kling v3</button>
-                <button type="button" onclick="selectVideoModelSlug('google/veo-3.1-fast')" class="px-2 py-0.5 rounded text-[10px] bg-emerald-600/25 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40">Google Veo 3.1</button>
-              </div>
-              <input type="text" id="currentVideoModelInput" list="openrouterVideoModelsList" value="minimax/hailuo-3" placeholder="选择或输入视频模型 slug..."
+              <select id="videoModelSelect" onchange="if(this.value) selectVideoModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-emerald-500/40 text-emerald-100 font-mono focus:outline-none focus:border-emerald-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取视频模型列表...</option>
+              </select>
+              <input type="text" id="currentVideoModelInput" list="openrouterVideoModelsList" value="minimax/hailuo-3" placeholder="从上方下拉选择，或手动输入视频模型 slug..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-emerald-500/50 text-emerald-200 font-mono font-bold focus:outline-none focus:border-emerald-400" />
               <datalist id="openrouterVideoModelsList"></datalist>
             </div>
@@ -6480,13 +6966,11 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span id="accordionArrowModel3" class="text-[10px] text-gray-400 font-mono transition">▶</span>
             </button>
             <div id="accordionBodyModel3" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
-              <div class="flex flex-wrap gap-1">
-                <button type="button" onclick="selectTextModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">DeepSeek Chat</button>
-                <button type="button" onclick="selectTextModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Claude 3.5 Sonnet</button>
-                <button type="button" onclick="selectTextModelSlug('google/gemini-2.5-flash')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">Gemini 2.5 Flash</button>
-                <button type="button" onclick="selectTextModelSlug('openai/gpt-4o-mini')" class="px-2 py-0.5 rounded text-[10px] bg-purple-600/25 hover:bg-purple-600/50 text-purple-300 border border-purple-500/40">GPT-4o Mini</button>
-              </div>
-              <input type="text" id="currentTextModelInput" value="deepseek/deepseek-chat" placeholder="选择或输入分镜提炼模型 slug..."
+              <select id="textModelSelect" onchange="if(this.value) selectTextModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-purple-500/40 text-purple-100 font-mono focus:outline-none focus:border-purple-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentTextModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" placeholder="从上方下拉选择，或手动输入分镜提炼模型 slug..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-purple-400" />
             </div>
           </div>
@@ -6502,12 +6986,11 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span id="accordionArrowModel4" class="text-[10px] text-gray-400 font-mono transition">▶</span>
             </button>
             <div id="accordionBodyModel4" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
-              <div class="flex flex-wrap gap-1">
-                <button type="button" onclick="selectImageModelSlug('black-forest-labs/flux-3-image')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">FLUX 3 Image</button>
-                <button type="button" onclick="selectImageModelSlug('recraft/recraft-v4.1')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">Recraft V4.1</button>
-                <button type="button" onclick="selectImageModelSlug('google/gemini-3.1-flash-image')" class="px-2 py-0.5 rounded text-[10px] bg-blue-600/25 hover:bg-blue-600/50 text-blue-300 border border-blue-500/40">Gemini 3.1 Image</button>
-              </div>
-              <input type="text" id="currentImageModelInput" list="openrouterImageModelsList" value="black-forest-labs/flux-3-image" placeholder="输入生图模型 slug..."
+              <select id="imageModelSelect" onchange="if(this.value) selectImageModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-blue-500/40 text-blue-100 font-mono focus:outline-none focus:border-blue-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取生图模型列表...</option>
+              </select>
+              <input type="text" id="currentImageModelInput" list="openrouterImageModelsList" value="black-forest-labs/flux-3-image" placeholder="从上方下拉选择，或手动输入生图模型 slug..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-blue-400" />
               <datalist id="openrouterImageModelsList"></datalist>
             </div>
@@ -6524,13 +7007,11 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span id="accordionArrowModel5" class="text-[10px] text-gray-400 font-mono transition">▶</span>
             </button>
             <div id="accordionBodyModel5" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
-              <div class="flex flex-wrap gap-1">
-                <button type="button" onclick="selectBgmModelSlug('deepseek/deepseek-chat')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">DeepSeek Chat</button>
-                <button type="button" onclick="selectBgmModelSlug('anthropic/claude-3.5-sonnet')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Claude 3.5 Sonnet</button>
-                <button type="button" onclick="selectBgmModelSlug('google/gemini-2.5-flash')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Gemini 2.5 Flash</button>
-                <button type="button" onclick="selectBgmModelSlug('meta/musicgen')" class="px-2 py-0.5 rounded text-[10px] bg-amber-600/25 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40">Meta MusicGen</button>
-              </div>
-              <input type="text" id="currentBgmModelInput" value="deepseek/deepseek-chat" placeholder="输入 BGM 音乐/审查模型 slug..."
+              <select id="bgmModelSelect" onchange="if(this.value) selectBgmModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-amber-500/40 text-amber-100 font-mono focus:outline-none focus:border-amber-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentBgmModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" placeholder="从上方下拉选择，或手动输入 BGM 模型 slug..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-amber-400" />
             </div>
           </div>
@@ -9571,33 +10052,177 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const btn = document.getElementById('btnTestProvider');
 
       if (!apiKey) {
-        alert('请先输入 OpenRouter API Key');
+        alert('请先输入 API Key');
         return;
       }
 
       btn.disabled = true;
       btn.innerHTML = '<span>⏳ 正在连接测试...</span>';
-      statusEl.classList.remove('hidden');
-      statusEl.innerHTML = '<span class="text-amber-400">正在与服务网关通信...</span>';
+      if (statusEl) {
+        statusEl.classList.remove('hidden');
+        statusEl.innerHTML = '<span class="text-amber-400">正在与服务网关通信...</span>';
+      }
 
       try {
-        const res = await fetch('/api/test-provider?project=' + activeProjectId, {
+        const res = await fetch('/api/test-provider?project=' + (activeProjectId || ''), {
           method: 'POST',
+          signal: AbortSignal.timeout(20000),
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ provider: 'openrouter', apiKey, baseUrl, model })
         });
         const data = await res.json();
         if (data.ok) {
-          statusEl.innerHTML = '<span class="text-emerald-400 font-bold">✅ ' + data.message + '</span>';
+          if (statusEl) statusEl.innerHTML = '<span class="text-emerald-400 font-bold">✅ ' + data.message + '</span>';
           showToast('✅ ' + data.message);
         } else {
-          statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ ' + (data.error || '连接失败') + '</span>';
+          const errMsg = data.error || '连接失败';
+          if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ ' + errMsg + '</span>';
+          showToast('❌ ' + errMsg);
         }
       } catch (e) {
-        statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 请求失败: ' + e.message + '</span>';
+        const msg = (e?.name === 'TimeoutError' || e?.name === 'AbortError') ? '请求超时（20秒），请检查网络或代理设置' : e.message;
+        if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 请求失败: ' + msg + '</span>';
+        showToast('❌ 请求失败: ' + msg);
       } finally {
         btn.disabled = false;
-        btn.innerHTML = '<span>⚡ 测试网关 API 连接</span>';
+        btn.innerHTML = '⚡测试';
+      }
+    }
+
+    async function testAuxiliaryApiConnection({ endpoint, inputId, btnId, statusId, label }) {
+      const apiKey = (document.getElementById(inputId)?.value || '').trim();
+      const statusEl = document.getElementById(statusId);
+      const btn = document.getElementById(btnId);
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '⏳';
+      }
+      if (statusEl) {
+        statusEl.classList.remove('hidden');
+        statusEl.innerHTML = '<span class="text-amber-400">正在测试 ' + label + ' 连接...</span>';
+      }
+      try {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          signal: AbortSignal.timeout(20000),
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ apiKey, projectId: activeProjectId || '' }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          if (statusEl) statusEl.innerHTML = '<span class="text-emerald-400 font-bold">✅ ' + data.message + '</span>';
+          showToast('✅ ' + data.message);
+        } else {
+          const errMsg = data.error || (label + ' 连接失败');
+          if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ ' + errMsg + '</span>';
+          showToast('❌ ' + errMsg);
+        }
+      } catch (e) {
+        const msg = (e?.name === 'TimeoutError' || e?.name === 'AbortError') ? '请求超时（20秒）' : e.message;
+        if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 请求失败: ' + msg + '</span>';
+        showToast('❌ ' + label + ' 请求失败: ' + msg);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = '⚡测试';
+        }
+      }
+    }
+
+    function testTavilyConnection() {
+      return testAuxiliaryApiConnection({
+        endpoint: '/api/test-tavily',
+        inputId: 'currentTavilyKeyInput',
+        btnId: 'btnTestTavily',
+        statusId: 'testTavilyStatus',
+        label: 'Tavily'
+      });
+    }
+
+    function testMeowloadConnection() {
+      return testAuxiliaryApiConnection({
+        endpoint: '/api/test-meowload',
+        inputId: 'currentMeowloadKeyInput',
+        btnId: 'btnTestMeowload',
+        statusId: 'testMeowloadStatus',
+        label: '哼哼猫'
+      });
+    }
+
+    const MODEL_PREFS_STORAGE_KEY = 'whyvideo_studio_model_prefs_v1';
+    const MODEL_PREF_FIELD_MAP = [
+      ['apiKey', 'currentApiKeyInput'],
+      ['baseUrl', 'currentBaseUrlInput'],
+      ['tavilyApiKey', 'currentTavilyKeyInput'],
+      ['writerModel', 'currentWriterModelInput'],
+      ['videoModel', 'currentVideoModelInput'],
+      ['textModel', 'currentTextModelInput'],
+      ['imageModel', 'currentImageModelInput'],
+      ['bgmModel', 'currentBgmModelInput'],
+    ];
+
+    function saveModelPrefsToLocal() {
+      try {
+        const prev = JSON.parse(localStorage.getItem(MODEL_PREFS_STORAGE_KEY) || '{}');
+        const next = { ...prev };
+        for (const [key, id] of MODEL_PREF_FIELD_MAP) {
+          const el = document.getElementById(id);
+          if (!el) continue;
+          const val = String(el.value || '').trim();
+          if (val) next[key] = val;
+        }
+        localStorage.setItem(MODEL_PREFS_STORAGE_KEY, JSON.stringify(next));
+      } catch (e) {}
+    }
+
+    function restoreModelPrefsFromLocal() {
+      try {
+        const prefs = JSON.parse(localStorage.getItem(MODEL_PREFS_STORAGE_KEY) || '{}');
+        if (!prefs || typeof prefs !== 'object') return;
+        for (const [key, id] of MODEL_PREF_FIELD_MAP) {
+          const el = document.getElementById(id);
+          const val = String(prefs[key] || '').trim();
+          if (el && val) {
+            el.value = val;
+          }
+        }
+        if (prefs.apiKey) visualConfig.apiKey = prefs.apiKey;
+        if (prefs.baseUrl) visualConfig.baseUrl = prefs.baseUrl;
+        if (prefs.writerModel) visualConfig.writerModel = prefs.writerModel;
+        if (prefs.videoModel) visualConfig.videoModel = prefs.videoModel;
+        if (prefs.textModel) visualConfig.textModel = prefs.textModel;
+        if (prefs.imageModel) visualConfig.imageModel = prefs.imageModel;
+        if (prefs.bgmModel) visualConfig.bgmModel = prefs.bgmModel;
+
+        const syncSelect = (selId, val) => {
+          const sel = document.getElementById(selId);
+          if (sel && val) sel.value = val;
+        };
+        syncSelect('writerModelSelect', visualConfig.writerModel);
+        syncSelect('videoModelSelect', visualConfig.videoModel);
+        syncSelect('textModelSelect', visualConfig.textModel);
+        syncSelect('imageModelSelect', visualConfig.imageModel);
+        syncSelect('bgmModelSelect', visualConfig.bgmModel);
+        updateModelBadge();
+        updateModelHeaderBadges();
+      } catch (e) {}
+    }
+
+    function bindModelPrefAutoSave() {
+      for (const [, id] of MODEL_PREF_FIELD_MAP) {
+        const el = document.getElementById(id);
+        if (el && !el.dataset.prefBound) {
+          el.dataset.prefBound = '1';
+          el.addEventListener('input', saveModelPrefsToLocal);
+          el.addEventListener('change', saveModelPrefsToLocal);
+        }
+      }
+      for (const selId of ['writerModelSelect', 'videoModelSelect', 'textModelSelect', 'imageModelSelect', 'bgmModelSelect']) {
+        const sel = document.getElementById(selId);
+        if (sel && !sel.dataset.prefBound) {
+          sel.dataset.prefBound = '1';
+          sel.addEventListener('change', saveModelPrefsToLocal);
+        }
       }
     }
 
@@ -9646,6 +10271,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           }
         }
         toggleVisualModelModal();
+        saveModelPrefsToLocal();
         updateModelBadge();
         renderTable();
         selectWriterModelSlug(writerModel);
@@ -9809,15 +10435,42 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
+    function populateModelSelect(selectId, inputId, models, placeholderLabel) {
+      const sel = document.getElementById(selectId);
+      if (!sel) return;
+      const curVal = (document.getElementById(inputId)?.value || '').trim();
+      const opts = ['<option value="">' + placeholderLabel + '（共 ' + models.length + ' 个）</option>'];
+      let hasCur = false;
+      for (const m of models) {
+        const id = String(m.id || '').trim();
+        if (!id) continue;
+        const selected = id === curVal ? ' selected' : '';
+        if (selected) hasCur = true;
+        const label = (m.name && m.name !== id) ? (m.name + ' (' + id + ')') : id;
+        opts.push('<option value="' + escapeHtml(id) + '"' + selected + '>' + escapeHtml(label) + '</option>');
+      }
+      if (curVal && !hasCur) {
+        opts.splice(1, 0, '<option value="' + escapeHtml(curVal) + '" selected>' + escapeHtml(curVal) + ' (当前配置)</option>');
+      }
+      sel.innerHTML = opts.join('');
+    }
+
     async function loadOpenRouterModels() {
       try {
-        const res = await fetch('/api/openrouter-models');
+        const apiKey = (document.getElementById('currentApiKeyInput')?.value || '').trim();
+        const qs = new URLSearchParams();
+        if (activeProjectId) qs.set('project', activeProjectId);
+        if (apiKey) qs.set('apiKey', apiKey);
+        const res = await fetch('/api/openrouter-models?' + qs.toString());
         const data = await res.json();
         if (data.ok && Array.isArray(data.models)) {
           const dl = document.getElementById('openrouterModelsList');
           if (dl) {
-            dl.innerHTML = data.models.map(m => '<option value="' + m.id + '">' + (m.name || m.id) + '</option>').join('');
+            dl.innerHTML = data.models.map(m => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.name || m.id) + '</option>').join('');
           }
+          populateModelSelect('writerModelSelect', 'currentWriterModelInput', data.models, '🔽 从 OpenRouter 选择文案大模型');
+          populateModelSelect('textModelSelect', 'currentTextModelInput', data.models, '🔽 从 OpenRouter 选择分镜模型');
+          populateModelSelect('bgmModelSelect', 'currentBgmModelInput', data.models, '🔽 从 OpenRouter 选择 BGM 模型');
         }
       } catch (e) {
         console.warn('加载 OpenRouter 列表跳过:', e);
@@ -9831,8 +10484,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (data.ok && Array.isArray(data.models)) {
           const dl = document.getElementById('openrouterVideoModelsList');
           if (dl) {
-            dl.innerHTML = data.models.map(m => '<option value="' + m.id + '">' + (m.name || m.id) + '</option>').join('');
+            dl.innerHTML = data.models.map(m => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.name || m.id) + '</option>').join('');
           }
+          populateModelSelect('videoModelSelect', 'currentVideoModelInput', data.models, '🔽 从 OpenRouter 选择视频模型');
         }
       } catch (e) {
         console.warn('加载 OpenRouter 视频模型列表跳过:', e);
@@ -9846,16 +10500,34 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (data.ok && Array.isArray(data.models)) {
           const dl = document.getElementById('openrouterImageModelsList');
           if (dl) {
-            dl.innerHTML = data.models.map(m => '<option value="' + m.id + '">' + (m.name || m.id) + '</option>').join('');
+            dl.innerHTML = data.models.map(m => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.name || m.id) + '</option>').join('');
           }
+          populateModelSelect('imageModelSelect', 'currentImageModelInput', data.models, '🔽 从 OpenRouter 选择生图模型');
         }
       } catch (e) {
         console.warn('加载 OpenRouter 生图模型列表跳过:', e);
       }
     }
 
+    async function refreshAllOpenRouterModels(showNotice = false) {
+      const btn = document.getElementById('btnRefreshOrModels');
+      if (btn) btn.disabled = true;
+      try {
+        await Promise.all([
+          loadOpenRouterModels(),
+          loadOpenRouterVideoModels(),
+          loadOpenRouterImageModels()
+        ]);
+        if (showNotice) showToast('✅ 已从 OpenRouter 同步最新模型下拉列表！');
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
     async function loadWorkflow() {
       try {
+        bindModelPrefAutoSave();
+        restoreModelPrefsFromLocal();
         loadOpenRouterModels();
         loadOpenRouterVideoModels();
         loadOpenRouterImageModels();
@@ -9915,6 +10587,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             selectWriterModelSlug(visualConfig.writerModel);
           }
 
+          restoreModelPrefsFromLocal();
           updateModelBadge();
         }
 
@@ -9951,14 +10624,6 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             </div>
             <p class="text-xs text-gray-300 font-normal">可在各镜头中生成 16:9 画面预览，或上传视频与图片检验素材。</p>
           </div>
-          <div class="flex items-center gap-3">
-            <button onclick="toggleVisualModelModal('video')" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition shadow flex items-center gap-1.5 cursor-pointer" title="快速呼出模型调度中心并聚焦定位到 AI 视频生成模型 (MiniMax/Kling/Wan等)">
-              🎬 快速更换视频模型
-            </button>
-            <a href="http://localhost:3100" target="_blank" class="px-4 py-2 text-xs font-bold rounded-xl bg-blue-600 hover:bg-blue-500 text-white transition">
-              🎬 打开 Remotion 预览
-            </a>
-          </div>
         \`;
       }
     }
@@ -9978,8 +10643,26 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       document.getElementById('statOver').textContent = overCount + ' 镜';
     }
 
+    function formatUiMMSS(sec) {
+      const num = Math.max(0, Number(sec || 0));
+      const totalInt = Math.floor(num);
+      const frac = Number((num - totalInt).toFixed(1));
+      const m = Math.floor(totalInt / 60);
+      const s = totalInt % 60;
+      return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0') + (frac > 0 ? '.' + Math.round(frac * 10) : '');
+    }
+
     function renderTable() {
       updateCounters();
+      window._pendingDownloadUrls = window._pendingDownloadUrls || {};
+      if (manifestData && Array.isArray(manifestData.scenes)) {
+        manifestData.scenes.forEach((_, i) => {
+          const existingInp = document.getElementById('urlDownloadInput_' + i);
+          if (existingInp && existingInp.value.trim()) {
+            window._pendingDownloadUrls[i] = existingInp.value.trim();
+          }
+        });
+      }
       const tbody = document.getElementById('tableBody');
       tbody.innerHTML = '';
       const fieldLabels = ['', '旁白', '核心关键词', '画面方式', 'AI 生成画面', '素材上传与 AI 剪辑', '节拍调整'];
@@ -10295,12 +10978,14 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         let modifiersBadgesHtml = '';
         const m = scene.media_modifiers;
         const hasTrim = scene.trim_start_sec !== undefined || m?.trim_start_sec !== undefined;
-        if (m || hasTrim) {
+        if (m || hasTrim || scene.downloaded_clip_info) {
           const parts = [];
-          if (hasTrim) {
+          if (scene.downloaded_clip_info && scene.downloaded_clip_info.label) {
+            parts.push('✂️ 原片片段: ' + scene.downloaded_clip_info.label + ' (本地 ' + (scene.downloaded_clip_info.local_duration_sec || durSec) + 's)');
+          } else if (hasTrim) {
             const s = scene.trim_start_sec !== undefined ? scene.trim_start_sec : m?.trim_start_sec;
             const e = scene.trim_end_sec !== undefined ? scene.trim_end_sec : (m?.trim_end_sec || '末尾');
-            parts.push('⏱️ 截取: ' + s + 's~' + e + 's');
+            parts.push('⏱️ 本地播放: ' + s + 's~' + e + 's');
           }
           if (m && m.filters && m.filters.brightness) parts.push('☀️ 亮度: ' + m.filters.brightness + 'x');
           if (m && m.filters && m.filters.sepia) parts.push('🎞️ 复古胶片');
@@ -10321,12 +11006,14 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
         const isImage = asset && (asset.type === 'image' || /\.(png|jpg|jpeg|webp)$/i.test(asset.path || ''));
         const isVideo = asset && (asset.type === 'video' || /\.(mp4|mov|webm)$/i.test(asset.path || ''));
-        const inputPlaceholder = isImage
-          ? '💬 输入针对图片的任意口语要求 (运镜推拉平移、调色滤镜、艺术字动效等)...'
-          : isVideo
-          ? '💬 输入针对视频的任意口语要求 (时间截取、画面调色、艺术字动效等)...'
-          : '💬 输入任意口语要求 (大模型将自主解析并生成 Remotion 动效代码)...';
-        const currentPromptVal = (scene.ai_intent_prompt || scene.trim_prompt || '').replace(/"/g, '&quot;');
+        const hasBoundManual = Boolean(asset && scene.source_mode === 'manual_upload');
+        const inputPlaceholder = hasBoundManual
+          ? (isImage
+              ? '💬 针对本张图片输入口令 (运镜推拉平移、调色滤镜、加字幕/艺术字)...'
+              : '💬 基于本段已下载短视频加字幕/艺术字、调色、运镜，或输入新下载秒数...')
+          : '💬 第一步：输入下载秒数口令 (如: 第1分5秒到1分15秒) 点「✨编译」...';
+        const rawPromptVal = scene.ai_intent_prompt || '';
+        const currentPromptVal = String(rawPromptVal).replace(/"/g, '&quot;');
 
         let speechBubbleHtml = '';
         if (scene.ai_speech_reply) {
@@ -10341,57 +11028,141 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           \`;
         }
 
+        // 口令框（置于最上方：既能把秒数口令编译为下载片段跳转指令，也能对已下载本地短视频做加字幕/动效二次剪辑）
         const aiInputHtml = \`
-          <div class="pt-1.5 space-y-1.5">
-            \${speechBubbleHtml}
-            \${modifiersBadgesHtml}
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between text-[9px] text-sky-300 font-bold">
+              <span>🎙️ Step 1 · 口语指令 (指定下载几分几秒 / 字幕与动效)</span>
+              <span class="text-gray-500 font-mono">回车或点编译 ↵</span>
+            </div>
             <div class="flex items-center gap-1">
               <input type="text" id="aiIntentInput_\${idx}"
                      placeholder="\${inputPlaceholder}"
                      value="\${currentPromptVal}"
                      onkeydown="if(event.key==='Enter') applyAiIntentForRow(\${idx})"
                      class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-sky-500/60 text-white text-[10px] placeholder:text-gray-500 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 focus:outline-none" />
-              <button onclick="applyAiIntentForRow(\${idx})" class="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] whitespace-nowrap shadow cursor-pointer transition">
+              <button type="button" onclick="applyAiIntentForRow(\${idx})" class="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] whitespace-nowrap shadow cursor-pointer transition" title="解析口语中的起止秒数生成下载跳转命令，或编译字幕与Remotion动效">
                 ✨ 编译
               </button>
             </div>
-            <div class="flex items-center justify-between text-[9px] text-sky-400/80">
-              <span>💡 输入任意口语指令，由大模型 API 智能推导 Remotion 动效代码</span>
-              <span class="text-gray-500 font-mono">回车执行 ↵</span>
+            \${speechBubbleHtml}
+            \${modifiersBadgesHtml}
+          </div>
+        \`;
+
+        // 检查是否已由口令编译出待下载的片段起止秒数
+        const dlStart = scene.download_clip_start_sec;
+        const dlEnd = scene.download_clip_end_sec;
+        const hasCompiledDlRange = dlStart !== undefined && dlStart !== null && dlEnd !== undefined && dlEnd !== null && Number(dlEnd) > Number(dlStart);
+        const dlRangeLabel = hasCompiledDlRange ? (\`\${formatUiMMSS(dlStart)}~\${formatUiMMSS(dlEnd)}\`) : '';
+        const dlBtnText = hasCompiledDlRange ? (\`⬇️ 下载片段 (\${dlRangeLabel})\`) : '⬇️ 下载';
+        const pendingUrlVal = ((window._pendingDownloadUrls && window._pendingDownloadUrls[idx]) || '').replace(/"/g, '&quot;');
+        const seqDisplay = \`\${activeProjectId}·序列\${String(idx + 1).padStart(2, '0')}\`;
+
+        const downloadRangeBadgeHtml = hasCompiledDlRange
+          ? \`
+            <div class="p-1.5 rounded-lg bg-teal-950/80 border border-teal-400/60 text-[10px] text-teal-200 font-mono flex items-center justify-between gap-1 shadow-sm">
+              <span class="truncate" title="点下载时将只抓取原视频 \${dlRangeLabel} (\${dlStart}s~\${dlEnd}s)">
+                🎯 已就绪: 仅下载 <b>\${dlRangeLabel}</b> (\${(Number(dlEnd) - Number(dlStart)).toFixed(1)}s)
+              </span>
+              <button type="button" onclick="clearDownloadRangeForRow(\${idx})" class="text-rose-400 hover:text-rose-300 text-[10px] shrink-0 font-bold hover:underline cursor-pointer">✕ 整片</button>
+            </div>
+          \`
+          : '';
+
+        const urlDownloadBarHtml = \`
+          <div class="space-y-1 pt-1 border-t border-gray-800/70">
+            <div class="flex items-center justify-between text-[9px] text-teal-300/90 font-bold">
+              <span>🔗 Step 2 · 填入视频 URL 下载 (\${seqDisplay})</span>
+              <span class="text-gray-500 font-mono truncate max-w-[140px]" title="projects/\${activeProjectId}/public/assets/video/">📂 projects/\${activeProjectId}/public/assets/</span>
+            </div>
+            \${downloadRangeBadgeHtml}
+            <div class="flex items-center gap-1">
+              <input type="url" id="urlDownloadInput_\${idx}"
+                     value="\${pendingUrlVal}"
+                     oninput="window._pendingDownloadUrls = window._pendingDownloadUrls || {}; window._pendingDownloadUrls[\${idx}] = this.value"
+                     placeholder="🔗 粘贴视频链接 (YouTube/B站/抖音等)..."
+                     onkeydown="if(event.key==='Enter') downloadUrlForRow(\${idx})"
+                     class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-teal-500/50 text-white text-[10px] placeholder:text-gray-500 focus:border-teal-400 focus:ring-1 focus:ring-teal-400 focus:outline-none" />
+              <button type="button" id="urlDownloadBtn_\${idx}" onclick="downloadUrlForRow(\${idx})"
+                      class="px-2 py-1.5 rounded-lg \${hasCompiledDlRange ? 'bg-gradient-to-r from-teal-500 to-emerald-500 ring-1 ring-teal-300' : 'bg-teal-600 hover:bg-teal-500'} text-white font-bold text-[10px] whitespace-nowrap shadow cursor-pointer transition">
+                \${dlBtnText}
+              </button>
+            </div>
+            <div id="urlDownloadProgressWrap_\${idx}" class="hidden space-y-0.5 pt-0.5">
+              <div class="w-full h-1.5 rounded-full bg-gray-800 overflow-hidden">
+                <div id="urlDownloadProgressBar_\${idx}" class="h-full bg-gradient-to-r from-teal-400 to-emerald-400 rounded-full transition-all duration-200" style="width: 0%;"></div>
+              </div>
+              <div class="flex items-center justify-between text-[9px] text-teal-300/90 font-mono">
+                <span id="urlDownloadProgressText_\${idx}" class="truncate">准备下载...</span>
+                <span id="urlDownloadProgressPct_\${idx}" class="shrink-0 font-bold">0%</span>
+              </div>
             </div>
           </div>
         \`;
 
-        const urlDownloadBarHtml = \`
-          <div class="flex items-center gap-1">
-            <input type="url" id="urlDownloadInput_\${idx}"
-                   placeholder="🔗 粘贴视频链接 (YouTube/B站/抖音等)..."
-                   onkeydown="if(event.key==='Enter') downloadUrlForRow(\${idx})"
-                   class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-teal-500/50 text-white text-[10px] placeholder:text-gray-500 focus:border-teal-400 focus:ring-1 focus:ring-teal-400 focus:outline-none" />
-            <button type="button" id="urlDownloadBtn_\${idx}" onclick="downloadUrlForRow(\${idx})"
-                    class="px-2 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-bold text-[10px] whitespace-nowrap shadow cursor-pointer transition">
-              ⬇️ 下载
-            </button>
-          </div>
-        \`;
+        // 检测本工程已下载/上传的本地素材列表（位于 projects/<projectId>/public/assets/video 或 images）
+        const projectLocalAssets = (assetIndexData?.assets || []).filter(
+          (a) => a && a.exists_on_disk !== false && a.path && !String(a.path).toLowerCase().startsWith('assets/generated/')
+        );
+        let projectAssetListHtml = '';
+        if (projectLocalAssets.length > 0) {
+          const itemsHtml = projectLocalAssets
+            .slice()
+            .reverse()
+            .map((a) => {
+              const isCurrent = asset && asset.asset_id === a.asset_id && scene.source_mode === 'manual_upload';
+              const label = (a.file_name || a.asset_id || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+              const durBadge = a.duration_seconds ? \`\${a.duration_seconds}s\` : (a.type === 'image' ? '图片' : '');
+              return \`
+                <div class="flex items-center justify-between gap-1 px-2 py-1 rounded bg-gray-900/90 hover:bg-gray-800 border \${isCurrent ? 'border-emerald-500/60 text-emerald-300' : 'border-gray-800 text-gray-300'} text-[10px]">
+                  <span class="truncate max-w-[165px]" title="\${label} (\${a.file_path || a.path})">
+                    \${isCurrent ? '✅ ' : '🎬 '}\${label}
+                  </span>
+                  <div class="flex items-center gap-1 shrink-0">
+                    \${durBadge ? \`<span class="text-[9px] text-gray-400 font-mono">\${durBadge}</span>\` : ''}
+                    \${
+                      isCurrent
+                        ? \`<span class="text-[9px] text-emerald-400 font-bold">当前绑定</span>\`
+                        : \`<button type="button" onclick="bindProjectAssetForRow(\${idx}, '\${a.asset_id}')" class="px-1.5 py-0.5 rounded bg-sky-600/80 hover:bg-sky-500 text-white font-bold text-[9px] cursor-pointer">选用</button>\`
+                    }
+                  </div>
+                </div>
+              \`;
+            })
+            .join('');
+
+          projectAssetListHtml = \`
+            <div class="rounded-xl border border-gray-800 bg-gray-950/90 p-2 space-y-1 text-left">
+              <div class="flex items-center justify-between text-[9px] text-amber-300/90 font-bold">
+                <span>📂 本工程已下载素材库 (\${projectLocalAssets.length})</span>
+                <span class="text-gray-500 font-mono">projects/\${activeProjectId}/public/assets</span>
+              </div>
+              <div class="max-h-24 overflow-y-auto space-y-1 pr-0.5">
+                \${itemsHtml}
+              </div>
+            </div>
+          \`;
+        }
 
         if (asset && scene.source_mode === 'manual_upload') {
           const videoSrc = \`/public/\${activeProjectId}/\${asset.path}\`;
 
           td6.innerHTML = \`
-            <div class="space-y-1.5">
+            <div class="space-y-2">
               \${linkHtml}
+              \${aiInputHtml}
               \${urlDownloadBarHtml}
               <div class="border border-sky-500/40 bg-sky-950/30 rounded-xl p-2.5 text-left space-y-1.5"
                    ondragover="onFileDragOver(event, \${idx})"
                    ondragleave="onFileDragLeave(event, \${idx})"
                    ondrop="onFileDrop(event, \${idx})">
-                <div class="flex items-center justify-between">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-sky-500/20 text-sky-300 truncate max-w-[130px]" title="\${asset.file_name || asset.asset_id}">
+                <div class="flex items-center justify-between gap-1">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-sky-500/20 text-sky-300 truncate max-w-[165px]" title="\${asset.file_name || asset.asset_id} (\${asset.file_path || asset.path})">
                     \${asset.file_name || asset.asset_id}
                   </span>
-                  <span class="text-[10px] text-emerald-400 font-mono font-bold">
-                    ⏱️ 需 \${durSec}s
+                  <span class="text-[10px] text-emerald-400 font-mono font-bold shrink-0">
+                    ⏱️ 本地 \${asset.duration_seconds || durSec}s / 需 \${durSec}s
                   </span>
                 </div>
 
@@ -10409,35 +11180,39 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                   \`
                 }
 
-                \${aiInputHtml}
+                <div class="text-[9px] text-gray-400 font-mono truncate" title="projects/\${activeProjectId}/public/\${asset.path}">
+                  📍 工程路径: projects/\${activeProjectId}/public/\${asset.path}
+                </div>
 
                 <div class="scene-asset-actions flex items-center justify-between pt-1 border-t border-gray-800/80 text-[10px]">
                   <button onclick="document.getElementById('fileInput_\${idx}').click()" class="text-sky-400 hover:underline cursor-pointer">
-                    选择替换素材
+                    选择替换本地文件
                   </button>
                   <button onclick="clearAsset(\${idx})" class="text-rose-400 hover:underline cursor-pointer">
-                    清除
+                    清除绑定
                   </button>
                 </div>
               </div>
+              \${projectAssetListHtml}
             </div>
           \`;
         } else {
           td6.innerHTML = \`
-            <div class="space-y-1.5">
+            <div class="space-y-2">
               \${linkHtml}
+              \${aiInputHtml}
               \${urlDownloadBarHtml}
               <button type="button" id="dropzone_\${idx}"
-                   class="w-full border-2 border-dashed border-sky-500/40 hover:border-sky-300 bg-sky-950/25 hover:bg-sky-900/35 rounded-xl p-3 text-center transition cursor-pointer group"
+                   class="w-full border-2 border-dashed border-sky-500/40 hover:border-sky-300 bg-sky-950/25 hover:bg-sky-900/35 rounded-xl p-2.5 text-center transition cursor-pointer group"
                    ondragover="onFileDragOver(event, \${idx})"
                    ondragleave="onFileDragLeave(event, \${idx})"
                    ondrop="onFileDrop(event, \${idx})"
                    onclick="document.getElementById('fileInput_\${idx}').click()">
-                <span class="block text-sky-300 text-xl mb-1 group-hover:scale-110 transition">📥</span>
+                <span class="block text-sky-300 text-lg mb-0.5 group-hover:scale-110 transition">📥</span>
                 <span class="block text-[11px] font-bold text-sky-200">选择或拖入视频 / 图片</span>
-                <span class="block text-[10px] text-gray-400 mt-0.5">上传后自动绑定并显示预览</span>
+                <span class="block text-[9px] text-gray-400 mt-0.5">或先在上方口令框指定秒数 ➔ 编译 ➔ 填 URL 下载</span>
               </button>
-              \${aiInputHtml}
+              \${projectAssetListHtml}
             </div>
           \`;
         }
@@ -10886,46 +11661,6 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
-    async function autoGenerateAllPromptsForPage() {
-      if (!manifestData || !manifestData.scenes) return;
-      const total = manifestData.scenes.length;
-      showToast('🚀 正在由 AI 视觉总监并发提炼全页 ' + total + ' 个镜头的指示词，请稍候...');
-
-      const promises = manifestData.scenes.map(async (sc, idx) => {
-        const mode = sc.target_visual_mode || (sc.visual_type === 'broll_video' ? 'video' : sc.visual_type === 'photo_motion' ? 'image' : 'video');
-        const tmpl = sc.visual_type || 'data_card';
-        try {
-          const res = await fetch('/api/extract-prompt?project=' + activeProjectId, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              projectId: activeProjectId,
-              narrationText: sc.narration_text,
-              targetMode: mode,
-              keywords: sc.keywords || sc.content_keywords || [],
-              templateStyle: tmpl
-            })
-          });
-          const data = await res.json();
-          const generated = data.prompt || extractLocalSmartPrompt(sc.narration_text, mode, sc.keywords || sc.content_keywords, tmpl);
-          if (!sc.ppt_slide_spec) sc.ppt_slide_spec = {};
-          sc.ppt_slide_spec.custom_prompt = generated;
-          const input = document.getElementById('prompt_input_' + idx);
-          if (input) input.value = generated;
-        } catch (e) {
-          const fallback = extractLocalSmartPrompt(sc.narration_text, mode, sc.keywords || sc.content_keywords, tmpl);
-          if (!sc.ppt_slide_spec) sc.ppt_slide_spec = {};
-          sc.ppt_slide_spec.custom_prompt = fallback;
-          const input = document.getElementById('prompt_input_' + idx);
-          if (input) input.value = fallback;
-        }
-      });
-
-      await Promise.all(promises);
-      renderTable();
-      showToast('🎉 全页 ' + total + ' 个镜头的指示词已全部提炼完成！');
-    }
-
     function setVisualTarget(idx, mode) {
       if (!manifestData.scenes[idx]) return;
       const sc = manifestData.scenes[idx];
@@ -11004,40 +11739,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
-    async function generateAllPpt() {
-      const globalPrompt = document.getElementById('globalPromptInput').value;
-      showToast('⚡ 正在批量渲染 AI 画面...');
-      try {
-        const res = await fetch('/api/generate-ppt?project=' + activeProjectId, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            projectId: activeProjectId,
-            sceneId: null,
-            visualTarget: 'card',
-            globalPrompt,
-            manifest: manifestData,
-            selectedModel: visualConfig.videoModel,
-          }),
-        });
-        const data = await res.json();
-        if (data.ok) {
-          manifestData = data.manifest;
-          await loadWorkflow();
-          showToast('⚡ 已批量完成 AI 卡片画面渲染与生成！');
-        } else {
-          showToast('❌ 批量生成失败: ' + (data.error || '未知错误'));
-        }
-      } catch (err) {
-        showToast('❌ 批量请求异常: ' + err.message);
-      }
-    }
-
     async function downloadUrlForRow(idx) {
       const scene = manifestData.scenes[idx];
       const inputEl = document.getElementById('urlDownloadInput_' + idx);
       const btnEl = document.getElementById('urlDownloadBtn_' + idx);
+      const promptEl = document.getElementById('aiIntentInput_' + idx);
       const rawUrl = inputEl ? inputEl.value.trim() : '';
+      const rawPrompt = promptEl ? promptEl.value.trim() : '';
 
       if (!rawUrl) {
         alert('请先粘贴要下载的网络视频或帖子链接（支持 YouTube、B站、抖音、TikTok、小红书等）');
@@ -11045,11 +11753,45 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         return;
       }
 
+      const clipStartSec = scene.download_clip_start_sec;
+      const clipEndSec = scene.download_clip_end_sec;
+      const hasRange = clipStartSec !== undefined && clipStartSec !== null && clipEndSec !== undefined && clipEndSec !== null && Number(clipEndSec) > Number(clipStartSec);
+      const origBtnText = btnEl ? btnEl.textContent : '⬇️ 下载';
+
       if (btnEl) {
         btnEl.disabled = true;
-        btnEl.textContent = '⏳ 下载中...';
+        btnEl.textContent = hasRange ? \`⏳ 截取 \${formatUiMMSS(clipStartSec)}~\${formatUiMMSS(clipEndSec)}...\` : '⏳ 下载中...';
       }
-      showToast('⏳ 正在通过哼哼猫 API 解析并下载网络视频到本地...');
+
+      const jobId = 'dl_' + Date.now() + '_' + idx;
+      const progWrap = document.getElementById('urlDownloadProgressWrap_' + idx);
+      const progBar = document.getElementById('urlDownloadProgressBar_' + idx);
+      const progText = document.getElementById('urlDownloadProgressText_' + idx);
+      const progPct = document.getElementById('urlDownloadProgressPct_' + idx);
+      const setProgUi = (pct, msg) => {
+        const safePct = Math.max(0, Math.min(100, Math.round(pct || 0)));
+        if (progWrap) progWrap.classList.remove('hidden');
+        if (progBar) progBar.style.width = safePct + '%';
+        if (progPct) progPct.textContent = safePct + '%';
+        if (progText && msg) progText.textContent = msg;
+      };
+      setProgUi(0, '准备连接本机哼哼猫客户端...');
+
+      const pollTimer = setInterval(async () => {
+        try {
+          const pr = await fetch('/api/download-progress?jobId=' + encodeURIComponent(jobId));
+          const pj = await pr.json();
+          if (pj && pj.ok && typeof pj.percent === 'number') {
+            setProgUi(pj.percent, pj.text || '下载处理中...');
+          }
+        } catch (e) {}
+      }, 300);
+
+      showToast(
+        hasRange
+          ? \`⏳ 正在按口令仅下载原视频 \${formatUiMMSS(clipStartSec)} ~ \${formatUiMMSS(clipEndSec)} 片段至本工程 assets/video/ ...\`
+          : '⏳ 正在解析并下载网络视频到本工程专属 assets 目录...'
+      );
 
       try {
         const res = await fetch('/api/download-url-asset?project=' + activeProjectId, {
@@ -11059,6 +11801,60 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             projectId: activeProjectId,
             sceneId: scene.scene_id,
             url: rawUrl,
+            clipStartSec: hasRange ? Number(clipStartSec) : undefined,
+            clipEndSec: hasRange ? Number(clipEndSec) : undefined,
+            rawPrompt,
+            jobId,
+          }),
+        });
+        clearInterval(pollTimer);
+        const data = await res.json();
+        if (data.ok) {
+          setProgUi(100, '下载并绑定完成！');
+          if (window._pendingDownloadUrls) delete window._pendingDownloadUrls[idx];
+          manifestData = data.manifest;
+          assetIndexData = data.assetIndex;
+          setTimeout(() => renderTable(), 350);
+          showToast(data.message || '✅ 网络视频片段已下载到本工程 assets 目录并绑定至当前分镜！');
+          setTimeout(() => {
+            const inp = document.getElementById('aiIntentInput_' + idx);
+            if (inp) {
+              inp.value = '';
+              inp.focus();
+              inp.placeholder = '✅ 短视频已就绪！现在可输入口令对此片段加字幕/艺术字、调色或运镜...';
+            }
+          }, 500);
+        } else {
+          if (progWrap) progWrap.classList.add('hidden');
+          alert(data.error || '链接解析下载失败');
+          if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.textContent = origBtnText;
+          }
+        }
+      } catch (err) {
+        clearInterval(pollTimer);
+        if (progWrap) progWrap.classList.add('hidden');
+        alert('请求失败: ' + err.message);
+        if (btnEl) {
+          btnEl.disabled = false;
+          btnEl.textContent = origBtnText;
+        }
+      }
+    }
+
+    async function bindProjectAssetForRow(idx, assetId) {
+      const scene = manifestData.scenes[idx];
+      if (!scene || !assetId) return;
+      showToast('⏳ 正在绑定本工程已下载素材...');
+      try {
+        const res = await fetch('/api/bind-project-asset?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            sceneId: scene.scene_id,
+            assetId,
           }),
         });
         const data = await res.json();
@@ -11066,27 +11862,35 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           manifestData = data.manifest;
           assetIndexData = data.assetIndex;
           renderTable();
-          showToast(data.message || '✅ 网络视频已下载到本地并绑定至当前分镜！');
-          setTimeout(() => {
-            const inp = document.getElementById('aiIntentInput_' + idx);
-            if (inp) {
-              inp.focus();
-              inp.placeholder = '已下载就绪，可输入如“截取 6 至 10 秒”、变亮、弹艺术字...';
-            }
-          }, 200);
+          showToast(data.message || '✅ 已切换绑定本工程素材！');
         } else {
-          alert(data.error || '链接解析下载失败');
-          if (btnEl) {
-            btnEl.disabled = false;
-            btnEl.textContent = '⬇️ 下载';
-          }
+          alert(data.error || '素材绑定失败');
         }
       } catch (err) {
         alert('请求失败: ' + err.message);
-        if (btnEl) {
-          btnEl.disabled = false;
-          btnEl.textContent = '⬇️ 下载';
+      }
+    }
+
+    async function clearDownloadRangeForRow(idx) {
+      const scene = manifestData.scenes[idx];
+      if (!scene) return;
+      try {
+        const res = await fetch('/api/clear-download-range?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            sceneId: scene.scene_id,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          manifestData = data.manifest;
+          renderTable();
+          showToast('↺ 已取消片段区间限制，点下载时将下载完整视频');
         }
+      } catch (err) {
+        console.warn(err);
       }
     }
 
