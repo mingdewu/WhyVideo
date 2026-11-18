@@ -339,6 +339,17 @@
       flex-direction: column;
       gap: 3px;
     }
+    .ppt-editor, .asset-preview {
+      display: flex;
+      gap: 14px;
+      align-items: flex-start;
+    }
+    .ppt-form {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
 
     /* Upload Box */
     .upload-zone {
@@ -368,6 +379,8 @@
       border: 1px solid var(--border);
       background: #000;
     }
+    .asset-preview { align-items: center; gap: 12px; }
+    .asset-select { width: auto; min-width: 210px; }
 
     /* AI Intent Quick Box */
     .ai-intent-box {
@@ -467,6 +480,88 @@
       display: none;
       z-index: 200;
     }
+    .scene-field-label { display: none; }
+
+    @media (max-width: 1023px) {
+      body { overflow-wrap: anywhere; }
+      .topbar {
+        position: static;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        padding: 12px;
+        gap: 12px;
+      }
+      .brand { display: grid; grid-template-columns: auto minmax(0, 1fr); }
+      .brand-title { font-size: 15px; }
+      .project-select { grid-column: 1 / -1; width: 100%; color-scheme: dark; }
+      .toolbar-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .toolbar-actions .btn { justify-content: center; text-align: center; }
+      .toolbar-actions a { grid-column: 1 / -1; }
+      .btn, .mode-option, .ai-tag-btn, .review-toggle,
+      .cell-input, .ai-intent-input, select { min-height: 44px; }
+      .project-select, .prompt-textarea, .cell-input, .cell-textarea, .ai-intent-input {
+        min-width: 0;
+        max-width: 100%;
+        font-size: 16px;
+      }
+
+      .subbar {
+        grid-template-columns: minmax(0, 1fr);
+        padding: 12px;
+        gap: 12px;
+      }
+      .prompt-header, .ai-intent-header { flex-direction: column; align-items: flex-start; gap: 4px; }
+      .prompt-box, .stats-box { padding: 12px; }
+      .stats-box { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .stat-val { font-size: 16px; }
+
+      .table-container { padding: 12px 12px 32px; overflow: visible; }
+      table.db-table {
+        display: block;
+        background: none;
+        border: 0;
+        overflow: visible;
+      }
+      .db-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
+      .db-table tbody { display: grid; gap: 12px; }
+      .db-table tbody tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        background: var(--bg-row);
+        border: 1px solid var(--border);
+        border-radius: 10px;
+      }
+      table.db-table td {
+        display: block;
+        padding: 12px;
+        border: 0;
+        background: transparent;
+      }
+      table.db-table td:first-child {
+        background: var(--bg-panel);
+        border-radius: 10px 10px 0 0;
+      }
+      table.db-table td + td { border-top: 1px solid var(--border); }
+      .scene-field-label {
+        display: block;
+        margin-bottom: 6px;
+        color: #cbd5e1;
+        font-size: 13px;
+        font-weight: 700;
+      }
+      .ppt-editor, .asset-preview { flex-direction: column; align-items: stretch; gap: 10px; }
+      .ppt-preview-card, .media-thumb, .asset-select { width: 100%; }
+      .asset-select { min-width: 0; }
+      .ai-intent-input-row { flex-wrap: wrap; }
+      .ai-intent-input { flex: 1 1 10rem; min-width: 0; }
+      .toast { left: 12px; right: 12px; bottom: 12px; }
+    }
   </style>
 </head>
 <body>
@@ -474,7 +569,7 @@
     <div class="brand">
       <span class="brand-badge">WORKFLOW DB</span>
       <span class="brand-title">WhyVideo 分镜数据库工作台（人工上传 + AI PPT 标题主题生成）</span>
-      <select id="projectSelect" class="project-select"></select>
+      <select id="projectSelect" class="project-select" aria-label="制作工程"></select>
     </div>
     <div class="toolbar-actions">
       <button class="btn btn-purple" onclick="generateAllPptSlides()">
@@ -492,8 +587,8 @@
   <div class="subbar">
     <div class="prompt-box">
       <div class="prompt-header">
-        <span>🤖 全局 AI 生成 PPT 画面 Prompt 模板（你随时可以在此填入/修改你的专属 Prompt 规则）</span>
-        <span style="font-size:12px;color:var(--text-muted);">作用于所有选为「AI 自动生成 PPT」的镜头行</span>
+        <label for="globalPromptInput">🤖 AI PPT 画面提示词</label>
+        <span style="font-size:12px;color:var(--text-muted);">应用于所有采用 AI PPT 的镜头</span>
       </div>
       <textarea
         id="globalPromptInput"
@@ -523,18 +618,18 @@
   </div>
 
   <div class="table-container">
-    <table class="db-table">
-      <thead>
-        <tr>
-          <th style="width: 110px;">镜头 & 时间</th>
-          <th style="width: 240px;">旁白内容 (Narration)</th>
-          <th style="width: 220px;">想表达的内容关键词 (Keywords)</th>
-          <th style="width: 190px;">画面来源模式 (上传 / AI PPT)</th>
-          <th style="width: 520px;">PPT 标题主题设定 / 人工上传素材 & 实时预览</th>
-          <th style="width: 210px;">单行 Prompt 补充 & 审核状态</th>
+    <table class="db-table" role="table" aria-label="分镜列表">
+      <thead role="rowgroup">
+        <tr role="row">
+          <th role="columnheader" scope="col" style="width: 110px;">镜头 & 时间</th>
+          <th role="columnheader" scope="col" style="width: 240px;">旁白内容 (Narration)</th>
+          <th role="columnheader" scope="col" style="width: 220px;">想表达的内容关键词 (Keywords)</th>
+          <th role="columnheader" scope="col" style="width: 190px;">画面来源模式 (上传 / AI PPT)</th>
+          <th role="columnheader" scope="col" style="width: 520px;">PPT 标题主题设定 / 人工上传素材 & 实时预览</th>
+          <th role="columnheader" scope="col" style="width: 210px;">单行 Prompt 补充 & 审核状态</th>
         </tr>
       </thead>
-      <tbody id="sceneTableBody"></tbody>
+      <tbody id="sceneTableBody" role="rowgroup"></tbody>
     </table>
   </div>
 
@@ -605,6 +700,7 @@
       updateStats();
       const tbody = document.getElementById("sceneTableBody");
       tbody.innerHTML = "";
+      const fieldLabels = ["", "旁白", "关键词", "画面来源", "画面设置与预览", "提示词与审核"];
 
       const assetsMap = new Map(
         (assetIndex?.assets || []).map((a) => [a.asset_id, a])
@@ -612,6 +708,7 @@
 
       sceneManifest.scenes.forEach((scene, idx) => {
         const tr = document.createElement("tr");
+        tr.setAttribute("role", "row");
         const isPpt = scene.source_mode === "ai_ppt_slide";
         const kws = Array.isArray(scene.content_keywords)
           ? scene.content_keywords
@@ -637,7 +734,7 @@
         // Column 2: Narration Text
         const tdNarration = document.createElement("td");
         tdNarration.innerHTML = `
-          <textarea class="cell-textarea" rows="4" data-idx="${idx}" onchange="onNarrationChange(${idx}, this.value)">${scene.narration_text}</textarea>
+          <textarea class="cell-textarea" rows="4" aria-label="旁白" data-idx="${idx}" onchange="onNarrationChange(${idx}, this.value)">${scene.narration_text}</textarea>
         `;
 
         // Column 3: Keywords
@@ -650,6 +747,7 @@
           <input
             type="text"
             class="cell-input"
+            aria-label="关键词"
             value="${kws.join(", ")}"
             placeholder="用逗号分隔关键词..."
             onchange="onKeywordsChange(${idx}, this.value)"
@@ -663,14 +761,14 @@
         const tdMode = document.createElement("td");
         tdMode.innerHTML = `
           <div class="mode-switch">
-            <div class="mode-option ${isPpt ? "active-ppt" : ""}" onclick="setSceneMode(${idx}, 'ai_ppt_slide')">
-              <input type="radio" name="mode_${idx}" ${isPpt ? "checked" : ""} />
+            <label class="mode-option ${isPpt ? "active-ppt" : ""}">
+              <input type="radio" name="mode_${idx}" onchange="setSceneMode(${idx}, 'ai_ppt_slide')" ${isPpt ? "checked" : ""} />
               <span>🤖 AI 生成 PPT 画面</span>
-            </div>
-            <div class="mode-option ${!isPpt ? "active-upload" : ""}" onclick="setSceneMode(${idx}, 'manual_upload')">
-              <input type="radio" name="mode_${idx}" ${!isPpt ? "checked" : ""} />
+            </label>
+            <label class="mode-option ${!isPpt ? "active-upload" : ""}">
+              <input type="radio" name="mode_${idx}" onchange="setSceneMode(${idx}, 'manual_upload')" ${!isPpt ? "checked" : ""} />
               <span>📤 人工上传素材</span>
-            </div>
+            </label>
           </div>
         `;
 
@@ -684,8 +782,8 @@
             .join("");
 
           tdContent.innerHTML = `
-            <div style="display:flex;gap:14px;align-items:flex-start;">
-              <div style="flex:1;display:flex;flex-direction:column;gap:8px;">
+            <div class="ppt-editor">
+              <div class="ppt-form">
                 <div>
                   <div style="font-size:12px;color:#d8b4fe;font-weight:700;margin-bottom:4px;">
                     PPT 画面标题主题 (Slide Headline)：
@@ -739,7 +837,7 @@
           if (currentAsset) {
             const mediaUrl = `/media/${currentProjectId}/${currentAsset.path}`;
             if (currentAsset.type === "video") {
-              previewMediaHtml = `<video class="media-thumb" src="${mediaUrl}" controls muted></video>`;
+              previewMediaHtml = `<video class="media-thumb" src="${mediaUrl}" controls muted playsinline></video>`;
             } else {
               previewMediaHtml = `<img class="media-thumb" src="${mediaUrl}" alt="${currentAsset.asset_id}" />`;
             }
@@ -778,17 +876,17 @@
               ondrop="onZoneDrop(event, ${idx}, this)"
             >
               <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
-                <label class="btn btn-primary btn-sm" style="cursor:pointer;">
-                  📤 上传/拖拽视频或图片
-                  <input type="file" accept="image/*,video/*" style="display:none;" onchange="uploadAssetFile(${idx}, this.files[0])" />
-                </label>
-                <select class="cell-input" style="width:auto;min-width:210px;" onchange="onSelectExistingAsset(${idx}, this.value)">
+                <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('assetFile_${idx}').click()">
+                  📤 选择或拖入视频 / 图片
+                </button>
+                <input type="file" id="assetFile_${idx}" accept="image/*,video/*" hidden onchange="uploadAssetFile(${idx}, this.files[0])" />
+                <select class="cell-input asset-select" aria-label="从素材库选择" onchange="onSelectExistingAsset(${idx}, this.value)">
                   <option value="">-- 或从已有素材库选择 --</option>
                   ${assetOptions}
                 </select>
               </div>
 
-              <div style="display:flex;gap:12px;align-items:center;">
+              <div class="asset-preview">
                 ${previewMediaHtml}
                 <div style="font-size:12px;color:var(--text-muted);line-height:1.5;flex:1;">
                   <div><strong>画面要求：</strong>${scene.visual_purpose}</div>
@@ -848,18 +946,23 @@
             placeholder="可选：针对本行的特殊生成指令..."
             onchange="onCustomPromptChange(${idx}, this.value)"
           >${ppt.custom_prompt || ""}</textarea>
-          <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;cursor:pointer;color:#fde68a;">
+          <label class="review-toggle" style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:12px;cursor:pointer;color:#fde68a;">
             <input type="checkbox" ${!scene.human_review_required ? "checked" : ""} onchange="onToggleReviewed(${idx}, this.checked)" />
             <span>人工已确认通过</span>
           </label>
         `;
 
-        tr.appendChild(tdId);
-        tr.appendChild(tdNarration);
-        tr.appendChild(tdKeywords);
-        tr.appendChild(tdMode);
-        tr.appendChild(tdContent);
-        tr.appendChild(tdPromptAndStatus);
+        [tdId, tdNarration, tdKeywords, tdMode, tdContent, tdPromptAndStatus].forEach((cell, column) => {
+          cell.setAttribute("role", "cell");
+          if (fieldLabels[column]) {
+            const label = document.createElement("span");
+            label.className = "scene-field-label";
+            label.setAttribute("aria-hidden", "true");
+            label.textContent = fieldLabels[column];
+            cell.prepend(label);
+          }
+          tr.appendChild(cell);
+        });
         tbody.appendChild(tr);
       });
     }

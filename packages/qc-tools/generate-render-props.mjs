@@ -24,6 +24,9 @@ const sceneManifest = JSON.parse(
 const assetIndex = JSON.parse(
   fs.readFileSync(path.join(dataDir, "asset-index.json"), "utf8")
 );
+const narrationFile = sceneManifest.audio_file ||
+  (["audio/narration.wav", "audio/narration.mp3"].find((candidate) =>
+    fs.existsSync(path.join(publicDir, candidate))) || null);
 const srtRaw = fs.readFileSync(
   path.join(publicDir, sceneManifest.captions_file || "captions/captions.srt"),
   "utf8"
@@ -229,7 +232,7 @@ const renderProps = {
     },
   },
   audio_track: {
-    src: sceneManifest.audio_file,
+    src: narrationFile,
     start_from_frame: 0,
     end_at_frame: totalDurationFrames,
     duration_ms: sceneManifest.total_duration_ms,

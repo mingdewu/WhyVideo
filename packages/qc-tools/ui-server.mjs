@@ -1,8 +1,11 @@
 import http from 'http';
 import fs from 'fs';
 import path from 'path';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
+import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'url';
+import { renderProject, projectRenderPaths } from './render-project.mjs';
+import { getVoiceboxProfiles, synthesizeWithVoicebox } from './synthesize-voicebox.mjs';
 import {
   getWriterPromptsState,
   saveProjectWriterPromptPreset,
@@ -16,6 +19,8 @@ const rootDir = path.resolve(__dirname, '../../');
 
 const PORT = process.env.PORT || 4000;
 const defaultProjectId = 'why_nikko_heritage_road_001';
+const renderJobs = new Map();
+const voiceJobs = new Map();
 
 // 优先读取 .env
 function loadEnv() {
@@ -94,6 +99,7 @@ function listProjects() {
     let hasVideo = fs.existsSync(paths.videoPath);
     let hasScript = fs.existsSync(paths.finalScriptPath);
     let hasManifest = fs.existsSync(paths.manifestPath);
+    let isBlankDraft = false;
 
     if (hasScript) {
       try {
@@ -105,6 +111,7 @@ function listProjects() {
     if (title === pId && fs.existsSync(paths.briefPath)) {
       try {
         const br = JSON.parse(fs.readFileSync(paths.briefPath, 'utf8'));
+        if (br._blank_draft) isBlankDraft = true;
         if (br.title) title = `《${br.title}》`;
       } catch (e) {}
     }
@@ -113,7 +120,7 @@ function listProjects() {
       try {
         const mf = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
         scenesCount = (mf.scenes || []).length;
-        if (mf.project_title && title === pId) title = `《${mf.project_title}》`;
+        if (mf.project_title && title === pId && !isBlankDraft) title = `《${mf.project_title}》`;
       } catch (e) {}
     }
 
@@ -735,15 +742,96 @@ async function fetchWikipediaExtract(query) {
   return '';
 }
 
-async function researchFactMaterials(title, { model, apiKey, baseUrl, projectDir } = {}) {
+function getWriterTavilyKey(projectDir) {
+  const configPath = path.join(projectDir, 'data', 'prompt-config.json');
+  let config = {};
+  if (fs.existsSync(configPath)) {
+    try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (e) {}
+  }
+  return String(config.tavilyApiKey || process.env.TAVILY_API_KEY || '').trim();
+}
+
+function getMeowloadApiKey(projectDir, explicitKey = '') {
+  if (explicitKey && String(explicitKey).trim()) return String(explicitKey).trim();
+  if (projectDir) {
+    const configPath = path.join(projectDir, 'data', 'prompt-config.json');
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        if (config.meowloadApiKey && String(config.meowloadApiKey).trim()) {
+          return String(config.meowloadApiKey).trim();
+        }
+      } catch (e) {}
+    }
+  }
+  if (process.env.MEOWLOAD_API_KEY && String(process.env.MEOWLOAD_API_KEY).trim()) {
+    return String(process.env.MEOWLOAD_API_KEY).trim();
+  }
+  try {
+    const projDir = path.resolve(rootDir, 'projects');
+    if (fs.existsSync(projDir)) {
+      const subs = fs.readdirSync(projDir);
+      for (const sub of subs) {
+        const cfgPath = path.join(projDir, sub, 'data', 'prompt-config.json');
+        if (fs.existsSync(cfgPath)) {
+          const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+          if (cfg.meowloadApiKey && String(cfg.meowloadApiKey).trim()) {
+            return String(cfg.meowloadApiKey).trim();
+          }
+        }
+      }
+    }
+  } catch (e) {}
+  return '';
+}
+
+async function fetchWriterTavilyResults(query, projectDir) {
+  const apiKey = getWriterTavilyKey(projectDir);
+  if (!apiKey) throw new Error('未配置 Tavily API Key，请在「AI 写作模型与网关配置」中填写 Tavily Key，或设置 TAVILY_API_KEY');
+  const ctrl = new AbortController();
+  const timeout = setTimeout(() => ctrl.abort(), 30000);
+  let response;
+  try {
+    response = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ query: String(query || '').trim().slice(0, 300), search_depth: 'advanced', include_answer: false, include_raw_content: true, max_results: 6 }),
+      signal: ctrl.signal,
+    });
+  } catch (error) {
+    throw new Error(`Tavily 检索失败：${error.name === 'AbortError' ? '请求超时' : error.message}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+  if (!response.ok) throw new Error(`Tavily 检索失败（HTTP ${response.status}）`);
+  const data = await response.json();
+  const results = (Array.isArray(data.results) ? data.results : [])
+    .filter((item) => item && /^https?:\/\//i.test(String(item.url || '')))
+    .map((item) => ({
+      title: String(item.title || '').trim(),
+      url: String(item.url).trim(),
+      content: String(item.content || '').trim().slice(0, 700),
+      rawContent: String(item.raw_content || '').trim().slice(0, 2200),
+    }));
+  if (!results.length) throw new Error('Tavily 未返回带来源链接的检索结果，请调整题目后重试');
+  return results;
+}
+
+async function searchWriterTavily(query, projectDir) {
+  const results = await fetchWriterTavilyResults(query, projectDir);
+  return results.map((item, index) => `${index + 1}. ${item.title || '未命名资料'}\n来源链接：${item.url}\n检索摘要：${item.content || '无摘要'}\n${item.rawContent ? `网页正文摘录：${item.rawContent}` : '未取得网页正文，需要打开原文核查'}`).join('\n\n');
+}
+
+async function researchFactMaterials(title, { model, apiKey, baseUrl, projectDir, tavilyResults: suppliedResults } = {}) {
+  const tavilyResults = suppliedResults || await searchWriterTavily(title, projectDir);
   const wikiContext = await fetchWikipediaExtract(title);
   const sys = renderWriterPrompt(projectDir, 'W1_research', {
     title,
     wiki_context: wikiContext || '',
   });
-  const user = `【视频选题】：${title}\n${wikiContext ? wikiContext : ''}\n请展开深入事实调查并整理输出详实考证资料：`;
+  const user = `【视频选题】：${title}\n\n【Tavily 检索结果（摘要仅供线索，未逐篇核验原文）】\n${tavilyResults}\n\n${wikiContext ? wikiContext : ''}\n请依据检索结果整理资料，逐条保留来源链接与限定条件；不要把摘要当作已经核实的原文。`;
   const text = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500 });
-  return text && text.trim() ? text.trim() : `【自动事实考证资料】：关于“${title}”的地理底层机制、历史起源演进与现代社会运转档案。`;
+  return text && text.trim() ? text.trim() : `【Tavily 检索结果（待核验）】\n${tavilyResults}`;
 }
 
 async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, baseUrl, maxTokens = 3500 } = {}) {
@@ -2075,7 +2163,8 @@ function getWriterProjectData(projectId) {
   }
 
   // 兜底补齐：若没有 finalScript 且非用户主动清零重写的空白草稿，从 scene-manifest.json 反向聚合定稿文案
-  if (!finalScript && !brief?._blank_draft && manifest && Array.isArray(manifest.scenes) && manifest.scenes.length > 0) {
+  const manifestMatchesBrief = !brief?.title || !manifest?.project_title || manifest.project_title === brief.title;
+  if (!finalScript && !brief?._blank_draft && manifestMatchesBrief && manifest && Array.isArray(manifest.scenes) && manifest.scenes.length > 0) {
     const chapterMap = new Map();
     for (const sc of manifest.scenes) {
       const ref = sc.chapter_ref || '正文';
@@ -2215,11 +2304,7 @@ function getWriterProjectData(projectId) {
       chapter_number: ch.chapter_number || idx + 1,
       sub_question: ch.sub_question || ch.core_question || `第${idx + 1}章核心探讨`,
       mechanism_or_background_summary: ch.mechanism_or_background_summary || ch.mechanism || '',
-      supporting_evidence_ids: Array.isArray(ch.supporting_evidence_ids)
-        ? ch.supporting_evidence_ids
-        : Array.isArray(ch.bound_evidence_ids)
-        ? ch.bound_evidence_ids
-        : [],
+      supporting_evidence_ids: getWriterEvidenceIds(ch),
     }));
   }
 
@@ -2256,7 +2341,14 @@ function getWriterProjectData(projectId) {
     chapters = hydratedChapters.sort((a, b) => (Number(a.chapter_number) || 0) - (Number(b.chapter_number) || 0));
   }
 
-  const normalizedEvidence = Array.isArray(evidenceCards) ? evidenceCards : [];
+  const normalizedEvidence = Array.isArray(evidenceCards)
+    ? evidenceCards.map((card) => {
+        const normalized = markWriterEvidencePending(card);
+        return normalized?.claim_type === 'unverified_fact' && normalized.verification_checked_at && !normalized.verification_status
+          ? { ...normalized, verification_status: 'failed', verification_reason: '未找到支持整张卡主张的原文' }
+          : normalized;
+      })
+    : [];
   const hasFinalWords = Boolean(finalScript && (finalScript.total_word_count > 0 || getFinalScriptRawText(finalScript).length > 0));
   const hasExistingContent = Boolean(
     hasFinalWords ||
@@ -2289,6 +2381,122 @@ function getWriterProjectData(projectId) {
   };
 }
 
+function getWriterEvidenceIds(section) {
+  const ids = Array.isArray(section?.supporting_evidence_ids)
+    ? section.supporting_evidence_ids
+    : section?.bound_evidence_ids;
+  return Array.isArray(ids)
+    ? [...new Set(ids.filter((id) => typeof id === 'string' && id.trim()).map((id) => id.trim()))]
+    : [];
+}
+
+async function extractWriterEvidence(projectId, stored, brief, materials, modelOptions) {
+  const { projectDir } = getPaths(projectId);
+  const { title } = brief;
+  const tavilyResults = await searchWriterTavily(brief.core_question || title, projectDir);
+  let researchedMaterials = null;
+  if (!materials) {
+    const scriptText = getFinalScriptRawText(stored.finalScript);
+    if (scriptText.length > 50) {
+      materials = `【工程现有文案正文事实源】\n${scriptText.slice(0, 4000)}`;
+    } else {
+      materials = await researchFactMaterials(title, { ...modelOptions, projectDir, tavilyResults });
+      researchedMaterials = materials;
+      saveWriterProjectData(projectId, 'materials', materials);
+    }
+  }
+
+  const briefJson = JSON.stringify(brief, null, 2);
+  const sys = renderWriterPrompt(projectDir, 'W3_evidence', { title, materials, brief_json: briefJson });
+  const user = `【视频题目】${title}\n【立项 Brief】\n${briefJson}\n\n【已有资料】\n${materials}\n\n【本次 Tavily 检索结果（摘要仍需原文核查）】\n${tavilyResults}\n\n只为可定位来源且输入内容直接支持的主张建卡。`;
+  const aiText = await callOpenRouterText(sys, user, { ...modelOptions, maxTokens: 3500 });
+  const parsedCards = extractJsonFromText(aiText);
+  if (!Array.isArray(parsedCards)) return { evidenceCards: parsedCards, researchedMaterials, aiText, pendingEvidenceCount: 0 };
+  const suppliedText = `${briefJson}\n${materials}\n${tavilyResults}`;
+  let pendingEvidenceCount = 0;
+  const evidenceCards = parsedCards.filter((card) => card && typeof card === 'object' && !Array.isArray(card))
+    .map((card, index) => {
+      const normalized = markWriterEvidencePending(card, suppliedText);
+      if (card.claim_type === 'verified_fact' && normalized.claim_type === 'unverified_fact') pendingEvidenceCount++;
+      return { ...normalized, evidence_id: `EV-${String(index + 1).padStart(3, '0')}` };
+    });
+  return { evidenceCards, researchedMaterials, aiText, pendingEvidenceCount };
+}
+
+function markWriterEvidencePending(card, suppliedText = null) {
+  if (!card || card.claim_type !== 'verified_fact') return card;
+  if (card.verification_status === 'human_approved') return card;
+  const sourceUrl = String(card.source_url || '').trim();
+  let validUrl = false;
+  try {
+    const url = new URL(sourceUrl);
+    validUrl = ['http:', 'https:'].includes(url.protocol) && Boolean(url.hostname);
+  } catch (e) {}
+  if (validUrl && (suppliedText === null || suppliedText.includes(sourceUrl))) return card;
+  return { ...card, claim_type: 'unverified_fact', reliability: 'low' };
+}
+
+async function verifyWriterEvidenceCard(card, projectDir, modelOptions = {}) {
+  const claim = String(card?.evidence_summary || card?.claim || '').trim();
+  const checkedAt = new Date().toISOString();
+  if (!claim) return { ...card, claim_type: 'unverified_fact', verification_status: 'failed', verification_reason: '主张为空，无法核查', verification_checked_at: checkedAt };
+  const searchQuery = claim.slice(0, 300);
+  let sources;
+  try {
+    sources = await fetchWriterTavilyResults(searchQuery, projectDir);
+  } catch (error) {
+    if (error.message.includes('未返回带来源链接的检索结果')) {
+      return { ...card, claim_type: 'unverified_fact', reliability: 'low', verification_status: 'failed', verification_reason: 'Tavily 未找到带来源链接的结果', verification_checked_at: checkedAt };
+    }
+    throw error;
+  }
+  const sourceText = sources.map((source, index) =>
+    `${index + 1}. 标题：${source.title}\n链接：${source.url}\n检索摘要：${source.content}\n网页正文摘录：${source.rawContent || '无'}`
+  ).join('\n\n');
+  const system = '你是严格的资料核验员。只根据给出的搜索结果判断完整主张是否得到某一来源直接支持。不能用模型记忆、标题相似或部分数字吻合代替证据。输出且仅输出 JSON 对象：{"supported":true或false,"source_index":1起始整数或0,"supporting_quote":"来源文字中连续出现的原文短句"}。若找不到直接支持完整主张的原文，supported 必须为 false。';
+  const user = `待核查主张：${claim}\n\nTavily 找到的来源：\n${sourceText}\n\n引用必须逐字复制上述来源的检索摘要或网页正文摘录，且足以支持主张中的对象、年份、数字、范围与因果表述。`;
+  const answer = await callOpenRouterText(system, user, { ...modelOptions, maxTokens: 500 });
+  if (!answer) throw new Error(globalThis.__lastWriterLlmError || '自动核验模型未返回结果');
+  const decision = extractJsonFromText(answer);
+  const index = Number(decision?.source_index) - 1;
+  const source = Number.isInteger(index) ? sources[index] : null;
+  const quote = String(decision?.supporting_quote || '').trim();
+  const normalize = (value) => String(value || '').normalize('NFKC').replace(/\s+/g, '').toLowerCase();
+  const sourceBody = normalize(`${source?.content || ''}\n${source?.rawContent || ''}`);
+  const claimNumbers = normalize(claim).match(/\d+(?:[.,]\d+)*/g) || [];
+  const fullSourceText = normalize(`${source?.title || ''}\n${source?.content || ''}\n${source?.rawContent || ''}`);
+  const quoteMatches = quote.length >= 8 && sourceBody.includes(normalize(quote));
+  const numbersMatch = claimNumbers.every((number) => fullSourceText.includes(number));
+  if (decision?.supported === true && source && quoteMatches && numbersMatch) {
+    return {
+      ...card,
+      claim_type: 'verified_fact',
+      source_title: source.title || card.source_title || '',
+      source_url: source.url,
+      source_excerpt: quote,
+      reliability: source.rawContent && normalize(source.rawContent).includes(normalize(quote)) ? 'medium' : 'low',
+      verification_method: 'tavily_ai_source_quote',
+      verification_status: 'passed',
+      verification_reason: '',
+      verification_checked_at: checkedAt,
+    };
+  }
+  const reason = !decision?.supported ? '搜索结果未直接支持完整主张'
+    : !source ? '模型未给出可定位的来源'
+      : !quoteMatches ? '模型引文未在搜索结果中找到'
+        : '主张中的数字未全部出现在来源中';
+  return { ...card, claim_type: 'unverified_fact', reliability: 'low', verification_status: 'failed', verification_reason: reason, verification_checked_at: checkedAt };
+}
+
+function getWriterChapterNarration(chapter) {
+  const directText = [chapter?.full_chapter_narration, chapter?.narration_text]
+    .find((text) => typeof text === 'string' && text.trim());
+  return directText?.trim() || Object.values(chapter?.sections || {})
+    .filter((text) => typeof text === 'string' && text.trim())
+    .map((text) => text.trim())
+    .join('\n\n');
+}
+
 function saveWriterProjectData(projectId, part, payload) {
   const paths = getPaths(projectId);
   if (!fs.existsSync(paths.dataDir)) {
@@ -2296,7 +2504,16 @@ function saveWriterProjectData(projectId, part, payload) {
   }
 
   if (part === 'brief') {
-    fs.writeFileSync(paths.briefPath, JSON.stringify(payload, null, 2), 'utf8');
+    const toSaveBrief = { ...payload };
+    if (!fs.existsSync(paths.finalScriptPath) && fs.existsSync(paths.briefPath)) {
+      try {
+        const prevBrief = JSON.parse(fs.readFileSync(paths.briefPath, 'utf8'));
+        if (prevBrief?._blank_draft && toSaveBrief._blank_draft === undefined) {
+          toSaveBrief._blank_draft = true;
+        }
+      } catch (e) {}
+    }
+    fs.writeFileSync(paths.briefPath, JSON.stringify(toSaveBrief, null, 2), 'utf8');
     return { ok: true, message: '立项 Brief 已保存' };
   }
   if (part === 'materials') {
@@ -2611,6 +2828,79 @@ function syncWriterToProducer(projectId, { finalScript, content, title, preserve
   return { ...result, preservedAssetsCount };
 }
 
+async function runProjectRenderJob(job) {
+  const curPaths = getPaths(job.projectId);
+  const appendLog = (chunk) => { job.log = (job.log + chunk).slice(-4000); };
+  try {
+    if (!fs.existsSync(curPaths.manifestPath)) throw new Error('工程缺少镜头清单，无法渲染');
+    const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+    syncCaptions(manifest, curPaths.captionsPath);
+    await new Promise((resolve, reject) => {
+      const child = spawn(process.execPath, [
+        'packages/qc-tools/generate-render-props.mjs', '--project', job.projectId,
+      ], { cwd: rootDir, stdio: ['ignore', 'pipe', 'pipe'] });
+      child.stdout.on('data', (chunk) => appendLog(chunk.toString()));
+      child.stderr.on('data', (chunk) => appendLog(chunk.toString()));
+      child.on('error', reject);
+      child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`生成渲染参数失败，退出码 ${code}`)));
+    });
+    job.status = 'rendering';
+    const output = await renderProject(job.projectId, {
+      preview: job.preview,
+      concurrency: job.concurrency,
+      onOutput: appendLog,
+    });
+    job.status = 'completed';
+    job.outputUrl = `/output/${job.projectId}/${path.basename(output)}`;
+  } catch (error) {
+    job.status = 'failed';
+    job.error = error.message;
+  } finally {
+    job.finishedAt = new Date().toISOString();
+  }
+}
+
+async function runVoiceboxJob(job, text) {
+  const curPaths = getPaths(job.projectId);
+  const fileName = 'voicebox_' + randomUUID() + '.wav';
+  const outputPath = path.join(curPaths.audioDir, fileName);
+  try {
+    fs.mkdirSync(curPaths.audioDir, { recursive: true });
+    const result = await synthesizeWithVoicebox({
+      text,
+      profileId: job.profileId || undefined,
+      outputPath,
+      maxWaitMs: 2 * 60 * 60 * 1000,
+      onProgress: (status, generationId) => {
+        job.status = 'generating';
+        job.voiceboxStatus = status;
+        job.generationId = generationId;
+      },
+    });
+    if (job.useAsNarration) {
+      const narrationPath = path.join(curPaths.audioDir, 'narration.wav');
+      fs.copyFileSync(outputPath, narrationPath);
+      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      manifest.audio_file = 'audio/narration.wav';
+      fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+      recompileProject(job.projectId);
+      const compiledProps = JSON.parse(fs.readFileSync(curPaths.propsPath, 'utf8'));
+      if (compiledProps.audio_track?.src !== 'audio/narration.wav') {
+        throw new Error('旁白已保存，但渲染参数未同步，请重新保存工程');
+      }
+    }
+    job.status = 'completed';
+    job.audioUrl = '/public/' + job.projectId + '/audio/' + fileName;
+    job.duration = result.duration;
+    job.profileName = result.profileName;
+  } catch (error) {
+    job.status = 'failed';
+    job.error = error.message;
+  } finally {
+    job.finishedAt = new Date().toISOString();
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
@@ -2618,6 +2908,54 @@ const server = http.createServer(async (req, res) => {
   const paths = getPaths(queryProject);
 
   try {
+    if (req.method === 'GET' && pathname === '/api/render-status') {
+      projectRenderPaths(queryProject);
+      const job = renderJobs.get(queryProject) || { projectId: queryProject, status: 'idle' };
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, job }));
+    }
+
+    if (req.method === 'POST' && pathname === '/api/render-project') {
+      const body = await readBody(req);
+      const projectId = body.projectId || queryProject;
+      projectRenderPaths(projectId);
+      const existing = renderJobs.get(projectId);
+      const activeVoice = voiceJobs.get(projectId);
+      if (activeVoice?.useAsNarration && ['queued', 'generating'].includes(activeVoice.status)) {
+        res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '当前工程正在生成旁白，请等待完成后再渲染' }));
+      }
+      if (existing && ['preparing', 'rendering'].includes(existing.status)) {
+        res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '这个工程已有渲染任务在运行', job: existing }));
+      }
+      const job = {
+        projectId,
+        preview: Boolean(body.preview),
+        concurrency: 2,
+        status: 'preparing',
+        startedAt: new Date().toISOString(),
+        log: '',
+      };
+      renderJobs.set(projectId, job);
+      void runProjectRenderJob(job);
+      res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, job }));
+    }
+
+    if (req.method === 'GET' && pathname === '/api/voicebox/profiles') {
+      const profiles = await getVoiceboxProfiles();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, profiles: profiles.map(({ id, name, language }) => ({ id, name, language })) }));
+    }
+
+    if (req.method === 'GET' && pathname === '/api/voicebox/status') {
+      projectRenderPaths(queryProject);
+      const job = voiceJobs.get(queryProject) || { projectId: queryProject, status: 'idle' };
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, job }));
+    }
+
     // 0. 工程列表 API
     if (req.method === 'GET' && pathname === '/api/projects') {
       const projects = listProjects();
@@ -2888,13 +3226,13 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname === '/api/writer/ai/generate-brief') {
       const body = await readBody(req);
       const { title, durationMinutes = 25, model, apiKey, baseUrl } = body;
-      let { materials } = body;
+      let materials = body.materials?.trim() || getWriterProjectData(queryProject).materials.trim();
       if (!title) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ ok: false, error: '请先输入明确的视频题目' }));
       }
       let researchedMaterials = null;
-      if (!materials || materials.trim().length < 15) {
+      if (!materials) {
         materials = await researchFactMaterials(title, { model, apiKey, baseUrl, projectDir: paths.projectDir });
         researchedMaterials = materials;
         saveWriterProjectData(queryProject, 'materials', materials);
@@ -2907,9 +3245,11 @@ const server = http.createServer(async (req, res) => {
       const user = `【视频题目】：${title}\n【预期时长】：${durationMinutes} 分钟\n【参考考证资料】：\n${materials}`;
       const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 2500 });
       const parsed = extractJsonFromText(aiText);
-      if (parsed) {
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         parsed.project_id = queryProject;
+        if (!parsed.title) parsed.title = title;
         saveWriterProjectData(queryProject, 'brief', parsed);
+        if (!researchedMaterials) saveWriterProjectData(queryProject, 'materials', materials);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ ok: true, brief: parsed, researchedMaterials, rawAi: aiText }));
       }
@@ -2920,73 +3260,105 @@ const server = http.createServer(async (req, res) => {
     // 0.9 AI 从原始资料或现有文案提取原子化证据卡 (半自动智能考证：缺资料自动联网考证补充)
     if (req.method === 'POST' && pathname === '/api/writer/ai/extract-evidence') {
       const body = await readBody(req);
-      const { title, model, apiKey, baseUrl } = body;
-      let { materials } = body;
+      const { model, apiKey, baseUrl } = body;
+      const stored = getWriterProjectData(queryProject);
+      const title = body.title?.trim() || body.brief?.title?.trim() || stored.brief?.title;
       if (!title) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ ok: false, error: '请先提供视频题目' }));
       }
-      let researchedMaterials = null;
-      if (!materials || materials.trim().length < 15) {
-        const stored = getWriterProjectData(queryProject);
-        const scriptText = getFinalScriptRawText(stored?.finalScript);
-        if (scriptText && scriptText.length > 50) {
-          materials = `【工程现有文案正文事实源】：\n${scriptText.slice(0, 4000)}`;
-        } else {
-          materials = await researchFactMaterials(title, { model, apiKey, baseUrl, projectDir: paths.projectDir });
-          researchedMaterials = materials;
-          saveWriterProjectData(queryProject, 'materials', materials);
-        }
-      }
-      const sys = renderWriterPrompt(paths.projectDir, 'W3_evidence', {
-        title,
-        materials,
-      });
-      const user = `【视频题目】：${title}\n【考证资料内容】：\n${materials}`;
-      const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 3500 });
-      let list = extractJsonFromText(aiText);
-      if (Array.isArray(list) && list.length > 0) {
-        saveWriterProjectData(queryProject, 'evidenceCards', list);
+      const brief = { ...stored.brief, ...body.brief, project_id: queryProject, title };
+      const materials = body.materials?.trim() || stored.materials.trim();
+      const { evidenceCards, researchedMaterials, aiText, pendingEvidenceCount } = await extractWriterEvidence(
+        queryProject, stored, brief, materials, { model, apiKey, baseUrl }
+      );
+      if (Array.isArray(evidenceCards) && evidenceCards.length > 0) {
+        saveWriterProjectData(queryProject, 'evidenceCards', evidenceCards);
+        if (body.brief) saveWriterProjectData(queryProject, 'brief', brief);
+        if (body.materials?.trim()) saveWriterProjectData(queryProject, 'materials', materials);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: true, evidenceCards: list, researchedMaterials }));
+        return res.end(JSON.stringify({ ok: true, evidenceCards, researchedMaterials, pendingEvidenceCount }));
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '大模型未返回证据卡 JSON 数组', rawAi: aiText }));
     }
 
+    // 自动为待核查事实补找来源，并核对搜索结果中的原文摘录
+    if (req.method === 'POST' && pathname === '/api/writer/ai/verify-pending-evidence') {
+      const body = await readBody(req);
+      const stored = getWriterProjectData(queryProject);
+      const cards = Array.isArray(stored.evidenceCards) ? [...stored.evidenceCards] : [];
+      const pendingIndices = cards.map((card, index) => ({ card, index }))
+        .filter(({ card }) => card?.claim_type === 'unverified_fact' && (body.retry || !card.verification_checked_at))
+        .slice(0, 2);
+      const settled = await Promise.allSettled(pendingIndices.map(({ card }) =>
+        verifyWriterEvidenceCard(card, paths.projectDir, {
+          model: body.model, apiKey: body.apiKey, baseUrl: body.baseUrl,
+        })
+      ));
+      const errors = [];
+      let verifiedCount = 0;
+      settled.forEach((result, i) => {
+        if (result.status === 'fulfilled') {
+          cards[pendingIndices[i].index] = result.value;
+          if (result.value.claim_type === 'verified_fact') verifiedCount++;
+        } else {
+          errors.push(`${pendingIndices[i].card.evidence_id || pendingIndices[i].index + 1}: ${result.reason?.message || '核验失败'}`);
+        }
+      });
+      if (settled.some((result) => result.status === 'fulfilled')) {
+        saveWriterProjectData(queryProject, 'evidenceCards', cards);
+      }
+      const remainingCount = cards.filter((card) => card?.claim_type === 'unverified_fact' && !card.verification_checked_at).length;
+      res.writeHead(errors.length && !verifiedCount && remainingCount ? 502 : 200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({
+        ok: errors.length === 0,
+        evidenceCards: cards,
+        checkedCount: settled.filter((result) => result.status === 'fulfilled').length,
+        verifiedCount,
+        remainingCount,
+        pendingCount: cards.filter((card) => card?.claim_type === 'unverified_fact').length,
+        errors,
+      }));
+    }
+
     // 0.10 AI 基于证据卡构建 5~7 章大纲 (半自动智能协同：自动兜底证据卡与大纲结构)
     if (req.method === 'POST' && pathname === '/api/writer/ai/build-outline') {
       const body = await readBody(req);
-      const { brief, model, apiKey, baseUrl } = body;
-      let { evidenceCards } = body;
+      const { model, apiKey, baseUrl } = body;
+      const stored = getWriterProjectData(queryProject);
+      const brief = { ...stored.brief, ...body.brief, project_id: queryProject };
+      let evidenceCards = Array.isArray(body.evidenceCards) && body.evidenceCards.length
+        ? body.evidenceCards.map((card) => markWriterEvidencePending(card))
+        : stored.evidenceCards;
 
       // 若前端传入证据卡为空，自动从持久化数据中寻找或自动考证提取
       let autoGeneratedEvidence = null;
-      if (!Array.isArray(evidenceCards) || evidenceCards.length === 0) {
-        const stored = getWriterProjectData(queryProject);
-        if (stored.evidenceCards && stored.evidenceCards.length > 0) {
-          evidenceCards = stored.evidenceCards;
-        } else {
-          const title = (brief && brief.title) || '中文深度科普';
-          const materials = await researchFactMaterials(title, { model, apiKey, baseUrl, projectDir: paths.projectDir });
-          const sysEv = renderWriterPrompt(paths.projectDir, 'W3_evidence', { title, materials });
-          const userEv = '【视频题目】：' + title + '\n【考证资料】：\n' + materials;
-          const aiEv = await callOpenRouterText(sysEv, userEv, { model, apiKey, baseUrl, maxTokens: 2500 });
-          evidenceCards = extractJsonFromText(aiEv) || [];
-          if (evidenceCards.length > 0) {
-            saveWriterProjectData(queryProject, 'evidenceCards', evidenceCards);
-            autoGeneratedEvidence = evidenceCards;
-          }
+      if (evidenceCards.length === 0) {
+        const materials = body.materials?.trim() || stored.materials.trim();
+        const extracted = await extractWriterEvidence(queryProject, stored, brief, materials, { model, apiKey, baseUrl });
+        if (!Array.isArray(extracted.evidenceCards) || extracted.evidenceCards.length === 0) {
+          res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '未能提取证据卡，请在第 2 步补充资料后重试' }));
         }
+        evidenceCards = extracted.evidenceCards;
+        saveWriterProjectData(queryProject, 'evidenceCards', evidenceCards);
+        autoGeneratedEvidence = evidenceCards;
+      }
+
+      const approvedEvidenceCards = evidenceCards.filter((card) => card?.claim_type !== 'unverified_fact');
+      if (approvedEvidenceCards.length === 0) {
+        res.writeHead(422, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '没有自动核验或人工复核通过的证据卡；请先处理待人工复核候选，再生成大纲' }));
       }
 
       const briefJson = JSON.stringify(brief, null, 2);
-      const evidenceCardsJson = JSON.stringify(evidenceCards, null, 2);
+      const evidenceCardsJson = JSON.stringify(approvedEvidenceCards, null, 2);
       const sys = renderWriterPrompt(paths.projectDir, 'W4_outline', {
         brief_json: briefJson,
         evidence_cards_json: evidenceCardsJson,
       });
-      const user = `【立项 Brief】：\n${briefJson}\n\n【可用证据卡列表】：\n${evidenceCardsJson}`;
+      const user = `【立项 Brief】\n${briefJson}\n\n【可用证据卡列表】\n${evidenceCardsJson}\n\n每章的 supporting_evidence_ids 必须引用上面实际存在且支持本章论点的证据卡。unverified_fact 只能作为待调查线索，不得写成已核实的章节结论。`;
       const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000 });
       let outline = extractJsonFromText(aiText);
       if (outline && !outline.chapters && outline.outline && Array.isArray(outline.outline.chapters)) {
@@ -2995,12 +3367,38 @@ const server = http.createServer(async (req, res) => {
       if (outline && !outline.chapters && Array.isArray(outline.chapter_list)) {
         outline.chapters = outline.chapter_list;
       }
-      if (outline && Array.isArray(outline.chapters)) {
+      if (Array.isArray(outline?.chapters) && outline.chapters.length) {
+        const evidenceIds = new Set(approvedEvidenceCards.map((card) => card?.evidence_id));
+        const chapters = outline.chapters.map((chapter, index) => ({
+          ...chapter,
+          chapter_number: Number(chapter?.chapter_number || index + 1),
+          supporting_evidence_ids: getWriterEvidenceIds(chapter),
+        }));
+        const numbers = new Set(chapters.map((chapter) => chapter.chapter_number));
+        const badChapters = chapters.filter((chapter) =>
+          !chapter.supporting_evidence_ids.length || chapter.supporting_evidence_ids.some((id) => !evidenceIds.has(id))
+        );
+        const openingHasMissingEvidence = getWriterEvidenceIds(outline.opening_hook).some((id) => !evidenceIds.has(id));
+        const endingHasMissingEvidence = getWriterEvidenceIds(outline.single_ending_plan).some((id) => !evidenceIds.has(id));
+        if (badChapters.length || openingHasMissingEvidence || endingHasMissingEvidence || numbers.size !== chapters.length ||
+            chapters.some(({ chapter_number }) => !Number.isInteger(chapter_number) || chapter_number < 1)) {
+          const locations = [
+            ...badChapters.map((chapter) => `第 ${chapter.chapter_number} 章`),
+            ...(openingHasMissingEvidence ? ['开篇'] : []),
+            ...(endingHasMissingEvidence ? ['结尾'] : []),
+          ];
+          const error = locations.length
+            ? `大纲的证据卡绑定缺失或无效（${locations.join('、')}），请重新生成大纲`
+            : '大纲的章节编号无效，请重新生成大纲';
+          res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error, rawAi: aiText }));
+        }
+        outline.chapters = chapters;
         outline.project_id = queryProject;
         outline.approval_status = 'pending_user_review';
         saveWriterProjectData(queryProject, 'outline', outline);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: true, outline, autoGeneratedEvidence }));
+        return res.end(JSON.stringify({ ok: true, outline, autoGeneratedEvidence, evidenceCards }));
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '大模型未返回符合规范的 Outline JSON', rawAi: aiText }));
@@ -3009,32 +3407,53 @@ const server = http.createServer(async (req, res) => {
     // 0.11 AI 单章受控撰写 (四段式结构)
     if (req.method === 'POST' && pathname === '/api/writer/ai/write-chapter') {
       const body = await readBody(req);
-      const { chapterNumber, outline, evidenceCards, model, apiKey, baseUrl } = body;
-      const targetChapter = (outline.chapters || []).find((c) => Number(c.chapter_number) === Number(chapterNumber));
+      const { chapterNumber, model, apiKey, baseUrl } = body;
+      const stored = getWriterProjectData(queryProject);
+      const outline = body.outline ?? stored.outline;
+      const targetChapter = Array.isArray(outline?.chapters) && outline.chapters.find(
+        (chapter, index) => Number(chapter?.chapter_number || index + 1) === Number(chapterNumber)
+      );
       if (!targetChapter) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ ok: false, error: `在大纲中未找到第 ${chapterNumber} 章` }));
       }
 
-      const targetChapterJson = JSON.stringify(targetChapter, null, 2);
-      const evidenceCardsJson = JSON.stringify(evidenceCards || [], null, 2);
+      const evidenceCards = Array.isArray(body.evidenceCards) && body.evidenceCards.length
+        ? body.evidenceCards
+        : stored.evidenceCards;
+      const supportingIds = getWriterEvidenceIds(targetChapter);
+      const cardsById = new Map(evidenceCards.map((card) => [card?.evidence_id, card]));
+      const missingEvidenceIds = supportingIds.filter((id) => !cardsById.has(id));
+      if (missingEvidenceIds.length) {
+        res.writeHead(422, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({
+          ok: false, error: `第 ${chapterNumber} 章缺少证据卡 ${missingEvidenceIds.join('、')}，请补齐证据卡或重新生成大纲`,
+        }));
+      }
+      // 兼容从旧定稿回填、尚无证据绑定的大纲，提供现有卡供模型选择。
+      const chapterCards = supportingIds.length ? supportingIds.map((id) => cardsById.get(id)) : evidenceCards;
+      const targetChapterJson = JSON.stringify({ ...targetChapter, supporting_evidence_ids: supportingIds }, null, 2);
+      const evidenceCardsJson = JSON.stringify(chapterCards, null, 2);
       const sys = renderWriterPrompt(paths.projectDir, 'W5_chapter', {
         chapter_number: chapterNumber,
         chapter_title: targetChapter.chapter_title || '',
         sub_question: targetChapter.sub_question || '',
-        supporting_evidence_ids_json: JSON.stringify(targetChapter.supporting_evidence_ids || []),
+        supporting_evidence_ids_json: JSON.stringify(supportingIds),
         target_chapter_json: targetChapterJson,
         evidence_cards_json: evidenceCardsJson,
       });
-      const user = `【本章大纲规划】：\n${targetChapterJson}\n\n【关联证据卡库】：\n${evidenceCardsJson}`;
+      const user = `【本章大纲规划】\n${targetChapterJson}\n\n【本章可用证据卡】\n${evidenceCardsJson}\n\n依据给出的卡片写作，保留事实限定条件，仅在 used_evidence_ids 中列出实际引用的卡片编号。unverified_fact 只能以待核查线索呈现，不得写成已核实事实。`;
       const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 4000 });
       const chData = extractJsonFromText(aiText);
-      if (chData && chData.sections) {
+      const narration = getWriterChapterNarration(chData);
+      if (chData?.sections && narration) {
+        const allowedIds = new Set(chapterCards.map((card) => card?.evidence_id));
         chData.chapter_number = Number(chapterNumber);
-        if (!chData.full_chapter_narration) {
-          chData.full_chapter_narration = Object.values(chData.sections).filter(Boolean).join('\n\n');
-        }
-        chData.word_count = chData.full_chapter_narration.length;
+        chData.full_chapter_narration = narration;
+        chData.used_evidence_ids = Array.isArray(chData.used_evidence_ids)
+          ? [...new Set(chData.used_evidence_ids.filter((id) => typeof id === 'string' && allowedIds.has(id)))]
+          : [];
+        chData.word_count = narration.length;
         saveWriterProjectData(queryProject, 'chapter', chData);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ ok: true, chapter: chData }));
@@ -3046,53 +3465,98 @@ const server = http.createServer(async (req, res) => {
     // 0.12 AI 全文统稿去伪结尾与定稿
     if (req.method === 'POST' && pathname === '/api/writer/ai/finalize-script') {
       const body = await readBody(req);
-      const { outline, chapters, model, apiKey, baseUrl } = body;
+      const { model, apiKey, baseUrl } = body;
+      const stored = getWriterProjectData(queryProject);
+      const outline = body.outline ?? stored.outline;
+      if (!Array.isArray(outline?.chapters) || outline.chapters.length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '请先完成大纲，再进行全文统稿' }));
+      }
+
+      const chapterNumbers = outline.chapters.map((chapter, index) => Number(chapter?.chapter_number || index + 1));
+      if (new Set(chapterNumbers).size !== chapterNumbers.length ||
+          chapterNumbers.some((number) => !Number.isInteger(number) || number < 1)) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '请先修正大纲里的章节编号，再进行全文统稿' }));
+      }
+      const incomingChapters = Array.isArray(body.chapters) ? body.chapters : [];
+      const draftsByNumber = new Map([...stored.chapters, ...incomingChapters].map((chapter) => [
+        Number(chapter?.chapter_number), chapter,
+      ]));
+      const chapters = chapterNumbers.map((number) => {
+        const draft = draftsByNumber.get(number);
+        return { ...draft, chapter_number: number, full_chapter_narration: getWriterChapterNarration(draft) };
+      });
+      const missingChapters = chapters.filter((chapter) => !chapter.full_chapter_narration);
+      if (missingChapters.length) {
+        const labels = missingChapters.map((chapter) => `第 ${chapter.chapter_number} 章`);
+        res.writeHead(422, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: `请先完成 ${labels.join('、')}，再进行全文统稿` }));
+      }
+
+      const evidenceCards = Array.isArray(body.evidenceCards) && body.evidenceCards.length
+        ? body.evidenceCards
+        : stored.evidenceCards;
+      const evidenceIds = new Set(evidenceCards.map((card) => card?.evidence_id));
+      const outlineEvidenceIds = new Set([outline.opening_hook, ...outline.chapters, outline.single_ending_plan].flatMap(getWriterEvidenceIds));
+      const missingEvidenceIds = [...outlineEvidenceIds].filter((id) => !evidenceIds.has(id));
+      if (missingEvidenceIds.length) {
+        res.writeHead(422, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({
+          ok: false, error: `统稿缺少大纲引用的证据卡 ${missingEvidenceIds.join('、')}，请补齐证据卡后重试`,
+        }));
+      }
+
       const outlineJson = JSON.stringify(outline, null, 2);
       const chaptersJson = JSON.stringify(chapters, null, 2);
+      const evidenceCardsJson = JSON.stringify(evidenceCards, null, 2);
       const sys = renderWriterPrompt(paths.projectDir, 'W6_finalize', {
         outline_json: outlineJson,
         chapters_json: chaptersJson,
+        evidence_cards_json: evidenceCardsJson,
       });
-      const user = `【大纲结构】：\n${outlineJson}\n\n【全部已撰写章节】：\n${chaptersJson}`;
+      const user = `【大纲结构】\n${outlineJson}\n\n【全部章节稿】\n${chaptersJson}\n\n【完整证据卡与出处】\n${evidenceCardsJson}\n\n按大纲保留每一章，参照证据卡核对事实、数字、时间和出处，保留适用范围及不确定性，避免新增无证据支持的事实。unverified_fact 必须保留待核查标记，不得统稿成已核实结论。`;
       const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 8192 });
       let finalScript = extractJsonFromText(aiText);
-      if (!finalScript || !finalScript.script_segments) {
-        // 长篇 JSON 被截断时自动平滑兜底拼合各章节，确保统稿永不卡死
-        if (Array.isArray(chapters) && chapters.length > 0) {
-          const mergedChapters = chapters.map((c, idx) => ({
-            chapter_number: c.chapter_number || idx + 1,
-            chapter_title: c.chapter_title || `第${idx + 1}章`,
-            narration_text: c.full_chapter_narration || Object.values(c.sections || {}).filter(Boolean).join('\n\n'),
-          }));
-          const rawTotal = mergedChapters.map((c) => c.narration_text).join('\n\n');
-          finalScript = {
-            project_id: queryProject,
-            title: outline?.title || queryProject,
-            total_word_count: rawTotal.replace(/\s+/g, '').length,
-            estimated_duration_minutes: Number((rawTotal.replace(/\s+/g, '').length / 240).toFixed(1)),
-            revision_count: 1,
-            editorial_changes_log: {
-              removed_duplicate_arguments: ['已完成全片章节结构化统稿拼合'],
-              removed_duplicate_examples: [],
-              unified_terms_and_names: [],
-              removed_false_endings_count: 0,
-            },
-            script_segments: {
-              opening: outline?.opening_hook?.immediate_short_answer || '',
-              chapters: mergedChapters,
-              ending: outline?.single_ending_plan?.final_takeaway || '',
-            },
-          };
-        }
+      const modelChapters = finalScript?.script_segments?.chapters;
+      const modelByNumber = new Map((Array.isArray(modelChapters) ? modelChapters : []).map((chapter) => [
+        Number(chapter?.chapter_number), chapter,
+      ]));
+      const useDraftMerge = modelChapters?.length !== chapterNumbers.length ||
+        !chapterNumbers.every((number) => {
+          const text = modelByNumber.get(number)?.narration_text;
+          return typeof text === 'string' && text.trim();
+        });
+      if (useDraftMerge) {
+        // 模型未返回完整统稿时保留所有已写章节，并让前端标明仍需统稿复核。
+        const mergedChapters = chapters.map((chapter, index) => ({
+          chapter_number: chapter.chapter_number,
+          chapter_title: chapter.chapter_title || outline.chapters[index].chapter_title || `第${chapter.chapter_number}章`,
+          narration_text: chapter.full_chapter_narration,
+        }));
+        const rawTotal = mergedChapters.map((chapter) => chapter.narration_text).join('\n\n');
+        const wordCount = rawTotal.replace(/\s+/g, '').length;
+        finalScript = {
+          title: outline.title || queryProject,
+          total_word_count: wordCount,
+          estimated_duration_minutes: Number((wordCount / 240).toFixed(1)),
+          revision_count: 1,
+          _merged_from_drafts: true,
+          script_segments: {
+            opening: outline.opening_hook?.immediate_short_answer || '',
+            chapters: mergedChapters,
+            ending: outline.single_ending_plan?.final_takeaway || '',
+          },
+        };
+      } else {
+        finalScript.script_segments.chapters = chapterNumbers.map((number) => ({
+          ...modelByNumber.get(number), chapter_number: number,
+        }));
       }
-      if (finalScript && finalScript.script_segments) {
-        finalScript.project_id = queryProject;
-        saveWriterProjectData(queryProject, 'finalScript', finalScript);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: true, finalScript }));
-      }
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '大模型未返回符合规范的 final-script JSON', rawAi: aiText }));
+      finalScript.project_id = queryProject;
+      saveWriterProjectData(queryProject, 'finalScript', finalScript);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, finalScript, usedFallback: useDraftMerge }));
     }
 
     // 0.13 AI 全篇文案修复器 (De-AI Humanizer · 分章/分块防截断重构)
@@ -3290,6 +3754,10 @@ const server = http.createServer(async (req, res) => {
             global_ai_visual_prompt:
               '作为 16:9 纪录片视觉总监，结合旁白片段与关键词，在 16:9 画幅中央提炼一个醒目标志大字（不超过 14 字），搭配 1 条副级阐述，用于动效视觉传达。',
           };
+      promptConfig.tavilyKeyConfigured = Boolean(promptConfig.tavilyApiKey || process.env.TAVILY_API_KEY);
+      delete promptConfig.tavilyApiKey;
+      promptConfig.meowloadKeyConfigured = Boolean(getMeowloadApiKey(paths.projectDir));
+      delete promptConfig.meowloadApiKey;
 
       let audioFile = null;
       if (fs.existsSync(paths.audioDir)) {
@@ -3322,9 +3790,18 @@ const server = http.createServer(async (req, res) => {
       const curPaths = getPaths(targetProject);
 
       if (body.promptConfig) {
+        let previousPromptConfig = {};
+        if (fs.existsSync(curPaths.promptConfigPath)) {
+          try { previousPromptConfig = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8')); } catch (e) {}
+        }
         fs.writeFileSync(
           curPaths.promptConfigPath,
-          JSON.stringify(body.promptConfig, null, 2),
+          JSON.stringify({
+            ...previousPromptConfig,
+            ...body.promptConfig,
+            tavilyApiKey: previousPromptConfig.tavilyApiKey || '',
+            meowloadApiKey: previousPromptConfig.meowloadApiKey || '',
+          }, null, 2),
           'utf8'
         );
       }
@@ -3712,6 +4189,10 @@ const server = http.createServer(async (req, res) => {
         provider: 'openrouter',
         baseUrl: body.baseUrl || existing.baseUrl || 'https://openrouter.ai/api/v1',
         apiKey: body.apiKey !== undefined ? body.apiKey : (existing.apiKey || ''),
+        tavilyApiKey: typeof body.tavilyApiKey === 'string' && body.tavilyApiKey.trim()
+          ? body.tavilyApiKey.trim() : (existing.tavilyApiKey || ''),
+        meowloadApiKey: typeof body.meowloadApiKey === 'string' && body.meowloadApiKey.trim()
+          ? body.meowloadApiKey.trim() : (existing.meowloadApiKey || ''),
         writerModel: body.writerModel || existing.writerModel || 'deepseek/deepseek-chat',
         textModel: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
         videoModel: body.videoModel || existing.videoModel || 'minimax/hailuo-3-max',
@@ -3724,7 +4205,17 @@ const server = http.createServer(async (req, res) => {
 
       fs.writeFileSync(curPaths.promptConfigPath, JSON.stringify(updated, null, 2), 'utf8');
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: true, config: updated, message: '模型网关配置已保存！' }));
+      return res.end(JSON.stringify({
+        ok: true,
+        config: {
+          ...updated,
+          tavilyApiKey: undefined,
+          tavilyKeyConfigured: Boolean(updated.tavilyApiKey || process.env.TAVILY_API_KEY),
+          meowloadApiKey: undefined,
+          meowloadKeyConfigured: Boolean(getMeowloadApiKey(curPaths.projectDir, updated.meowloadApiKey)),
+        },
+        message: '模型网关配置已保存！'
+      }));
     }
 
     // 4.5 智能分镜与指示词提炼 API (调用 OpenRouter 统一网关指定的模型)
@@ -4105,6 +4596,344 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ ok: true, uploadedAsset: newAsset, manifest, assetIndex }));
     }
 
+    // 6.5 通过本机哼哼猫桌面端 (meowload CLI) 或 REST API 解析网络链接并下载视频/图片素材到本地
+    if (req.method === 'POST' && pathname === '/api/download-url-asset') {
+      const body = await readBody(req);
+      const { sceneId, url: rawInputUrl, projectId } = body;
+      const targetProject = projectId || queryProject;
+      const curPaths = getPaths(targetProject);
+
+      const urlMatch = String(rawInputUrl || '').match(/https?:\/\/[^\s"'<>]+/i);
+      const targetUrl = urlMatch ? urlMatch[0].trim() : String(rawInputUrl || '').trim();
+      if (!targetUrl) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '请输入有效的网络视频或帖子链接（支持 YouTube、B站、抖音、TikTok、小红书等）' }));
+      }
+
+      const resolveMeowloadCli = () => {
+        const candidates = ['/usr/local/bin/meowload', '/opt/homebrew/bin/meowload'];
+        for (const p of candidates) {
+          if (fs.existsSync(p)) return p;
+        }
+        const whichRes = spawnSync('which', ['meowload'], { encoding: 'utf8' });
+        if (whichRes.status === 0 && whichRes.stdout.trim()) return whichRes.stdout.trim();
+        return '';
+      };
+
+      const meowloadCli = resolveMeowloadCli();
+      const meowloadKey = getMeowloadApiKey(curPaths.projectDir);
+
+      if (!meowloadCli && !meowloadKey) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({
+          ok: false,
+          error: '未检测到本机哼哼猫客户端 CLI (meowload)，且未配置哼哼猫 API Key。请安装并登录哼哼猫桌面端，或在右上角「🪐 AI 全流程模型调度中心」填入 API Key。'
+        }));
+      }
+
+      try {
+        const safeScene = String(sceneId || 'scene').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+        let isVideo = true;
+        let siteName = 'web';
+        let postTitle = '';
+        let relPath = '';
+        let diskPath = '';
+        let detectedDuration = null;
+        let detectedResolution = '1920x1080';
+        let downloadSourceMode = 'desktop_app';
+
+        try {
+          const u = new URL(targetUrl);
+          siteName = u.hostname.replace(/^www\./, '').split('.')[0] || 'web';
+        } catch (e) {}
+
+        if (meowloadCli) {
+          // 优先使用本机已登录会员的哼哼猫桌面端 CLI，零 API 积分消耗
+          const tmpDir = path.join(curPaths.publicDir, 'assets', `.meow_tmp_${Date.now()}`);
+          fs.mkdirSync(tmpDir, { recursive: true });
+
+          const runCliDownload = () => new Promise((resolve, reject) => {
+            const proc = spawn(meowloadCli, ['download', targetUrl, '--media_type', 'video,image', '--output-dir', tmpDir], {
+              stdio: ['ignore', 'pipe', 'pipe'],
+            });
+            let outLog = '';
+            let errLog = '';
+            proc.stdout.on('data', (d) => { outLog += d.toString(); });
+            proc.stderr.on('data', (d) => { errLog += d.toString(); });
+
+            const timer = setTimeout(() => {
+              try { proc.kill('SIGKILL'); } catch (e) {}
+              reject(new Error('本机哼哼猫下载超时（超过 5 分钟）'));
+            }, 300000);
+
+            proc.on('error', (err) => {
+              clearTimeout(timer);
+              reject(err);
+            });
+            proc.on('close', (code) => {
+              clearTimeout(timer);
+              if (code === 0) {
+                resolve({ outLog, errLog });
+              } else {
+                const msg = (errLog || outLog || '').trim().split('\n').pop() || `退出码 ${code}`;
+                reject(new Error(`本机哼哼猫客户端下载失败: ${msg}（请确认桌面端已启动并登录会员账号）`));
+              }
+            });
+          });
+
+          try {
+            await runCliDownload();
+            const files = fs.readdirSync(tmpDir)
+              .filter((f) => !f.startsWith('.'))
+              .map((f) => ({ name: f, fullPath: path.join(tmpDir, f), stat: fs.statSync(path.join(tmpDir, f)) }))
+              .filter((item) => item.stat.isFile() && item.stat.size > 0);
+
+            const videoFile = files.find((f) => /\.(mp4|mov|webm|mkv)$/i.test(f.name));
+            const imageFile = files.find((f) => /\.(jpg|jpeg|png|webp)$/i.test(f.name));
+            const picked = videoFile || imageFile || files[0];
+
+            if (!picked) {
+              throw new Error('哼哼猫桌面端未在目录中输出有效媒体文件，请检查该链接是否受限或桌面端是否已登录');
+            }
+
+            isVideo = Boolean(videoFile) || !/\.(jpg|jpeg|png|webp)$/i.test(picked.name);
+            const rawExt = path.extname(picked.name).replace(/^\./, '').toLowerCase() || (isVideo ? 'mp4' : 'jpg');
+            const baseName = path.basename(picked.name, path.extname(picked.name));
+            postTitle = baseName.slice(0, 60);
+
+            const folder = isVideo ? 'assets/video' : 'assets/images';
+            const safeFile = `${safeScene}_meow_${siteName}_${Date.now()}.${rawExt}`;
+            relPath = `${folder}/${safeFile}`;
+            diskPath = path.join(curPaths.publicDir, relPath);
+            fs.mkdirSync(path.dirname(diskPath), { recursive: true });
+            fs.renameSync(picked.fullPath, diskPath);
+          } finally {
+            try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch (e) {}
+          }
+        } else {
+          // 若本机未安装桌面端 CLI，则回退使用 REST API
+          downloadSourceMode = 'rest_api';
+          const isYouTube = /(?:youtube\.com|youtu\.be)\//i.test(targetUrl);
+          let extractData = null;
+
+          const callMeowloadEndpoint = async (endpoint) => {
+            const resp = await fetch(`https://api.meowload.net/openapi/v1${endpoint}`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${meowloadKey}`,
+                'Accept-Language': 'zh',
+              },
+              body: JSON.stringify({ url: targetUrl }),
+            });
+            const json = await resp.json().catch(() => ({}));
+            return { ok: resp.ok, status: resp.status, data: json };
+          };
+
+          if (isYouTube) {
+            const proxyRes = await callMeowloadEndpoint('/youtube/proxy-download');
+            if (proxyRes.ok && Array.isArray(proxyRes.data?.medias) && proxyRes.data.medias.length > 0) {
+              extractData = proxyRes.data;
+            } else {
+              const postRes = await callMeowloadEndpoint('/extract/post');
+              if (!postRes.ok) {
+                throw new Error(postRes.data?.message || `哼哼猫提取失败 (HTTP ${postRes.status})`);
+              }
+              extractData = postRes.data;
+            }
+          } else {
+            const postRes = await callMeowloadEndpoint('/extract/post');
+            if (!postRes.ok) {
+              throw new Error(postRes.data?.message || `哼哼猫提取失败 (HTTP ${postRes.status})`);
+            }
+            extractData = postRes.data;
+          }
+
+          const medias = Array.isArray(extractData?.medias) ? extractData.medias : [];
+          if (medias.length === 0) {
+            throw new Error('该链接未提取到可下载的视频或图片媒体资源');
+          }
+
+          const media = medias.find((m) => m.media_type === 'video')
+            || medias.find((m) => m.media_type === 'image')
+            || medias[0];
+          isVideo = media.media_type !== 'image';
+          siteName = extractData.site || siteName;
+          postTitle = (extractData.title || extractData.text || `${siteName}_${extractData.id || Date.now()}`).slice(0, 60);
+          detectedDuration = Number(media.duration) > 0 ? Number(media.duration) : (isVideo ? 15.0 : null);
+
+          const folder = isVideo ? 'assets/video' : 'assets/images';
+          const ext = isVideo ? 'mp4' : 'jpg';
+          const safeFile = `${safeScene}_meow_${siteName}_${Date.now()}.${ext}`;
+          relPath = `${folder}/${safeFile}`;
+          diskPath = path.join(curPaths.publicDir, relPath);
+          fs.mkdirSync(path.dirname(diskPath), { recursive: true });
+
+          const mediaHeaders = (media.headers && typeof media.headers === 'object') ? media.headers : {};
+          const downloadBinary = async (dlUrl, destFile, isProxyUrl = false) => {
+            const reqHeaders = {
+              'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+              ...(isProxyUrl ? {} : mediaHeaders),
+            };
+            const dlResp = await fetch(dlUrl, { headers: reqHeaders });
+            if (!dlResp.ok) {
+              throw new Error(`下载媒体流失败 (HTTP ${dlResp.status})`);
+            }
+            const buf = Buffer.from(await dlResp.arrayBuffer());
+            fs.writeFileSync(destFile, buf);
+          };
+
+          if (isVideo) {
+            const variants = Array.isArray(media.variants) ? media.variants : [];
+            const candidates = variants.filter((v) => v && (v.video_proxy_url || v.video_url));
+            candidates.sort((a, b) => {
+              const aProxy = a.video_proxy_url ? 1 : 0;
+              const bProxy = b.video_proxy_url ? 1 : 0;
+              if (aProxy !== bProxy) return bProxy - aProxy;
+              const aQ = Number(a.quality || 0);
+              const bQ = Number(b.quality || 0);
+              const aIn1080 = aQ > 0 && aQ <= 1080 ? 1 : 0;
+              const bIn1080 = bQ > 0 && bQ <= 1080 ? 1 : 0;
+              if (aIn1080 !== bIn1080) return bIn1080 - aIn1080;
+              if (Boolean(a.is_default) !== Boolean(b.is_default)) return a.is_default ? -1 : 1;
+              return bQ - aQ;
+            });
+
+            const chosenVariant = candidates[0] || null;
+            let downloaded = false;
+
+            if (chosenVariant) {
+              const vUrl = chosenVariant.video_proxy_url || chosenVariant.video_url;
+              const vIsProxy = Boolean(chosenVariant.video_proxy_url);
+              const hasSplitAudio = Boolean(chosenVariant.video_url && chosenVariant.audio_url);
+              const aUrl = chosenVariant.audio_proxy_url || chosenVariant.audio_url;
+              const aIsProxy = Boolean(chosenVariant.audio_proxy_url);
+
+              if (hasSplitAudio && aUrl) {
+                const tmpVideo = `${diskPath}.tmp_v.mp4`;
+                const tmpAudio = `${diskPath}.tmp_a.m4a`;
+                try {
+                  await downloadBinary(vUrl, tmpVideo, vIsProxy);
+                  await downloadBinary(aUrl, tmpAudio, aIsProxy);
+                  let ffRes = spawnSync('ffmpeg', ['-y', '-i', tmpVideo, '-i', tmpAudio, '-c', 'copy', diskPath], { encoding: 'utf8' });
+                  if (ffRes.status !== 0 || !fs.existsSync(diskPath)) {
+                    ffRes = spawnSync('ffmpeg', ['-y', '-i', tmpVideo, '-i', tmpAudio, '-c:v', 'copy', '-c:a', 'aac', diskPath], { encoding: 'utf8' });
+                  }
+                  if (fs.existsSync(diskPath) && fs.statSync(diskPath).size > 0) {
+                    downloaded = true;
+                  }
+                } catch (splitErr) {
+                  console.warn('[MeowLoad] 分轨下载或合并失败，回退直链下载:', splitErr.message);
+                } finally {
+                  try { if (fs.existsSync(tmpVideo)) fs.unlinkSync(tmpVideo); } catch (e) {}
+                  try { if (fs.existsSync(tmpAudio)) fs.unlinkSync(tmpAudio); } catch (e) {}
+                }
+              } else if (vUrl && !hasSplitAudio) {
+                try {
+                  await downloadBinary(vUrl, diskPath, vIsProxy);
+                  downloaded = true;
+                } catch (varErr) {
+                  console.warn('[MeowLoad] 变体直链下载失败，回退主 resource_url:', varErr.message);
+                }
+              }
+            }
+
+            if (!downloaded) {
+              const fallbackUrl = media.resource_proxy_url || media.resource_url;
+              if (!fallbackUrl) throw new Error('未找到可用的视频下载直链');
+              await downloadBinary(fallbackUrl, diskPath, Boolean(media.resource_proxy_url));
+            }
+          } else {
+            const imgUrl = media.resource_proxy_url || media.resource_url;
+            if (!imgUrl) throw new Error('未找到可用的图片下载直链');
+            await downloadBinary(imgUrl, diskPath, Boolean(media.resource_proxy_url));
+          }
+        }
+
+        // 用 ffprobe 探测本地视频真实时长与分辨率
+        if (isVideo) {
+          if (detectedDuration === null) detectedDuration = 15.0;
+          try {
+            const probe = spawnSync(
+              'ffprobe',
+              ['-v', 'error', '-select_streams', 'v:0', '-show_entries', 'stream=width,height:format=duration', '-of', 'json', diskPath],
+              { encoding: 'utf8' }
+            );
+            if (probe.status === 0 && probe.stdout) {
+              const info = JSON.parse(probe.stdout);
+              const dur = parseFloat(info?.format?.duration);
+              if (!Number.isNaN(dur) && dur > 0) {
+                detectedDuration = Number(dur.toFixed(1));
+              }
+              const w = info?.streams?.[0]?.width;
+              const h = info?.streams?.[0]?.height;
+              if (w && h) {
+                detectedResolution = `${w}x${h}`;
+              }
+            }
+          } catch (e) {}
+        }
+
+        const assetIndex = fs.existsSync(curPaths.assetIndexPath)
+          ? JSON.parse(fs.readFileSync(curPaths.assetIndexPath, 'utf8'))
+          : { assets: [] };
+        const newAssetId = `${isVideo ? 'AST-VID-' : 'AST-IMG-'}${String(assetIndex.assets.length + 1).padStart(3, '0')}`;
+        const ext = path.extname(relPath).replace(/^\./, '') || (isVideo ? 'mp4' : 'jpg');
+        const displayFileName = `[${siteName}] ${(postTitle || 'media').replace(/[\r\n]+/g, ' ').slice(0, 28)}.${ext}`;
+
+        const newAsset = {
+          asset_id: newAssetId,
+          path: relPath,
+          file_path: `projects/${targetProject}/public/${relPath}`,
+          file_name: displayFileName,
+          type: isVideo ? 'video' : 'image',
+          media_type: isVideo ? 'video' : 'image',
+          duration_seconds: detectedDuration,
+          duration_sec: detectedDuration,
+          resolution: detectedResolution,
+          license_status: 'approved',
+          source_url: targetUrl,
+          tags: ['网络链接下载', downloadSourceMode === 'desktop_app' ? '哼哼猫桌面端' : '哼哼猫API', siteName, sceneId],
+        };
+        assetIndex.assets.push(newAsset);
+        fs.writeFileSync(curPaths.assetIndexPath, JSON.stringify(assetIndex, null, 2), 'utf8');
+
+        const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+        const scene = manifest.scenes.find((s) => s.scene_id === sceneId);
+        if (scene) {
+          scene.source_mode = 'manual_upload';
+          scene.visual_type = isVideo ? 'broll_video' : 'photo_motion';
+          scene.scene_type = scene.visual_type;
+          scene.final_asset_id = newAssetId;
+          scene.status = 'READY_APPROVED';
+          if (isVideo) {
+            const reqSec = Number((scene.duration_ms / 1000).toFixed(1));
+            scene.trim_start_sec = 0.0;
+            scene.trim_end_sec = reqSec;
+            scene.trim_prompt = `默认前 ${reqSec} 秒`;
+          }
+        }
+        syncTableToManifest(manifest);
+        fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+        recompileProject(targetProject);
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({
+          ok: true,
+          uploadedAsset: newAsset,
+          manifest,
+          assetIndex,
+          message: `✅ 已通过${downloadSourceMode === 'desktop_app' ? '哼哼猫桌面端(会员)' : '哼哼猫API'}下载到本地 (${detectedResolution}${detectedDuration ? `, ${detectedDuration}s` : ''}) 并绑定至镜头 ${sceneId}！`
+        }));
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({
+          ok: false,
+          error: `链接解析下载失败: ${err.message}`
+        }));
+      }
+    }
+
     // 7. 一句话 AI 剪辑指令
     if (req.method === 'POST' && pathname === '/api/trim-asset') {
       const body = await readBody(req);
@@ -4315,6 +5144,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname === '/api/synthesize-voice') {
       const body = await readBody(req);
       const { projectId = queryProject, provider = 'elevenlabs', voiceId = '21m00Tcm4TlvDq8ikWAM', apiKey, text, sceneId } = body;
+      projectRenderPaths(projectId);
       const curPaths = getPaths(projectId);
       fs.mkdirSync(curPaths.audioDir, { recursive: true });
 
@@ -4325,7 +5155,8 @@ const server = http.createServer(async (req, res) => {
           return res.end(JSON.stringify({ error: '未配置 ElevenLabs API Key。请在操作界面中输入或在根目录 .env 中写入 ELEVENLABS_API_KEY=xxx' }));
         }
 
-        const outFileName = sceneId ? `voice_${sceneId.toLowerCase()}.mp3` : `narration_${Date.now()}.mp3`;
+        const safeSceneId = String(sceneId || '').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+        const outFileName = `${safeSceneId ? `voice_${safeSceneId}` : 'narration'}_${randomUUID()}.mp3`;
         const outFilePath = path.join(curPaths.audioDir, outFileName);
 
         const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
@@ -4355,8 +5186,36 @@ const server = http.createServer(async (req, res) => {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ ok: true, audioUrl: publicAudioUrl, message: `ElevenLabs 配音已成功保存至 ${outFileName}` }));
       } else if (provider === 'voicebox') {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, message: 'Voicebox 本地模型已预留端口连接配置。请确保您的本地 Voicebox 服务已启动于 http://localhost:8080。' }));
+        if (!String(text || '').trim()) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '请输入配音文本' }));
+        }
+        const existing = voiceJobs.get(projectId);
+        if (existing && ['queued', 'generating'].includes(existing.status)) {
+          res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '这个工程已有 Voicebox 配音任务在运行', job: existing }));
+        }
+        const useAsNarration = Boolean(body.useAsNarration);
+        if (useAsNarration && !fs.existsSync(curPaths.manifestPath)) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '工程缺少镜头清单，无法设置成片旁白' }));
+        }
+        const activeRender = renderJobs.get(projectId);
+        if (useAsNarration && ['preparing', 'rendering'].includes(activeRender?.status)) {
+          res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '当前工程正在渲染，请完成后再替换旁白音频' }));
+        }
+        const job = {
+          projectId,
+          profileId: body.profileId || null,
+          useAsNarration,
+          status: 'queued',
+          startedAt: new Date().toISOString(),
+        };
+        voiceJobs.set(projectId, job);
+        void runVoiceboxJob(job, String(text));
+        res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: true, job }));
       }
     }
 
@@ -4452,6 +5311,108 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     .badge-warn { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
     .badge-danger { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5); }
     .dropzone-hover { border-color: #38bdf8 !important; background-color: rgba(56, 189, 248, 0.25) !important; transform: scale(1.02); }
+    .scene-field-label { display: none; }
+
+    @media (max-width: 1023px) {
+      body.studio-page { padding: 0.75rem; overflow-wrap: anywhere; }
+      #appRootShell input:not([type="checkbox"], [type="radio"], [type="file"]),
+      #appRootShell select, #appRootShell textarea,
+      .studio-modal input:not([type="checkbox"], [type="radio"], [type="file"]),
+      .studio-modal select, .studio-modal textarea {
+        min-width: 0;
+        max-width: 100%;
+        font-size: 1rem;
+      }
+      #appRootShell :is(button, a, label:has(input[type="radio"])),
+      #appRootShell :is(input[type="text"], input[type="number"], select),
+      .studio-modal :is(input[type="text"], input[type="password"], select),
+      .studio-modal button { min-height: 44px; }
+      #appRootShell :is(button, a), .studio-modal button { white-space: normal; }
+      #appHeader .project-picker {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+      }
+      .project-picker label { grid-column: 1 / -1; }
+      .project-picker select { width: 100%; }
+      .workspace-tabs { width: 100%; }
+      .workspace-tabs button { flex: 1; justify-content: center; min-width: 0; }
+      #projectHeaderTitle { white-space: normal; }
+      #producerHeaderActions:not(.hidden), #writerHeaderActions:not(.hidden) {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.5rem;
+      }
+      #producerHeaderActions > *, #writerHeaderActions > * {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding-inline: 0.5rem;
+        text-align: center;
+      }
+      #writerMainGrid > *, .writer-step-panel { min-width: 0; }
+      #writerMainGrid, .writer-step-panel { scroll-margin-block-start: 0.75rem; }
+      #writerSteps button > div { white-space: normal; }
+      #wStep1ImportDuration, #importTargetDuration { flex: 1; }
+
+      #producerSceneList { max-height: none; overflow: visible; }
+      .scene-list .db-table { display: block; }
+      .scene-list thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
+      .scene-list tbody { display: grid; gap: 0.75rem; background: #0b0f17; }
+      .scene-list tbody tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        background: #151d2a;
+        border: 1px solid #233044;
+        border-radius: 0.75rem;
+      }
+      .scene-list .db-table td {
+        display: block;
+        border: 0;
+        padding: 0.75rem;
+        text-align: left;
+      }
+      .scene-list td:first-child {
+        background: #1a2436;
+        border-radius: 0.75rem 0.75rem 0 0;
+      }
+      .scene-list td:nth-child(2) textarea { min-height: 6rem; }
+      .scene-list td:has(.inactive-visual-editor) { display: none; }
+      .scene-list .db-table td + td { border-top: 1px solid #233044; }
+      .scene-field-label {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: #cbd5e1;
+        font-size: 0.8125rem;
+        font-weight: 700;
+      }
+      .scene-save-bar { flex-wrap: wrap; gap: 0.75rem; }
+      .scene-save-bar button { width: 100%; }
+      .scene-asset-actions { flex-wrap: wrap; gap: 0.5rem; }
+
+      .studio-modal.fixed { padding: 0.75rem; }
+      .studio-modal > .card {
+        max-height: calc(100dvh - 1.5rem);
+        min-width: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 0.875rem;
+      }
+      .studio-modal .studio-modal-content {
+        flex: none;
+        overflow: visible;
+      }
+      .studio-modal button:is(.w-8, .w-9) { min-width: 44px; flex-shrink: 0; }
+      #writerPromptStageTabs { flex-wrap: wrap; }
+      #toast { inset-inline: 0.75rem; bottom: 0.75rem; }
+    }
+
     @media (min-width: 1024px) {
       body.writer-compact-mode { height: 100vh; min-height: 0; overflow: hidden; padding: 0.75rem 1.25rem; }
       body.writer-compact-mode #appRootShell { height: 100%; display: flex; flex-direction: column; gap: 0.625rem; }
@@ -4463,7 +5424,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     }
   </style>
 </head>
-<body class="min-h-screen p-4 sm:p-6">
+<body class="studio-page min-h-screen p-4 sm:p-6">
   <div id="appRootShell" class="max-w-[1720px] mx-auto space-y-5">
 
     <!-- 顶部导航栏与工程选择 -->
@@ -4476,8 +5437,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </span>
           
           <!-- 制作工程黄色选择框 -->
-          <div class="flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-xl border border-amber-500/40 shadow-inner relative z-20 shrink-0">
-            <span class="text-xs font-bold text-amber-300 shrink-0">📁 制作工程：</span>
+          <div class="project-picker flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-xl border border-amber-500/40 shadow-inner relative z-20 shrink-0">
+            <label for="projectSelect" class="text-xs font-bold text-amber-300 shrink-0">📁 制作工程：</label>
             <select id="projectSelect" onchange="onProjectSelectChange(this.value)" style="color-scheme: dark;" class="relative z-30 bg-gray-950 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400 cursor-pointer min-w-[180px] max-w-[300px]">
               ${serverOptions}
             </select>
@@ -4497,7 +5458,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
         <!-- 第二行：【文案创作台 / 视觉分镜台】导航切换胶囊 (精确位于左上角黄色字体下方) 与 页面大标题 -->
         <div class="flex flex-wrap items-center gap-3 pt-0.5">
-          <div class="inline-flex p-1 bg-gray-950/90 rounded-xl border border-purple-500/40 shadow-inner shrink-0">
+          <div class="workspace-tabs inline-flex p-1 bg-gray-950/90 rounded-xl border border-purple-500/40 shadow-inner shrink-0">
             <button id="navTabWriter" type="button" onclick="switchWorkspaceTab('writer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
               ✍️ 文案创作台 (Writer)
             </button>
@@ -4570,6 +5531,15 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     <div id="videoContainer" class="card p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
     </div>
 
+    <div class="card p-4 rounded-2xl flex flex-wrap items-center gap-3 border border-emerald-500/25">
+      <button type="button" id="startFinalRenderBtn" onclick="startFinalRender()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold">
+        🎬 开始当前工程最终渲染（含已配置音频）
+      </button>
+      <span id="renderJobStatus" class="text-xs text-gray-300">等待查看渲染状态</span>
+      <a id="renderJobOutput" class="hidden text-xs text-emerald-300 underline" target="_blank" rel="noopener">查看成片</a>
+      <pre id="renderJobError" class="hidden w-full whitespace-pre-wrap text-xs text-rose-300"></pre>
+    </div>
+
     <!-- 统计卡片与节拍看板 -->
     <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
       <div class="lg:col-span-8 card p-4 rounded-2xl space-y-2">
@@ -4617,27 +5587,27 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     <!-- 视觉镜头主表格 -->
     <div class="card rounded-2xl overflow-hidden border border-gray-800">
-      <div class="max-h-[720px] overflow-y-auto overflow-x-auto">
-        <table class="w-full text-left text-xs db-table border-collapse">
-          <thead>
-            <tr class="text-gray-300 font-bold uppercase tracking-wider text-[11px]">
-              <th class="p-3 w-32 text-center">镜头序号 / 时长</th>
-              <th class="p-3 min-w-[240px]">当前镜头覆盖的旁白文本</th>
-              <th class="p-3 min-w-[160px]">16:9 核心标志关键词</th>
-              <th class="p-3 w-36">画面方式</th>
-              <th class="p-3 min-w-[340px]">🎨 AI 生成画面（点击按钮即时生成 16:9 预览视觉卡）</th>
-              <th class="p-3 min-w-[260px] text-center">📥 桌面拖拽素材 / 即时检验与 AI 剪辑</th>
-              <th class="p-3 w-28 text-center">节拍调整</th>
+      <div id="producerSceneList" class="scene-list max-h-[720px] overflow-y-auto overflow-x-auto">
+        <table class="w-full text-left text-xs db-table border-collapse" role="table" aria-label="分镜列表">
+          <thead role="rowgroup">
+            <tr class="text-gray-300 font-bold uppercase tracking-wider text-[11px]" role="row">
+              <th role="columnheader" scope="col" class="p-3 w-32 text-center">镜头序号 / 时长</th>
+              <th role="columnheader" scope="col" class="p-3 min-w-[240px]">当前镜头覆盖的旁白文本</th>
+              <th role="columnheader" scope="col" class="p-3 min-w-[160px]">16:9 核心标志关键词</th>
+              <th role="columnheader" scope="col" class="p-3 w-36">画面方式</th>
+              <th role="columnheader" scope="col" class="p-3 min-w-[340px]">🎨 AI 生成画面（点击按钮即时生成 16:9 预览视觉卡）</th>
+              <th role="columnheader" scope="col" class="p-3 min-w-[260px] text-center">📥 素材上传 / 即时检验与 AI 剪辑</th>
+              <th role="columnheader" scope="col" class="p-3 w-28 text-center">节拍调整</th>
             </tr>
           </thead>
-          <tbody id="tableBody" class="divide-y divide-gray-800">
+          <tbody id="tableBody" class="lg:divide-y lg:divide-gray-800" role="rowgroup">
           </tbody>
         </table>
       </div>
 
-      <div class="p-3 bg-gray-900/60 border-t border-gray-800 flex items-center justify-between">
+      <div class="scene-save-bar p-3 bg-gray-900/60 border-t border-gray-800 flex items-center justify-between">
         <div class="flex items-center gap-3">
-          <span class="text-[11px] text-gray-400">💡 <b>提示</b>：点击第 5 列的 <b>【🎨 一键生成本镜头画面】</b>，系统会立即根据指定的 AI 模型在行内渲染出 16:9 科技视觉卡供您肉眼检验！</span>
+          <span class="text-[11px] text-gray-400">💡 点击镜头内的生成按钮，可使用指定的 AI 模型查看 16:9 画面预览。</span>
         </div>
         <button onclick="saveAll()" class="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-bold transition">
           💾 保存修改并同步渲染
@@ -4674,28 +5644,28 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       </div>
 
       <!-- 五阶段按钮指示器 (单行紧凑胶囊) -->
-      <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
-        <button type="button" onclick="setWriterStep(1)" id="stepBtn1" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow cursor-pointer">
+      <div id="writerSteps" class="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
+        <button type="button" onclick="setWriterStep(1, true)" id="stepBtn1" aria-current="step" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow cursor-pointer">
           <span class="w-5 h-5 rounded-full bg-purple-600 text-white font-bold flex items-center justify-center text-[11px] shrink-0">1</span>
           <div class="text-xs font-bold truncate">立项与资料</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(2)" id="stepBtn2" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+        <button type="button" onclick="setWriterStep(2, true)" id="stepBtn2" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
           <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">2</span>
           <div class="text-xs font-bold truncate">证据卡提取核验</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(3)" id="stepBtn3" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+        <button type="button" onclick="setWriterStep(3, true)" id="stepBtn3" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
           <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">3</span>
           <div class="text-xs font-bold truncate">完整大纲策划</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(4)" id="stepBtn4" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+        <button type="button" onclick="setWriterStep(4, true)" id="stepBtn4" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
           <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">4</span>
           <div class="text-xs font-bold truncate">逐章撰写与润色</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(5)" id="stepBtn5" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+        <button type="button" onclick="setWriterStep(5, true)" id="stepBtn5" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
           <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">5</span>
           <div class="text-xs font-bold truncate">全文统稿与定稿</div>
         </button>
@@ -5374,7 +6344,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   <!-- ✍️ 知识长视频文案创作工坊结束 -->
 
   <!-- 【核心升级】：全功能 AI 模型指令调度中心 (紧凑自适应·折叠免滑动版) -->
-  <div id="visualModelModal" onclick="if(event.target===this) toggleVisualModelModal()" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+  <div id="visualModelModal" onclick="if(event.target===this) toggleVisualModelModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 hidden">
     <div class="card w-full max-w-4xl p-4 sm:p-5 rounded-2xl border border-purple-500/50 shadow-2xl flex flex-col max-h-[96vh] overflow-hidden">
       <!-- 弹窗固定头部：标题 + 醒目大热区退出叉 -->
       <div class="flex items-center justify-between pb-2.5 border-b border-gray-800 shrink-0">
@@ -5382,13 +6352,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           <h3 class="text-base sm:text-lg font-black text-white flex items-center gap-2">
             🪐 AI 全流程模型调度中心
           </h3>
-          <p class="text-[11px] text-purple-300/80 mt-0.5">全流程统管 5 大核心模型 · 紧凑折叠免滑动设计</p>
+          <p class="text-[11px] text-purple-300/80 mt-0.5">统一配置网关与各阶段模型</p>
         </div>
         <button type="button" onclick="toggleVisualModelModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-300 hover:text-white bg-gray-800/80 hover:bg-rose-600/80 hover:border-rose-400 border border-gray-700 transition text-lg font-bold cursor-pointer shrink-0 shadow" title="关闭退出 (Esc)">✕</button>
       </div>
 
       <!-- 弹窗内部主体（固定高度自适应，内部零上下滑动） -->
-      <div class="space-y-2.5 pt-2.5 flex-1 flex flex-col justify-between overflow-hidden">
+      <div class="studio-modal-content space-y-2.5 pt-2.5 flex-1 flex flex-col justify-between overflow-hidden">
         <!-- 1. 顶层快捷预设条与统一网关 (两列自适应高 ~75px) -->
         <div class="p-2.5 rounded-xl bg-gradient-to-r from-blue-950/60 via-purple-950/50 to-cyan-950/60 border border-cyan-500/30 shrink-0 space-y-1.5">
           <div class="flex flex-wrap items-center justify-between gap-1.5">
@@ -5405,7 +6375,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             </div>
           </div>
 
-          <!-- 双列网关输入：左列 API Key，右列 Base URL -->
+          <!-- 网关与事实检索密钥 -->
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-gray-800/80">
             <div>
               <div class="flex items-center justify-between mb-0.5">
@@ -5431,6 +6401,21 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                   class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
                 <button type="button" onclick="testCurrentProviderConnection()" id="btnTestProvider" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-purple-900/60 border border-purple-500/40 text-purple-200 transition shrink-0 cursor-pointer">⚡测试</button>
               </div>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-gray-800/80">
+            <div>
+              <label for="currentTavilyKeyInput" class="text-[10px] font-bold text-gray-300 block mb-0.5">🔎 Tavily 搜索 API Key（资料考证）</label>
+              <input type="password" id="currentTavilyKeyInput" autocomplete="off" placeholder="填写 Tavily Key；留空则保留已存 Key"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-cyan-400" />
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label for="currentMeowloadKeyInput" class="text-[10px] font-bold text-teal-300">🐱 哼哼猫 API Key（全网视频链接下载）</label>
+                <a href="https://www.henghengmao.com/user/developer" target="_blank" class="text-[9px] text-teal-400 hover:underline">获取 Key ↗</a>
+              </div>
+              <input type="password" id="currentMeowloadKeyInput" autocomplete="off" placeholder="填写哼哼猫 API Key；留空则保留已存 Key"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-teal-500/50 text-white font-mono focus:outline-none focus:border-teal-400" />
             </div>
           </div>
         </div>
@@ -5565,7 +6550,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   </div>
 
   <!-- 配音配置抽屉/弹窗 -->
-  <div id="audioModal" onclick="if(event.target===this) toggleAudioModal()" class="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+  <div id="audioModal" onclick="if(event.target===this) toggleAudioModal()" class="studio-modal fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="card w-full max-w-xl p-6 rounded-2xl border border-rose-500/40 shadow-2xl space-y-4">
       <div class="flex items-center justify-between pb-3 border-b border-gray-800">
         <h3 class="text-lg font-bold text-white flex items-center gap-2">
@@ -5579,16 +6564,17 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           <label class="block text-xs font-semibold text-gray-300 mb-1">选择配音提供商：</label>
           <div class="grid grid-cols-2 gap-3">
             <label class="flex items-center gap-2 p-2.5 rounded-xl border border-rose-500 bg-rose-500/10 cursor-pointer text-xs font-bold text-rose-200">
-              <input type="radio" name="audioProvider" value="elevenlabs" checked />
+              <input type="radio" name="audioProvider" value="elevenlabs" onchange="updateAudioProviderUI()" />
               <span>ElevenLabs (Multilingual v2)</span>
             </label>
             <label class="flex items-center gap-2 p-2.5 rounded-xl border border-gray-700 bg-gray-900 cursor-pointer text-xs font-bold text-gray-400">
-              <input type="radio" name="audioProvider" value="voicebox" />
-              <span>Voicebox 本地模型 (预留)</span>
+              <input type="radio" name="audioProvider" value="voicebox" checked onchange="updateAudioProviderUI()" />
+              <span>Voicebox 本地模型</span>
             </label>
           </div>
         </div>
 
+        <div id="elevenlabsFields" class="hidden space-y-3">
         <div>
           <label class="block text-xs font-semibold text-gray-300 mb-1">
             ElevenLabs API Key：
@@ -5605,11 +6591,24 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             <option value="pNInz6obpgDQGcFmaJgB">Adam - 权威宏大历史讲述 (深沉男声)</option>
           </select>
         </div>
+        </div>
+
+        <div id="voiceboxFields">
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Voicebox 本地音色：</label>
+          <select id="voiceboxProfileSelect" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white">
+            <option value="">正在读取本地音色…</option>
+          </select>
+        </div>
 
         <div>
           <label class="block text-xs font-semibold text-gray-300 mb-1">试听或测试文本：</label>
           <textarea id="sampleAudioText" rows="2" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">这是来自 WhyVideo 工作台的高保真纪录片旁白语音测试。</textarea>
         </div>
+        <label id="useAsNarrationLabel" class="flex items-center gap-2 text-xs text-gray-300">
+          <input type="checkbox" id="useAsNarrationCheckbox" class="accent-emerald-500" />
+          将本次完整配音设为当前工程成片旁白
+        </label>
+        <div id="voiceboxJobStatus" class="text-xs text-gray-400"></div>
 
         <div id="audioPlayerContainer" class="hidden p-3 rounded-xl bg-gray-950 border border-gray-800">
           <audio id="audioPreviewPlayer" controls class="w-full h-8"></audio>
@@ -5628,7 +6627,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   </div>
 
   <!-- 🎵 AI 自适应 BGM 背景音乐与闭环 Review 工作台 -->
-  <div id="bgmModal" class="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+  <div id="bgmModal" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
     <div class="card w-full max-w-2xl p-6 rounded-2xl border border-amber-500/50 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
       <div class="flex items-center justify-between pb-3 border-b border-gray-800">
         <div>
@@ -5761,7 +6760,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   </div>
 
   <!-- 📝 文案导入与镜头切分工作台 Modal -->
-  <div id="importScriptModal" class="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 hidden">
+  <div id="importScriptModal" class="studio-modal fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 hidden">
     <div class="card bg-gray-900 border border-violet-500/40 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
       
       <!-- Modal 头部 -->
@@ -5779,7 +6778,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       </div>
 
       <!-- Modal 滚动主体 -->
-      <div class="p-6 overflow-y-auto space-y-5 flex-1 text-sm custom-scrollbar">
+      <div class="studio-modal-content p-4 sm:p-6 overflow-y-auto space-y-5 flex-1 text-sm custom-scrollbar">
         
         <!-- 1. 工程基本设定 (项目ID 与 中文标题) -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-950/60 p-4 rounded-xl border border-gray-800">
@@ -5912,7 +6911,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   </div>
 
   <!-- 新建空白文案工程弹窗 -->
-  <div id="createBlankProjectModal" onclick="if(event.target===this) closeCreateBlankProjectModal()" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+  <div id="createBlankProjectModal" onclick="if(event.target===this) closeCreateBlankProjectModal()" class="studio-modal fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="card w-full max-w-md p-5 rounded-2xl border border-emerald-500/40 shadow-2xl space-y-4">
       <div class="flex items-center justify-between pb-2.5 border-b border-gray-800">
         <h3 class="text-base font-black text-white flex items-center gap-2">
@@ -5945,7 +6944,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   </div>
 
   <!-- 清零重做当前工程文案二次确认弹窗 -->
-  <div id="resetWriterConfirmModal" onclick="if(event.target===this) closeResetWriterConfirmModal()" class="fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+  <div id="resetWriterConfirmModal" onclick="if(event.target===this) closeResetWriterConfirmModal()" class="studio-modal fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
     <div class="card w-full max-w-md p-5 rounded-2xl border border-rose-500/50 shadow-2xl space-y-4">
       <div class="flex items-center justify-between pb-2.5 border-b border-gray-800">
         <h3 class="text-base font-black text-rose-300 flex items-center gap-2">
@@ -5968,7 +6967,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   </div>
 
   <!-- 文案创作台提示词模板与风格预设弹窗 (对标 8080 端 · 仅对当前工程生效 · 全量可编辑) -->
-  <div id="writerPromptsModal" onclick="if(event.target===this) closeWriterPromptsModal()" class="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 hidden">
+  <div id="writerPromptsModal" onclick="if(event.target===this) closeWriterPromptsModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 hidden">
     <div class="card w-full max-w-5xl max-h-[92vh] p-5 rounded-2xl border border-teal-500/50 shadow-2xl flex flex-col gap-3.5 overflow-hidden bg-gray-950">
       <!-- Header -->
       <div class="flex items-center justify-between pb-3 border-b border-gray-800 shrink-0">
@@ -5991,7 +6990,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       </div>
 
       <!-- Main Editor + Variables & Style Presets Drawer -->
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0 overflow-hidden">
+      <div class="studio-modal-content grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0 overflow-hidden">
         <!-- Left: Full-editable System Prompt Editor -->
         <div class="lg:col-span-8 flex flex-col gap-2 min-h-[340px]">
           <div class="flex items-center justify-between text-xs shrink-0">
@@ -6087,6 +7086,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     let writerData = null;
     let currentWriterStep = 1;
     let currentChapterIndex = 0;
+    let verifyingEvidenceProjectId = null;
 
     function switchWorkspaceTab(tab) {
       currentWorkspaceTab = tab;
@@ -6120,6 +7120,29 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       } else {
         document.getElementById('projectHeaderTitle').textContent = titleStr + ' · 知识长视频文案策划工坊';
         loadWriterProjectData(activeProjectId);
+      }
+    }
+
+    function updateActiveProjectTitleUI(newTitle) {
+      const cleanTitle = String(newTitle || '').trim().replace(/^《(.*)》$/, '$1');
+      const displayTitle = cleanTitle ? \`《\${cleanTitle}》\` : activeProjectId;
+      const cur = projectsList.find((p) => p.id === activeProjectId);
+      if (cur) {
+        cur.title = displayTitle;
+      }
+      const sel = document.getElementById('projectSelect');
+      if (sel) {
+        const opt = Array.from(sel.options).find((o) => o.value === activeProjectId);
+        if (opt) opt.textContent = \`\${displayTitle} (\${activeProjectId})\`;
+      }
+      const headerEl = document.getElementById('projectHeaderTitle');
+      if (headerEl) {
+        headerEl.textContent =
+          displayTitle + (currentWorkspaceTab === 'writer' ? ' · 知识长视频文案策划工坊' : ' · 视觉镜头工作台');
+      }
+      const inspectorTitleEl = document.getElementById('wInspectorTitle');
+      if (inspectorTitleEl && cleanTitle) {
+        inspectorTitleEl.textContent = cleanTitle;
       }
     }
 
@@ -6165,6 +7188,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             ? (data.brief?.title || '')
             : (data.brief?.title || data.finalScript?.title || fallbackTitle);
           document.getElementById('wInputTitle').value = title;
+          updateActiveProjectTitleUI(isBlankDraft && !data.brief?.title ? '' : title);
 
           if (data.brief) {
             document.getElementById('wInputDuration').value = data.brief.target_duration_minutes || (data.finalScript?.estimated_duration_minutes || 25);
@@ -6204,6 +7228,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           // 恢复用户所处的最优阶段（已有文案工程默认直达 Step 5 终稿 Review 或对应已就绪阶段）
           setWriterStep(data.activeStep || 1);
           setWriterPersistenceStatus('saved', '✅ 已从本地加载');
+          void autoVerifyPendingEvidence(projectId);
         }
       } catch (err) {
         console.error('加载文案数据失败:', err);
@@ -6345,7 +7370,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
-    function setWriterStep(step) {
+    function setWriterStep(step, scrollToContent = false) {
       currentWriterStep = step;
       const stepNames = {
         1: 'Step 1 · 立项与资料输入',
@@ -6363,11 +7388,27 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (panel) panel.classList.toggle('hidden', i !== step);
         if (btn) {
           if (i === step) {
+            btn.setAttribute('aria-current', 'step');
             btn.className = 'px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow cursor-pointer';
           } else {
+            btn.removeAttribute('aria-current');
             btn.className = 'px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer';
           }
         }
+      }
+
+      if (scrollToContent && window.matchMedia('(max-width: 1023px)').matches) {
+        const contentId = step === 1 ? 'writerMainGrid' : 'wPanelStep' + step;
+        document.getElementById(contentId).scrollIntoView({ block: 'start' });
+      }
+    }
+
+    function hasEvidenceSourceUrl(card) {
+      try {
+        const url = new URL(String(card?.source_url || '').trim());
+        return ['http:', 'https:'].includes(url.protocol) && Boolean(url.hostname);
+      } catch (e) {
+        return false;
       }
     }
 
@@ -6403,6 +7444,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
       const claimTypeBadge = {
         verified_fact: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">已证实客观事实</span>',
+        unverified_fact: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">事实线索·待核查</span>',
         disputed_claim: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">学界/行业存在争议</span>',
         legend_or_anecdote: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">民间传说/轶事</span>',
         author_interpretation: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">作者个人推论</span>',
@@ -6415,36 +7457,98 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2 flex-wrap">
               <span class="font-mono font-bold text-amber-400">\${c.evidence_id || 'EV-' + String(idx + 1).padStart(3, '0')}</span>
-              \${claimTypeBadge[c.claim_type] || claimTypeBadge.verified_fact}
-              <span class="text-[10px] text-gray-400 font-mono">可靠度: \${c.reliability || 'high'}</span>
+              \${c.verification_status === 'human_approved'
+                ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">人工复核通过</span>'
+                : c.claim_type === 'verified_fact' && !hasEvidenceSourceUrl(c)
+                ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">来源待核查</span>'
+                : c.claim_type === 'unverified_fact' && (c.verification_status === 'failed' || c.verification_checked_at)
+                  ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">自动未通过 · 待人工复核</span>'
+                  : (claimTypeBadge[c.claim_type] || '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-500/20 text-gray-300 border border-gray-500/30">类型待核查</span>')}
+              <span class="text-[10px] text-gray-400 font-mono">可靠度: \${c.claim_type === 'verified_fact' && !hasEvidenceSourceUrl(c) && c.verification_status !== 'human_approved' ? '待核查' : (c.reliability || '未评估')}</span>
             </div>
-            <button type="button" onclick="deleteEvidenceCard(\${idx})" class="text-gray-500 hover:text-rose-400 text-xs">✕ 删除</button>
+            <div class="flex items-center gap-2">
+              \${c.claim_type === 'unverified_fact' && (c.verification_status === 'failed' || c.verification_checked_at) ? '<button type="button" onclick="humanApproveEvidenceCard(' + idx + ')" class="text-amber-300 hover:text-amber-200 text-xs">人工复核</button>' : ''}
+              <button type="button" onclick="deleteEvidenceCard(\${idx})" class="text-gray-500 hover:text-rose-400 text-xs">✕ 删除</button>
+            </div>
           </div>
           <div class="text-gray-200 leading-relaxed font-sans">\${c.evidence_summary || c.claim || '无主张陈述'}</div>
           <div class="text-[11px] text-gray-500 flex items-center justify-between">
-            <span class="truncate max-w-md">来源: \${c.source_title || c.source_url || '用户提供资料'}</span>
+            <span class="truncate max-w-md">来源: \${escapeHtml(c.source_title || c.source_url || '待自动核查')}</span>
+            \${hasEvidenceSourceUrl(c) ? '<a class="text-sky-400 hover:underline shrink-0" href="' + escapeHtml(c.source_url) + '" target="_blank" rel="noopener noreferrer">打开来源</a>' : ''}
           </div>
+          \${c.source_excerpt ? '<div class="text-[11px] text-gray-400 leading-relaxed">原文依据：' + escapeHtml(c.source_excerpt) + '</div>' : ''}
+          \${c.verification_status === 'failed' ? '<div class="text-[11px] text-rose-300 leading-relaxed">未通过原因：' + escapeHtml(c.verification_reason || '未找到支持完整主张的来源') + '</div>' : ''}
+          \${c.verification_status === 'human_approved' ? '<div class="text-[11px] text-emerald-300 leading-relaxed">人工判断依据：' + escapeHtml(c.review_note || '') + '</div>' : ''}
         </div>
       \`
         )
         .join('');
     }
 
-    function addCustomEvidenceCard() {
+    async function addCustomEvidenceCard() {
       const summary = prompt('请输入一条具体原子化事实主张（单一事实原则）：');
       if (!summary || !summary.trim()) return;
+      const sourceUrl = prompt('来源链接（可留空，留空则标记为待核查）：');
+      if (sourceUrl === null) return;
+      let parsedSourceUrl;
+      if (sourceUrl.trim()) {
+        try { parsedSourceUrl = new URL(sourceUrl.trim()); } catch (e) {}
+      }
+      if (sourceUrl.trim() && (!parsedSourceUrl || !['http:', 'https:'].includes(parsedSourceUrl.protocol) || !parsedSourceUrl.hostname)) {
+        alert('链接格式无效；请填写 http(s) 链接，或留空作为待核查线索。');
+        return;
+      }
       if (!writerData) writerData = {};
       if (!Array.isArray(writerData.evidenceCards)) writerData.evidenceCards = [];
       const newId = \`EV-\${String(writerData.evidenceCards.length + 1).padStart(3, '0')}\`;
       writerData.evidenceCards.push({
         evidence_id: newId,
-        claim_type: 'verified_fact',
+        claim_type: parsedSourceUrl ? 'verified_fact' : 'unverified_fact',
         evidence_summary: summary.trim(),
-        source_title: '人工补充证据',
-        reliability: 'high',
+        source_title: parsedSourceUrl?.hostname || '人工补充待核查',
+        source_url: parsedSourceUrl?.href || '',
+        reliability: parsedSourceUrl ? 'medium' : 'low',
       });
       renderEvidenceCardsList();
-      saveWriterProjectDataAsync('evidenceCards', writerData.evidenceCards);
+      const saved = await saveWriterProjectDataAsync('evidenceCards', writerData.evidenceCards);
+      if (saved?.ok && !parsedSourceUrl) void autoVerifyPendingEvidence(activeProjectId);
+    }
+
+    async function humanApproveEvidenceCard(idx) {
+      const card = writerData?.evidenceCards?.[idx];
+      if (!card || card.claim_type !== 'unverified_fact') return;
+      const reviewNote = prompt('请写明你确认这条主张的依据；若只确认其中一部分，请先拆成独立证据卡：');
+      if (!reviewNote || !reviewNote.trim()) return;
+      const sourceInput = prompt('可补充来源链接（可留空）：', card.source_url || '');
+      if (sourceInput === null) return;
+      let sourceUrl = '';
+      if (sourceInput.trim()) {
+        try {
+          const url = new URL(sourceInput.trim());
+          if (!['http:', 'https:'].includes(url.protocol) || !url.hostname) throw Error('invalid');
+          sourceUrl = url.href;
+        } catch (e) {
+          alert('来源链接格式无效，请填写 http(s) 链接或留空。');
+          return;
+        }
+      }
+      writerData.evidenceCards[idx] = {
+        ...card,
+        claim_type: 'verified_fact',
+        verification_status: 'human_approved',
+        verification_method: 'human_review',
+        verification_reason: '',
+        review_note: reviewNote.trim(),
+        human_reviewed_at: new Date().toISOString(),
+        source_url: sourceUrl,
+        source_title: sourceUrl ? new URL(sourceUrl).hostname : (card.source_title || '人工复核'),
+        reliability: sourceUrl ? 'medium' : 'low',
+      };
+      const saved = await saveWriterProjectDataAsync('evidenceCards', writerData.evidenceCards);
+      if (saved?.ok) {
+        renderEvidenceCardsList();
+        showToast('✅ 已记录人工复核结论与判断依据。');
+      }
     }
 
     function deleteEvidenceCard(idx) {
@@ -6583,9 +7687,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const bar = document.getElementById('wChapterTabsBar');
       if (!bar) return;
       const outline = writerData?.outline;
-      const chapters = (writerData?.chapters && writerData.chapters.length > 0)
-        ? writerData.chapters
-        : (outline?.chapters || []);
+      const chapters = outline?.chapters?.length ? outline.chapters : (writerData?.chapters || []);
       if (chapters.length === 0) {
         bar.innerHTML = '<span class="text-xs text-gray-500 py-1">请先完成大纲审核，章节选项卡将在此呈现</span>';
         return;
@@ -6708,7 +7810,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       document.getElementById('wFinalScriptMin').textContent = durationMin;
 
       const log = script.editorial_changes_log;
-      if (log) {
+      if (script._merged_from_drafts) {
+        document.getElementById('wRemovedFalseEndingsBadge').textContent = '章节已合并 · 待 AI 统稿复核';
+        document.getElementById('wEditorialLogDetails').textContent = '已保留完整章节稿，请重新执行 AI 统稿完成证据复核。';
+      } else if (log) {
         document.getElementById('wRemovedFalseEndingsBadge').textContent = \`已清理伪结尾: \${log.removed_false_endings_count || 0} 处\`;
         const logHtml = [];
         if (log.removed_duplicate_arguments?.length) {
@@ -6783,7 +7888,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         return;
       }
 
-      const isAutoResearching = (!materials || materials.length < 15);
+      const isAutoResearching = !materials && !writerData?.materials;
       btn.disabled = true;
       btn.innerHTML = isAutoResearching
         ? '<span>🌐 正在自动调查事实真相并生成 Brief...</span>'
@@ -6806,13 +7911,20 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (data.ok && data.brief) {
           if (!writerData) writerData = {};
           writerData.brief = data.brief;
+          const resolvedTitle = (data.brief.title || title || '').trim();
+          if (resolvedTitle) {
+            document.getElementById('wInputTitle').value = resolvedTitle;
+            updateActiveProjectTitleUI(resolvedTitle);
+          }
           document.getElementById('wBriefCoreQuestion').value = data.brief.core_question || '';
           document.getElementById('wBriefShortAnswer').value = data.brief.short_answer || '';
           document.getElementById('wBriefScope').value = data.brief.scope?.time_range || '';
           document.getElementById('wBriefTaboos').value = (data.brief.taboos_and_exclusions || []).join('、');
+          if (data.brief.planned_chapter_count) document.getElementById('wInputChapterCount').value = data.brief.planned_chapter_count;
+          writerData.materials = data.researchedMaterials || materials || writerData.materials;
           setWriterPersistenceStatus('saved');
 
-          if (data.researchedMaterials && !materials) {
+          if (data.researchedMaterials) {
             document.getElementById('wInputMaterials').value = data.researchedMaterials;
             document.getElementById('wMaterialWordCount').textContent = '已自动考证补充 ' + data.researchedMaterials.length + ' 字事实资料';
             showToast('🌐 已自动调查事实真相并补充资料库，Brief 生成完毕！');
@@ -6830,8 +7942,47 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
+    async function autoVerifyPendingEvidence(projectId) {
+      if (verifyingEvidenceProjectId || !writerData?.evidenceCards?.some(
+        (card) => card.claim_type === 'unverified_fact' && !card.verification_checked_at
+      )) return;
+      verifyingEvidenceProjectId = projectId;
+      let checked = 0;
+      let verified = 0;
+      try {
+        showToast('🔎 正在用 Tavily 自动核查待核查事实...');
+        for (let batch = 0; batch < 100; batch++) {
+          const res = await fetch('/api/writer/ai/verify-pending-evidence?project=' + projectId, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              model: document.getElementById('wInputModel').value,
+              apiKey: visualConfig.apiKey,
+              baseUrl: visualConfig.baseUrl,
+            }),
+          });
+          const data = await res.json();
+          if (!data.ok) throw new Error(data.errors?.join('；') || data.error || '自动核查失败');
+          checked += data.checkedCount || 0;
+          verified += data.verifiedCount || 0;
+          if (activeProjectId === projectId && Array.isArray(data.evidenceCards)) {
+            writerData.evidenceCards = data.evidenceCards;
+            renderEvidenceCardsList();
+          }
+          if (!data.remainingCount || !data.checkedCount) break;
+        }
+        if (checked) showToast('🔎 自动核查完成：核查 ' + checked + ' 张，通过 ' + verified + ' 张；其余未通过本次核查。');
+      } catch (error) {
+        console.error('自动核查证据卡失败:', error);
+        showToast('⚠️ 自动核查暂停：' + error.message);
+      } finally {
+        verifyingEvidenceProjectId = null;
+      }
+    }
+
     async function aiExtractEvidence() {
-      const title = document.getElementById('wInputTitle').value.trim();
+      const brief = readWriterBriefFromForm();
+      const title = brief.title;
       const materials = document.getElementById('wInputMaterials').value.trim();
       const model = document.getElementById('wInputModel').value;
       const btn = document.getElementById('btnAiEvidence');
@@ -6841,7 +7992,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         return;
       }
 
-      const isAutoResearching = (!materials || materials.length < 15);
+      const isAutoResearching = !materials && !writerData?.materials;
       btn.disabled = true;
       btn.innerHTML = isAutoResearching
         ? '<span>🌐 正在自动调查事实真相并提取证据卡...</span>'
@@ -6853,6 +8004,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             title,
+            brief,
             materials,
             model,
             apiKey: visualConfig.apiKey,
@@ -6862,17 +8014,20 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         const data = await res.json();
         if (data.ok && Array.isArray(data.evidenceCards)) {
           if (!writerData) writerData = {};
+          writerData.brief = brief;
+          writerData.materials = data.researchedMaterials || materials || writerData.materials;
           writerData.evidenceCards = data.evidenceCards;
           renderEvidenceCardsList();
           setWriterPersistenceStatus('saved');
 
-          if (data.researchedMaterials && !materials) {
+          if (data.researchedMaterials) {
             document.getElementById('wInputMaterials').value = data.researchedMaterials;
             document.getElementById('wMaterialWordCount').textContent = '已自动考证补充 ' + data.researchedMaterials.length + ' 字事实资料';
             showToast('🌐 事实真相调查完毕，已成功抽取 ' + data.evidenceCards.length + ' 张证据卡！');
           } else {
             showToast('✅ 已成功提取 ' + data.evidenceCards.length + ' 张独立证据卡！');
           }
+          if (data.pendingEvidenceCount) void autoVerifyPendingEvidence(activeProjectId);
         } else {
           alert('提取证据卡失败: ' + (data.error || '格式异常'));
         }
@@ -6890,7 +8045,15 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         alert('当前尚未提取或录入任何证据卡，无法开启大纲策划！');
         return;
       }
-      showToast('🚦 证据卡已通过人工审核！进入阶段 3：大纲策划');
+      const approved = writerData.evidenceCards.filter((card) => card.claim_type !== 'unverified_fact').length;
+      if (approved === 0) {
+        alert('当前证据卡均未通过自动核验，已列为人工复核候选；请先逐张复核，再进入大纲策划。');
+        return;
+      }
+      const unresolved = writerData.evidenceCards.filter((card) => card.claim_type === 'unverified_fact').length;
+      showToast(unresolved
+        ? '🚦 已进入大纲策划；仍有 ' + unresolved + ' 张待人工复核卡，不能作为已核实事实使用。'
+        : '🚦 证据卡已审核，进入阶段 3：大纲策划');
       setWriterStep(3);
     }
 
@@ -6905,7 +8068,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            brief: writerData?.brief || { title: document.getElementById('wInputTitle').value },
+            brief: readWriterBriefFromForm(),
+            materials: document.getElementById('wInputMaterials').value.trim(),
             evidenceCards: writerData?.evidenceCards || [],
             model,
             apiKey: visualConfig.apiKey,
@@ -6914,13 +8078,16 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         });
         const data = await res.json();
         if (data.ok && data.outline) {
+          if (!writerData) writerData = {};
           writerData.outline = data.outline;
-          if (data.autoGeneratedEvidence && (!writerData.evidenceCards || writerData.evidenceCards.length === 0)) {
-            writerData.evidenceCards = data.autoGeneratedEvidence;
+          if (Array.isArray(data.evidenceCards)) {
+            writerData.evidenceCards = data.evidenceCards;
             renderEvidenceCardsList();
           }
+          currentChapterIndex = 0;
           renderOutlineView();
           renderChapterTabs();
+          renderCurrentChapterEditor();
           setWriterPersistenceStatus('saved');
           showToast('✅ 结构化大纲生成完成，请人工审核！');
         } else {
@@ -6998,8 +8165,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     async function saveCurrentChapterDraft() {
       const outlineCh = writerData?.outline?.chapters?.[currentChapterIndex];
-      const existingCh = writerData?.chapters?.[currentChapterIndex];
-      const targetNum = outlineCh?.chapter_number || existingCh?.chapter_number || currentChapterIndex + 1;
+      const chapters = writerData?.chapters || [];
+      const targetNum = outlineCh?.chapter_number || chapters[currentChapterIndex]?.chapter_number || currentChapterIndex + 1;
+      const existingCh = chapters.find((chapter) => Number(chapter.chapter_number) === Number(targetNum));
       const editedTitle = document.getElementById('wCurChapterTitleInput').value.trim() || outlineCh?.chapter_title || \`第\${targetNum}章\`;
       const sec1 = document.getElementById('wSec1Question').value.trim();
       const sec2 = document.getElementById('wSec2Mechanism').value.trim();
@@ -7018,6 +8186,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           '4_mini_summary_and_transition': sec4,
         },
         full_chapter_narration: fullText,
+        used_evidence_ids: existingCh?.used_evidence_ids || [],
         word_count: fullText.length,
         revision_count: (existingCh?.revision_count || 0) + 1,
       };
@@ -7067,11 +8236,6 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const model = document.getElementById('wInputModel').value;
       const btn = document.getElementById('btnAiFinalize');
 
-      if (chapters.length === 0) {
-        alert('尚未撰写任何章节，无法统稿！');
-        return;
-      }
-
       btn.disabled = true;
       btn.innerHTML = '<span>⏳ 正在全文去重去伪结尾与统稿...</span>';
       try {
@@ -7081,6 +8245,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           body: JSON.stringify({
             outline,
             chapters,
+            evidenceCards: writerData?.evidenceCards || [],
             model,
             apiKey: visualConfig.apiKey,
             baseUrl: visualConfig.baseUrl,
@@ -7091,7 +8256,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           writerData.finalScript = data.finalScript;
           renderFinalScriptView();
           setWriterPersistenceStatus('saved');
-          showToast('🎉 全文统稿去伪结尾完成，文案已定稿！');
+          showToast(data.usedFallback
+            ? '已合并完整章节稿，请重新执行 AI 统稿完成证据复核。'
+            : '🎉 全文统稿去伪结尾完成，文案已定稿！');
         } else {
           alert('全文统稿失败: ' + (data.error || '异常'));
         }
@@ -7154,18 +8321,24 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
+    function readWriterBriefFromForm() {
+      const brief = writerData?.brief;
+      return {
+        ...brief,
+        project_id: activeProjectId,
+        title: document.getElementById('wInputTitle').value.trim(),
+        core_question: document.getElementById('wBriefCoreQuestion').value.trim(),
+        short_answer: document.getElementById('wBriefShortAnswer').value.trim(),
+        target_duration_minutes: parseInt(document.getElementById('wInputDuration').value, 10) || 25,
+        planned_chapter_count: parseInt(document.getElementById('wInputChapterCount').value, 10) || 6,
+        scope: { ...brief?.scope, time_range: document.getElementById('wBriefScope').value.trim() },
+        taboos_and_exclusions: document.getElementById('wBriefTaboos').value.split(/[、,，\\n]+/).filter(Boolean),
+      };
+    }
+
     async function saveWriterPartManual(part) {
       if (part === 'brief') {
-        const briefObj = {
-          project_id: activeProjectId,
-          title: document.getElementById('wInputTitle').value.trim(),
-          core_question: document.getElementById('wBriefCoreQuestion').value.trim(),
-          short_answer: document.getElementById('wBriefShortAnswer').value.trim(),
-          target_duration_minutes: parseInt(document.getElementById('wInputDuration').value, 10) || 25,
-          planned_chapter_count: parseInt(document.getElementById('wInputChapterCount').value, 10) || 6,
-          scope: { time_range: document.getElementById('wBriefScope').value.trim() },
-          taboos_and_exclusions: document.getElementById('wBriefTaboos').value.split(/[、,，\\n]+/).filter(Boolean),
-        };
+        const briefObj = readWriterBriefFromForm();
         const materialsText = document.getElementById('wInputMaterials').value;
         if (!writerData) writerData = {};
         writerData.brief = briefObj;
@@ -7174,6 +8347,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (materialsText.trim()) {
           await saveWriterProjectDataAsync('materials', materialsText);
         }
+        updateActiveProjectTitleUI(briefObj.title);
         showToast('💾 Brief 立项与参考资料已保存！');
       }
       if (part === 'finalScript') {
@@ -7187,6 +8361,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           if (!writerData) writerData = {};
           writerData.finalScript = saved.finalScript;
           writerData.hasExistingContent = true;
+          if (saved.finalScript.title) updateActiveProjectTitleUI(saved.finalScript.title);
           renderFinalScriptView();
           applyWriterInspectorMode(writerData);
         }
@@ -8121,7 +9296,67 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     }
 
     function toggleAudioModal() {
-      document.getElementById('audioModal').classList.toggle('hidden');
+      const modal = document.getElementById('audioModal');
+      modal.classList.toggle('hidden');
+      if (!modal.classList.contains('hidden')) {
+        updateAudioProviderUI();
+        loadVoiceboxProfiles();
+        updateVoiceboxStatus();
+      }
+    }
+
+    function updateAudioProviderUI() {
+      const provider = document.querySelector('input[name="audioProvider"]:checked')?.value || 'voicebox';
+      document.getElementById('elevenlabsFields').classList.toggle('hidden', provider !== 'elevenlabs');
+      document.getElementById('voiceboxFields').classList.toggle('hidden', provider !== 'voicebox');
+      document.getElementById('voiceboxJobStatus').classList.toggle('hidden', provider !== 'voicebox');
+      document.getElementById('useAsNarrationLabel').classList.toggle('hidden', provider !== 'voicebox');
+    }
+
+    async function loadVoiceboxProfiles() {
+      const select = document.getElementById('voiceboxProfileSelect');
+      try {
+        const response = await fetch('/api/voicebox/profiles');
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || '无法读取音色');
+        select.replaceChildren();
+        for (const profile of data.profiles) {
+          const option = document.createElement('option');
+          option.value = profile.id;
+          option.textContent = profile.name + ' (' + (profile.language || '未知语言') + ')';
+          select.appendChild(option);
+        }
+      } catch (error) {
+        select.replaceChildren();
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Voicebox 未连接：' + error.message;
+        select.appendChild(option);
+      }
+    }
+
+    async function updateVoiceboxStatus() {
+      const projectId = activeProjectId;
+      const statusEl = document.getElementById('voiceboxJobStatus');
+      const button = document.getElementById('btnSynth');
+      if (!statusEl) return;
+      try {
+        const response = await fetch('/api/voicebox/status?project=' + encodeURIComponent(projectId));
+        const data = await response.json();
+        if (projectId !== activeProjectId) return;
+        const job = data.job || {};
+        const labels = { idle: '当前工程暂无配音任务', queued: '已提交至本地 Voicebox', generating: 'Voicebox 正在生成音频…', completed: '配音已完成', failed: '配音失败' };
+        statusEl.textContent = (labels[job.status] || '') + (job.error ? '：' + job.error : '');
+        button.disabled = ['queued', 'generating'].includes(job.status);
+        button.classList.toggle('opacity-50', button.disabled);
+        if (job.status === 'completed' && job.audioUrl) {
+          const player = document.getElementById('audioPreviewPlayer');
+          if (player.src !== new URL(job.audioUrl, location.href).href) player.src = job.audioUrl;
+          document.getElementById('audioPlayerContainer').classList.remove('hidden');
+        }
+      } catch (error) {
+        statusEl.textContent = '无法读取 Voicebox 状态：' + error.message;
+      }
     }
 
     // 🪗 模型配置 1~5 核心模型手风琴折叠控制 (单项展开，其余折叠，免滑动)
@@ -8368,6 +9603,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     async function saveVisualModelConfig() {
       const apiKey = document.getElementById('currentApiKeyInput').value.trim();
+      const tavilyApiKey = document.getElementById('currentTavilyKeyInput').value.trim();
+      const meowloadApiKey = (document.getElementById('currentMeowloadKeyInput')?.value || '').trim();
       const baseUrl = document.getElementById('currentBaseUrlInput').value.trim();
       const writerModel = (document.getElementById('currentWriterModelInput')?.value || '').trim() || 'deepseek/deepseek-chat';
       const videoModel = document.getElementById('currentVideoModelInput').value.trim();
@@ -8390,6 +9627,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           body: JSON.stringify({
             projectId: activeProjectId,
             apiKey,
+            tavilyApiKey,
+            meowloadApiKey,
             baseUrl,
             writerModel,
             videoModel,
@@ -8399,11 +9638,18 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           })
         });
         const data = await res.json();
+        if (data.config) {
+          const meowEl = document.getElementById('currentMeowloadKeyInput');
+          if (meowEl) {
+            meowEl.value = '';
+            meowEl.placeholder = data.config.meowloadKeyConfigured ? '哼哼猫 Key 已配置；留空则保留' : '填写哼哼猫 API Key；留空则保留已存 Key';
+          }
+        }
         toggleVisualModelModal();
         updateModelBadge();
         renderTable();
         selectWriterModelSlug(writerModel);
-        showToast('🎯 全流程 5 大模型与统一网关配置已保存！文案创作台与分镜制作台已同步生效。');
+        showToast('🎯 全流程模型、网关与哼哼猫下载 Key 配置已保存！');
       } catch (e) {
         showToast('❌ 保存失败: ' + e.message);
       }
@@ -8510,10 +9756,57 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       window.history.pushState({}, '', url);
       loadProjects();
       loadWorkflow();
+      updateRenderStatus();
+      updateVoiceboxStatus();
       if (currentWorkspaceTab === 'writer') {
         loadWriterProjectData(newId);
       }
       showToast('🔀 已切换至工程：' + newId);
+    }
+
+    async function updateRenderStatus() {
+      const projectId = activeProjectId;
+      const statusEl = document.getElementById('renderJobStatus');
+      const outputEl = document.getElementById('renderJobOutput');
+      const errorEl = document.getElementById('renderJobError');
+      const buttonEl = document.getElementById('startFinalRenderBtn');
+      if (!statusEl) return;
+      try {
+        const response = await fetch('/api/render-status?project=' + encodeURIComponent(projectId));
+        const data = await response.json();
+        if (activeProjectId !== projectId) return;
+        const job = data.job || {};
+        const labels = { idle: '当前工程尚未开始渲染', preparing: '正在准备工程素材…', rendering: '正在后台渲染，切换工程或刷新页面不会中断', completed: '渲染完成', failed: '渲染失败' };
+        statusEl.textContent = labels[job.status] || '渲染状态未知';
+        buttonEl.disabled = ['preparing', 'rendering'].includes(job.status);
+        buttonEl.classList.toggle('opacity-50', buttonEl.disabled);
+        outputEl.classList.toggle('hidden', !job.outputUrl);
+        if (job.outputUrl) outputEl.href = job.outputUrl;
+        errorEl.classList.toggle('hidden', job.status !== 'failed');
+        errorEl.textContent = job.status === 'failed' ? ((job.error || '') + '\\n' + (job.log || '')).slice(-2000) : '';
+      } catch (error) {
+        statusEl.textContent = '无法读取渲染状态：' + error.message;
+      }
+    }
+
+    async function startFinalRender() {
+      const projectId = activeProjectId;
+      const buttonEl = document.getElementById('startFinalRenderBtn');
+      buttonEl.disabled = true;
+      try {
+        const response = await fetch('/api/render-project?project=' + encodeURIComponent(projectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId }),
+        });
+        const data = await response.json();
+        if (!response.ok || !data.ok) throw new Error(data.error || '无法启动渲染');
+        showToast('已启动工程 ' + projectId + ' 的后台渲染');
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        await updateRenderStatus();
+      }
     }
 
     async function loadOpenRouterModels() {
@@ -8599,6 +9892,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           };
 
           const kEl = document.getElementById('currentApiKeyInput');
+          const tavilyEl = document.getElementById('currentTavilyKeyInput');
+          const meowloadEl = document.getElementById('currentMeowloadKeyInput');
           const bEl = document.getElementById('currentBaseUrlInput');
           const wEl = document.getElementById('currentWriterModelInput');
           const vEl = document.getElementById('currentVideoModelInput');
@@ -8607,6 +9902,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           const bgmEl = document.getElementById('currentBgmModelInput');
 
           if (kEl && visualConfig.apiKey) kEl.value = visualConfig.apiKey;
+          if (tavilyEl) tavilyEl.placeholder = cfg.tavilyKeyConfigured ? 'Tavily Key 已配置；留空则保留' : '填写 Tavily Key；留空则使用环境变量';
+          if (meowloadEl) meowloadEl.placeholder = cfg.meowloadKeyConfigured ? '哼哼猫 Key 已配置；留空则保留' : '填写哼哼猫 API Key；留空则保留已存 Key';
           if (bEl && visualConfig.baseUrl) bEl.value = visualConfig.baseUrl;
           if (wEl && visualConfig.writerModel) wEl.value = visualConfig.writerModel;
           if (vEl && visualConfig.videoModel) vEl.value = visualConfig.videoModel;
@@ -8642,7 +9939,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             <p class="text-xs text-gray-300 font-medium">当前工程已完成 Remotion 渲染，支持边查阅表格边拖拽播放进度检验音画节拍。</p>
           </div>
           <div class="w-full md:w-96 rounded-xl overflow-hidden border border-gray-700 bg-black aspect-video flex items-center justify-center">
-            <video src="\${data.videoUrl}" controls class="w-full h-full object-contain"></video>
+            <video src="\${data.videoUrl}" controls playsinline class="w-full h-full object-contain"></video>
           </div>
         \`;
       } else {
@@ -8652,7 +9949,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-300">视觉镜头轨已就绪 · \${count} 个镜头</span>
               <span class="text-xs text-gray-400">全片约 \${(totalSec/60).toFixed(1)} 分钟 · 平均 \${(totalSec/count).toFixed(1)} 秒/镜头</span>
             </div>
-            <p class="text-xs text-gray-300 font-normal">点击每行的 <b>【🎨 一键生成本镜头画面】</b>，可调用所选的 AI 模型在行内即时渲染出 16:9 视觉预览！桌面素材直接拖入右侧框中即可检验。</p>
+            <p class="text-xs text-gray-300 font-normal">可在各镜头中生成 16:9 画面预览，或上传视频与图片检验素材。</p>
           </div>
           <div class="flex items-center gap-3">
             <button onclick="toggleVisualModelModal('video')" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition shadow flex items-center gap-1.5 cursor-pointer" title="快速呼出模型调度中心并聚焦定位到 AI 视频生成模型 (MiniMax/Kling/Wan等)">
@@ -8685,6 +9982,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       updateCounters();
       const tbody = document.getElementById('tableBody');
       tbody.innerHTML = '';
+      const fieldLabels = ['', '旁白', '核心关键词', '画面方式', 'AI 生成画面', '素材上传与 AI 剪辑', '节拍调整'];
 
       (manifestData?.scenes || []).forEach((scene, idx) => {
         const isAi = scene.source_mode !== 'manual_upload';
@@ -8704,6 +10002,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
         const isSharedWithPrev = Boolean(scene.shared_asset_with_prev);
         const tr = document.createElement('tr');
+        tr.setAttribute('role', 'row');
         tr.className = 'transition ' + (isSharedWithPrev ? 'bg-sky-950/20' : '');
 
         // 1. 镜头序号与时长
@@ -8726,7 +10025,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         const td2 = document.createElement('td');
         td2.className = 'p-3';
         td2.innerHTML = \`
-          <textarea rows="3" class="w-full p-2.5 rounded-lg bg-gray-950 border border-gray-700 text-gray-100 text-xs leading-relaxed focus:border-blue-500 focus:outline-none"
+          <textarea rows="3" aria-label="旁白" class="w-full p-2.5 rounded-lg bg-gray-950 border border-gray-700 text-gray-100 text-xs leading-relaxed focus:border-blue-500 focus:outline-none"
             onchange="onNarrationEdit(\${idx}, this.value)">\${scene.narration_text}</textarea>
         \`;
 
@@ -8741,7 +10040,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           .join('');
         td3.innerHTML = \`
           <div class="flex flex-wrap gap-1 mb-1.5">\${chips}</div>
-          <input type="text" value="\${kws.join(', ')}"
+          <input type="text" aria-label="核心关键词" value="\${kws.join(', ')}"
             placeholder="核心标志词，用逗号分隔..."
             class="w-full px-2.5 py-1.5 rounded-lg bg-gray-950 border border-gray-700 text-gray-100 text-xs focus:border-purple-400 focus:outline-none font-semibold"
             onchange="onKeywordsEdit(\${idx}, this.value)" />
@@ -8753,21 +10052,21 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         td4.className = 'p-3';
         td4.innerHTML = \`
           <div class="space-y-1.5">
-            <label onclick="setMode(\${idx}, 'ai_ppt_slide')" class="flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition \${
+            <label class="flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition \${
               isAi
                 ? 'bg-purple-500/20 border-purple-500 text-purple-200 font-bold'
                 : 'bg-gray-950 border-gray-800 text-gray-400'
             }">
-              <input type="radio" name="mode_\${idx}" \${isAi ? 'checked' : ''} />
+              <input type="radio" name="mode_\${idx}" onchange="setMode(\${idx}, 'ai_ppt_slide')" \${isAi ? 'checked' : ''} />
               <span class="text-xs">🤖 AI 生成画面</span>
             </label>
-            <label onclick="setMode(\${idx}, 'manual_upload')" class="flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition \${
+            <label class="flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition \${
               !isAi
                 ? 'bg-sky-500/20 border-sky-500 text-sky-200 font-bold'
                 : 'bg-gray-950 border-gray-800 text-gray-400'
             }">
-              <input type="radio" name="mode_\${idx}" \${!isAi ? 'checked' : ''} />
-              <span class="text-xs">📤 人工素材/拖拽</span>
+              <input type="radio" name="mode_\${idx}" onchange="setMode(\${idx}, 'manual_upload')" \${!isAi ? 'checked' : ''} />
+              <span class="text-xs">📤 人工上传素材</span>
             </label>
           </div>
         \`;
@@ -8817,7 +10116,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             <!-- 实体视频行内真实播放器或预览占位 -->
             \${hasGeneratedVideo ? \`
               <div class="rounded-xl border border-emerald-500/60 bg-black aspect-[16/9] relative overflow-hidden group shadow-lg">
-                <video src="\${generatedVideoSrc}" controls class="w-full h-full object-cover"></video>
+                <video src="\${generatedVideoSrc}" controls playsinline class="w-full h-full object-cover"></video>
                 <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-emerald-400 border border-emerald-500/40 flex items-center gap-1 pointer-events-none">
                   <span>✅ 实体 MP4 视频就绪 (时长: \${durSec}s)</span>
                 </div>
@@ -8946,7 +10245,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         }
 
         td5.innerHTML = \`
-          <div class="space-y-2 \${isAi ? '' : 'opacity-40 pointer-events-none'}">
+          <div class="space-y-2 \${isAi ? '' : 'inactive-visual-editor opacity-40 pointer-events-none'}">
             <!-- 视觉呈现形态三态切换 -->
             <div class="flex items-center p-0.5 rounded-lg bg-gray-950 border border-gray-800 text-[10px] font-bold">
               <button type="button" onclick="setVisualTarget(\${idx}, 'video')"
@@ -9063,12 +10362,26 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </div>
         \`;
 
+        const urlDownloadBarHtml = \`
+          <div class="flex items-center gap-1">
+            <input type="url" id="urlDownloadInput_\${idx}"
+                   placeholder="🔗 粘贴视频链接 (YouTube/B站/抖音等)..."
+                   onkeydown="if(event.key==='Enter') downloadUrlForRow(\${idx})"
+                   class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-teal-500/50 text-white text-[10px] placeholder:text-gray-500 focus:border-teal-400 focus:ring-1 focus:ring-teal-400 focus:outline-none" />
+            <button type="button" id="urlDownloadBtn_\${idx}" onclick="downloadUrlForRow(\${idx})"
+                    class="px-2 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-bold text-[10px] whitespace-nowrap shadow cursor-pointer transition">
+              ⬇️ 下载
+            </button>
+          </div>
+        \`;
+
         if (asset && scene.source_mode === 'manual_upload') {
           const videoSrc = \`/public/\${activeProjectId}/\${asset.path}\`;
 
           td6.innerHTML = \`
             <div class="space-y-1.5">
               \${linkHtml}
+              \${urlDownloadBarHtml}
               <div class="border border-sky-500/40 bg-sky-950/30 rounded-xl p-2.5 text-left space-y-1.5"
                    ondragover="onFileDragOver(event, \${idx})"
                    ondragleave="onFileDragLeave(event, \${idx})"
@@ -9086,7 +10399,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                   isVideo
                     ? \`
                     <div class="rounded-lg overflow-hidden bg-black border border-gray-800 aspect-video flex items-center justify-center">
-                      <video src="\${videoSrc}" controls class="w-full h-full object-contain"></video>
+                      <video src="\${videoSrc}" controls playsinline class="w-full h-full object-contain"></video>
                     </div>
                   \`
                     : \`
@@ -9098,9 +10411,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
                 \${aiInputHtml}
 
-                <div class="flex items-center justify-between pt-1 border-t border-gray-800/80 text-[10px]">
+                <div class="scene-asset-actions flex items-center justify-between pt-1 border-t border-gray-800/80 text-[10px]">
                   <button onclick="document.getElementById('fileInput_\${idx}').click()" class="text-sky-400 hover:underline cursor-pointer">
-                    从桌面拖入替换
+                    选择替换素材
                   </button>
                   <button onclick="clearAsset(\${idx})" class="text-rose-400 hover:underline cursor-pointer">
                     清除
@@ -9113,16 +10426,17 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           td6.innerHTML = \`
             <div class="space-y-1.5">
               \${linkHtml}
-              <div id="dropzone_\${idx}"
-                   class="border-2 border-dashed border-sky-500/40 hover:border-sky-300 bg-sky-950/25 hover:bg-sky-900/35 rounded-xl p-3 text-center transition cursor-pointer group"
+              \${urlDownloadBarHtml}
+              <button type="button" id="dropzone_\${idx}"
+                   class="w-full border-2 border-dashed border-sky-500/40 hover:border-sky-300 bg-sky-950/25 hover:bg-sky-900/35 rounded-xl p-3 text-center transition cursor-pointer group"
                    ondragover="onFileDragOver(event, \${idx})"
                    ondragleave="onFileDragLeave(event, \${idx})"
                    ondrop="onFileDrop(event, \${idx})"
                    onclick="document.getElementById('fileInput_\${idx}').click()">
-                <div class="text-sky-300 text-xl mb-1 group-hover:scale-110 transition">📥</div>
-                <div class="text-[11px] font-bold text-sky-200">从桌面拖入视频 / 图片</div>
-                <div class="text-[10px] text-gray-400 mt-0.5">松开即自动绑定并在线检验</div>
-              </div>
+                <span class="block text-sky-300 text-xl mb-1 group-hover:scale-110 transition">📥</span>
+                <span class="block text-[11px] font-bold text-sky-200">选择或拖入视频 / 图片</span>
+                <span class="block text-[10px] text-gray-400 mt-0.5">上传后自动绑定并显示预览</span>
+              </button>
               \${aiInputHtml}
             </div>
           \`;
@@ -9154,13 +10468,17 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </div>
         \`;
 
-        tr.appendChild(td1);
-        tr.appendChild(td2);
-        tr.appendChild(td3);
-        tr.appendChild(td4);
-        tr.appendChild(td5);
-        tr.appendChild(td6);
-        tr.appendChild(td7);
+        [td1, td2, td3, td4, td5, td6, td7].forEach((cell, column) => {
+          cell.setAttribute('role', 'cell');
+          if (fieldLabels[column]) {
+            const label = document.createElement('span');
+            label.className = 'scene-field-label';
+            label.setAttribute('aria-hidden', 'true');
+            label.textContent = fieldLabels[column];
+            cell.prepend(label);
+          }
+          tr.appendChild(cell);
+        });
         tbody.appendChild(tr);
       });
     }
@@ -9715,6 +11033,63 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
+    async function downloadUrlForRow(idx) {
+      const scene = manifestData.scenes[idx];
+      const inputEl = document.getElementById('urlDownloadInput_' + idx);
+      const btnEl = document.getElementById('urlDownloadBtn_' + idx);
+      const rawUrl = inputEl ? inputEl.value.trim() : '';
+
+      if (!rawUrl) {
+        alert('请先粘贴要下载的网络视频或帖子链接（支持 YouTube、B站、抖音、TikTok、小红书等）');
+        if (inputEl) inputEl.focus();
+        return;
+      }
+
+      if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = '⏳ 下载中...';
+      }
+      showToast('⏳ 正在通过哼哼猫 API 解析并下载网络视频到本地...');
+
+      try {
+        const res = await fetch('/api/download-url-asset?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            sceneId: scene.scene_id,
+            url: rawUrl,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          manifestData = data.manifest;
+          assetIndexData = data.assetIndex;
+          renderTable();
+          showToast(data.message || '✅ 网络视频已下载到本地并绑定至当前分镜！');
+          setTimeout(() => {
+            const inp = document.getElementById('aiIntentInput_' + idx);
+            if (inp) {
+              inp.focus();
+              inp.placeholder = '已下载就绪，可输入如“截取 6 至 10 秒”、变亮、弹艺术字...';
+            }
+          }, 200);
+        } else {
+          alert(data.error || '链接解析下载失败');
+          if (btnEl) {
+            btnEl.disabled = false;
+            btnEl.textContent = '⬇️ 下载';
+          }
+        }
+      } catch (err) {
+        alert('请求失败: ' + err.message);
+        if (btnEl) {
+          btnEl.disabled = false;
+          btnEl.textContent = '⬇️ 下载';
+        }
+      }
+    }
+
     async function uploadFileForRow(idx, file) {
       if (!file) return;
       const scene = manifestData.scenes[idx];
@@ -9777,9 +11152,12 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     async function synthesizeTestVoice() {
       const btn = document.getElementById('btnSynth');
+      const provider = document.querySelector('input[name="audioProvider"]:checked')?.value || 'voicebox';
       const apiKey = document.getElementById('elevenlabsKeyInput').value;
       const voiceId = document.getElementById('voiceIdSelect').value;
+      const profileId = document.getElementById('voiceboxProfileSelect').value;
       const text = document.getElementById('sampleAudioText').value;
+      const useAsNarration = document.getElementById('useAsNarrationCheckbox').checked;
 
       btn.disabled = true;
       btn.textContent = '⏳ 正在合成中...';
@@ -9790,14 +11168,19 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             projectId: activeProjectId,
-            provider: 'elevenlabs',
+            provider,
             voiceId,
+            profileId,
             apiKey,
             text,
+            useAsNarration,
           }),
         });
         const data = await res.json();
-        if (data.ok && data.audioUrl) {
+        if (provider === 'voicebox' && data.ok && data.job) {
+          await updateVoiceboxStatus();
+          showToast('已提交至本地 Voicebox，当前工程可在后台继续生成');
+        } else if (data.ok && data.audioUrl) {
           const playerCont = document.getElementById('audioPlayerContainer');
           const player = document.getElementById('audioPreviewPlayer');
           player.src = data.audioUrl;
@@ -9812,6 +11195,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       } finally {
         btn.disabled = false;
         btn.textContent = '🔊 立即生成测试配音';
+        if (provider === 'voicebox') updateVoiceboxStatus();
       }
     }
 
@@ -10195,10 +11579,14 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     loadProjects().then(() => {
       loadWorkflow();
+      updateRenderStatus();
+      updateVoiceboxStatus();
       if (currentWorkspaceTab === 'writer') {
         switchWorkspaceTab('writer');
       }
     });
+    setInterval(updateRenderStatus, 5000);
+    setInterval(updateVoiceboxStatus, 5000);
   </script>
 </body>
 </html>`;

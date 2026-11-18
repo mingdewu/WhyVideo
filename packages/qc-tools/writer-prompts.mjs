@@ -77,22 +77,24 @@ export const WRITER_PROMPT_REGISTRY = {
 
   W3_evidence: {
     template_id: 'W3_evidence',
-    template_version: '1.0.0',
+    template_version: '1.1.0',
     label: '3. 证据卡提取',
     full_label: 'W3 · 原子化证据卡提取',
     description: '用于「从资料中提取证据卡」阶段，必须输出纯 JSON 数组。',
-    allowed_inputs: ['title', 'materials'],
+    allowed_inputs: ['title', 'materials', 'brief_json'],
     require_json: true,
     require_audit_marker: false,
-    raw_template: `你是一名严谨的知识型纪录片资料考证员。你的任务是将选题与参考资料拆解为一组原子化的证据卡（Evidence Cards）。
+    raw_template: `你是一名严谨的知识型纪录片资料考证员。按立项 Brief 的核心问题、范围和排除项，从参考资料中提取原子化的证据卡（Evidence Cards）。参考资料支持的主张可列为事实；模型已有知识可以提出待核查的事实线索，但不能充当核实来源。
 核心规则：
 1. 每张证据卡只包含一个独立事实主张；
-2. claim_type 严格限定四选一：verified_fact（已证实客观事实）、disputed_claim（存在争议）、legend_or_anecdote（民间传说/轶事）、author_interpretation（主观推论）；
+2. claim_type 严格限定五选一：verified_fact（已证实客观事实）、unverified_fact（待核查事实线索）、disputed_claim（存在争议）、legend_or_anecdote（民间传说/轶事）、author_interpretation（主观推论）；
+   verified_fact 必须附上本次输入中实际出现、可直接定位该主张的 http(s) 来源链接；没有链接或只有出处名称时，不要创建 verified_fact 卡。
 3. 必须输出 JSON 数组，每项包含：
    - evidence_id: 如 "EV-001"
-   - claim_type: 四选一
+   - claim_type: 五选一
    - evidence_summary: 事实客观中文概括
    - source_title: 资料出处说明
+   - source_url: 资料中已给出的出处链接；没有则为空字符串，且不能标为 verified_fact
    - reliability: high / medium / low
 请直接输出纯 JSON 数组，严禁包含任何前缀后缀说明。`,
   },
@@ -110,7 +112,7 @@ export const WRITER_PROMPT_REGISTRY = {
 核心规则：
 1. 单章单问：每一章必须且仅回答一个明确的子问题；
 2. 5~7 章递进：第1章破除表面误解与建立反差，第2-3章底层地理/历史/技术机制，第4-5章商业/基建/制度转折，第6-7章现代固化与代价；
-3. 必须绑定 supporting_evidence_ids；
+3. 每章的 supporting_evidence_ids 必须引用现有卡库中实际支持本章论点的编号；
 4. 必须且仅输出合法的 JSON 格式：
 {
   "project_id": "xxx",
@@ -160,7 +162,7 @@ export const WRITER_PROMPT_REGISTRY = {
 2. 内部结构严格遵循四段式：
    - 1_question_or_contradiction: 章节问题或矛盾（承接上文）
    - 2_mechanism_or_background: 形成机制或底层背景（逻辑拆解）
-   - 3_sourced_concrete_examples: 有来源的具体例子（绑定证据卡，平实具象，严禁伪造内心独白）
+   - 3_sourced_concrete_examples: 基于本章给出的证据卡写具体例子，保留原资料的适用条件，严禁伪造内心独白
    - 4_mini_summary_and_transition: 小结与自然引出下一章（非终章严禁做全局大总结）
 3. 必须输出合法 JSON 格式：
 {
@@ -174,30 +176,30 @@ export const WRITER_PROMPT_REGISTRY = {
     "4_mini_summary_and_transition": "..."
   },
   "full_chapter_narration": "拼接后的单章完整口语化旁白正文",
-  "used_evidence_ids": {{supporting_evidence_ids_json}},
+   "used_evidence_ids": {{supporting_evidence_ids_json}},
   "word_count": 1000
 }`,
   },
 
   W6_finalize: {
     template_id: 'W6_finalize',
-    template_version: '1.0.0',
+    template_version: '1.1.0',
     label: '6. 全文统稿',
     full_label: 'W6 · 全文统稿去伪结尾与定稿',
     description: '用于「全篇合并统稿与去伪结尾」阶段，必须输出 final-script JSON。',
-    allowed_inputs: ['outline_json', 'chapters_json'],
+    allowed_inputs: ['outline_json', 'chapters_json', 'evidence_cards_json'],
     require_json: true,
     require_audit_marker: false,
     raw_template: `你是一名资深长视频总编审。你的任务是对全片章节进行全文统稿编辑（Full Script Editing），将其熔炼为一篇可直接用于真人配音（TTS）与分镜制作的纯口播定稿。
 核心规则：
 1. 删除跨章节重复论点与重复例子；
-2. 统一全片术语、年代读法与口语化节奏；
+2. 对照证据卡核对事实、时间、数据和出处，保留证据的适用范围和不确定性。统一全片术语、年代读法与口语化节奏；
 3. 识别并删除中间各章节末尾的“伪结尾”，全片只保留一个正式终局结尾；
 4. 【彻底消除标题与书面壳子，转为纯口播流】：
    - 严禁在 opening、narration_text、ending 的正文中出现任何“第一章”“第二节”“Part 1”“一、”“1.”等章节标题、小标题、Markdown 标题符（# / ## / **）或分隔线（=== / ---）；
    - 将原本靠标题隔开的内容，改写为自然的口语承接与过渡句（如“说到这儿，你可能就要问了……”），确保从头到尾一气呵成、直接送去配音也不会读出任何标题词；
    - 章节归属名仅保留在 JSON 的 chapter_title 元数据字段中，供后台分镜分组使用，绝不可混入 narration_text 正文；
-5. 输出标准 final-script.json 结构：
+5. 按大纲保留全部章节及原章节编号，输出标准 final-script.json 结构：
 {
   "project_id": "xxx",
   "title": "视频标题",
