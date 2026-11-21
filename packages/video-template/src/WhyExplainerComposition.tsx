@@ -10,7 +10,94 @@ import { PhotoMotionScene } from "./scenes/PhotoMotionScene";
 import { TimelineScene } from "./scenes/TimelineScene";
 import { VersusDualScene } from "./scenes/VersusDualScene";
 import { DocumentHighlightScene } from "./scenes/DocumentHighlightScene";
-import { RenderPropsType, TimelineTrackProp } from "./types";
+import { BgmTrackProp, RenderPropsType, TimelineTrackProp } from "./types";
+
+function dbToGain(db: number): number {
+  if (!Number.isFinite(db)) return 0.15;
+  if (db <= -60) return 0;
+  return Math.min(1, Math.max(0, Math.pow(10, db / 20)));
+}
+
+function computeBgmVolume(
+  bgm: BgmTrackProp,
+  frame: number,
+  totalFrames: number,
+  fps: number
+): number {
+  if (!bgm.enabled) return 0;
+  const safeFps = Math.max(1, fps || 30);
+  const baseDb = Number.isFinite(bgm.base_volume_db) ? bgm.base_volume_db : -16;
+  let segmentDb = baseDb;
+
+  const segs = bgm.segments ?? [];
+  if (segs.length > 0) {
+    const transitionFrames = Math.max(1, Math.round(0.6 * safeFps));
+    for (let i = 0; i < segs.length; i++) {
+      const seg = segs[i];
+      if (frame >= seg.start_frame && (frame < seg.end_frame || i === segs.length - 1)) {
+        const curDb = Number.isFinite(seg.target_db) ? seg.target_db : baseDb;
+        if (i > 0) {
+          const prevDb = Number.isFinite(segs[i - 1].target_db)
+            ? segs[i - 1].target_db
+            : baseDb;
+          const elapsed = frame - seg.start_frame;
+          if (elapsed >= 0 && elapsed < transitionFrames) {
+            segmentDb = prevDb + ((curDb - prevDb) * elapsed) / transitionFrames;
+          } else {
+            segmentDb = curDb;
+          }
+        } else {
+          segmentDb = curDb;
+        }
+        break;
+      }
+    }
+  }
+
+  let duckFactor = 0;
+  if (bgm.ducking_enabled && bgm.speech_windows && bgm.speech_windows.length > 0) {
+    const duckDepth = Number.isFinite(bgm.ducking_db) ? bgm.ducking_db : -8;
+    if (duckDepth < 0) {
+      const attackFrames = Math.max(1, Math.round(((bgm.attack_ms || 180) / 1000) * safeFps));
+      const releaseFrames = Math.max(1, Math.round(((bgm.release_ms || 420) / 1000) * safeFps));
+      for (const win of bgm.speech_windows) {
+        if (frame < win.start_frame - attackFrames || frame > win.end_frame + releaseFrames) {
+          continue;
+        }
+        let localDuck = 0;
+        if (frame >= win.start_frame && frame <= win.end_frame) {
+          localDuck = 1;
+        } else if (frame >= win.start_frame - attackFrames && frame < win.start_frame) {
+          localDuck = Math.max(
+            0,
+            Math.min(1, (frame - (win.start_frame - attackFrames)) / attackFrames)
+          );
+        } else if (frame > win.end_frame && frame <= win.end_frame + releaseFrames) {
+          localDuck = Math.max(0, Math.min(1, 1 - (frame - win.end_frame) / releaseFrames));
+        }
+        if (localDuck > duckFactor) duckFactor = localDuck;
+        if (duckFactor >= 1) break;
+      }
+      segmentDb += duckFactor * duckDepth;
+    }
+  }
+
+  let gain = dbToGain(segmentDb);
+  const fadeInFrames = Math.max(0, Math.round(((bgm.fade_in_ms || 0) / 1000) * safeFps));
+  if (fadeInFrames > 0 && frame < fadeInFrames) {
+    gain *= Math.max(0, frame / fadeInFrames);
+  }
+  const fadeOutFrames = Math.max(0, Math.round(((bgm.fade_out_ms || 0) / 1000) * safeFps));
+  const safeTotal = Math.max(1, totalFrames || 1);
+  if (fadeOutFrames > 0) {
+    const framesFromEnd = Math.max(0, safeTotal - 1 - frame);
+    if (framesFromEnd < fadeOutFrames) {
+      gain *= Math.max(0, framesFromEnd / fadeOutFrames);
+    }
+  }
+
+  return Math.min(1, Math.max(0, gain));
+}
 
 const SceneDispatcher: React.FC<{ track: TimelineTrackProp; isFinalRender?: boolean }> = ({ track, isFinalRender }) => {
   const isMissing =
@@ -52,6 +139,21 @@ export const WhyExplainerComposition: React.FC<RenderPropsType & { isFinalRender
         <Audio
           src={staticFile(props.audio_track.src)}
           volume={props.audio_track.volume ?? 1}
+        />
+      )}
+
+      {props.audio_track?.bgm?.enabled && props.audio_track.bgm.src && (
+        <Audio
+          src={staticFile(props.audio_track.bgm.src)}
+          loop={props.audio_track.bgm.loop ?? true}
+          volume={(f) =>
+            computeBgmVolume(
+              props.audio_track.bgm!,
+              f,
+              props.video_config.duration_in_frames,
+              props.video_config.fps
+            )
+          }
         />
       )}
 

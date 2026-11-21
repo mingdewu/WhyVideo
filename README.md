@@ -113,7 +113,24 @@ PORT=4000
 
 ## 🌟 更新日志
 
-### ✍️ 文案创作工坊全量提示词定制、去 AI 味 Diff 审阅与单屏紧凑布局（最新）
+### 🎵 AI 自适应 BGM 工作台、Whisper 旁白逐字对齐与视觉分镜全套调优（最新）
+1. **AI 自适应智能背景音乐（BGM）工作台与动态闪避（Ducking）引擎**：
+   - 新增 `bgm-manager.mjs` 模块及配套 Schema / Remotion 渲染属性（`BgmTrackProp` / `render-props.schema.json`）。
+   - 支持多音轨管理、分段情绪与目标音量调节（`segments`）、AI 风格推荐分析（`parseBgmAnalysisJson`）。
+   - 实现毫秒级平滑过渡曲线与人声动态闪避（`ducking_db` / `attack_ms` / `release_ms` / `fade_in` / `fade_out`），在 Remotion `WhyExplainerComposition.tsx` 中实时基于音频帧精细衰减。
+2. **旁白逐字时间轴与智能切点规划（Cut Planner）**：
+   - 新增 `narration-timing.mjs` 与基于 Apple Silicon MLX 的 `align_whisper.py` 本地 Whisper 逐词时间戳对齐，未安装时自动平滑回退至 ffmpeg 停顿对齐。
+   - 新增 `cut-planner.mjs` 智能镜头切点规划器：支持关键词提前切入画面、句中换画面、停顿与转折词捕捉、长镜头智能切分建议及节奏统计（`rhythmStats`）。
+   - UI 增加一键切分镜头（`Split Shot`）、镜头合并、手动挪动切点（`moveCutTo`）与字幕独立于画面切点的精细对齐。
+3. **视觉分镜台提示词模板与视觉风格预设（`producer-prompts.mjs`）**：
+   - 提取分镜制作台专用的提示词注册表（`P1_keywords`、`P2_video_prompt` 等），支持当前工程独立定制、保存与重置。
+   - 内置 4 套经典视觉预设（纪录片写实考证风、电影级大片质感、现代极简信息图风、快节奏网感搜素材）。
+4. **配音链路与视频音轨控制增强**：
+   - **Voicebox 配音**：支持任务实时取消（`AbortController` / `/api/voicebox/cancel`）与模型加载超时防护（`loading_model` 状态看门狗）。
+   - **ElevenLabs 配音**：默认升级推荐模型为 `eleven_v4`，新增音色列表拉取与 `buildElevenlabsTtsPayload` 动态参数组装，支持精细稳定性与相似度调节。
+   - **B-Roll 视频原生音轨**：在 `BrollScene.tsx` 中支持单独保留素材原视频音频轨（`keep_original_audio`）与音量微调（`original_audio_volume`）。
+
+### ✍️ 文案创作工坊全量提示词定制、去 AI 味 Diff 审阅与单屏紧凑布局
 1. **工程级全量提示词定制与注册表（[writer-prompts.mjs](packages/qc-tools/writer-prompts.mjs)）**：
    - 将文案创作台 7 个 AI 阶段（`W1_research` 事实考证 → `W7_humanize` 去 AI 味润色）与 4 套风格预设（`WRITER_STYLE_PRESETS`）抽离至集中注册表，内置允许变量白名单与 JSON/审计契约校验（`validateWriterPromptTemplate`）。
    - 支持通过顶栏 **「⚙️ 提示词设置」** 弹窗（`#writerPromptsModal`）全量编辑各阶段系统提示词、点击插入变量芯片与一键追加风格预设；改动仅保存至当前工程的 `data/writer-prompts.json`，新建或未修改工程自动沿用出厂默认基线。

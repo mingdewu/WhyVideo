@@ -94,7 +94,47 @@
         "end_at_frame": { "type": "integer" },
         "duration_ms": { "type": "integer" },
         "volume": { "type": "number" },
-        "unauthorized_bgm_present": { "type": "boolean", "const": false }
+        "unauthorized_bgm_present": { "type": "boolean", "const": false },
+        "bgm": {
+          "type": ["object", "null"],
+          "required": ["src", "enabled", "base_volume_db", "ducking_enabled", "ducking_db"],
+          "properties": {
+            "src": { "type": "string" },
+            "enabled": { "type": "boolean" },
+            "loop": { "type": "boolean" },
+            "base_volume_db": { "type": "number" },
+            "ducking_enabled": { "type": "boolean" },
+            "ducking_db": { "type": "number" },
+            "attack_ms": { "type": "integer" },
+            "release_ms": { "type": "integer" },
+            "fade_in_ms": { "type": "integer" },
+            "fade_out_ms": { "type": "integer" },
+            "segments": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["start_frame", "end_frame", "target_db", "mood"],
+                "properties": {
+                  "start_frame": { "type": "integer" },
+                  "end_frame": { "type": "integer" },
+                  "target_db": { "type": "number" },
+                  "mood": { "type": "string" }
+                }
+              }
+            },
+            "speech_windows": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["start_frame", "end_frame"],
+                "properties": {
+                  "start_frame": { "type": "integer" },
+                  "end_frame": { "type": "integer" }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "caption_track": {

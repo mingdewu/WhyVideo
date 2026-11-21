@@ -6,12 +6,45 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'url';
 import { renderProject, projectRenderPaths } from './render-project.mjs';
 import { getVoiceboxProfiles, synthesizeWithVoicebox } from './synthesize-voicebox.mjs';
+import { buildElevenlabsTtsPayload } from './synthesize-elevenlabs.mjs';
 import {
   getWriterPromptsState,
   saveProjectWriterPromptPreset,
   resetProjectWriterPromptPreset,
   renderWriterPrompt,
 } from './writer-prompts.mjs';
+import {
+  getProducerPromptsState,
+  saveProjectProducerPromptPreset,
+  resetProjectProducerPromptPreset,
+  renderProducerPrompt,
+} from './producer-prompts.mjs';
+import {
+  alignNarration,
+  applyTimingToScenes,
+  buildCaptionsFromTiming,
+  buildTimeLookup,
+  isSpoken,
+  loadTiming,
+  probeDurationMs,
+  timingPath,
+  scenesText,
+  sceneSpokenRanges,
+  spokenIndex,
+  whisperAvailable,
+} from './narration-timing.mjs';
+import { planCuts, resliceSceneTexts, splitAtSpokenIndex, moveCutTo, rhythmStats } from './cut-planner.mjs';
+import {
+  ALLOWED_AUDIO_EXTS,
+  BGM_PUBLIC_SUBDIR,
+  buildBgmAudit,
+  buildDeterministicSegments,
+  loadBgmConfig,
+  normalizeBgmSegments,
+  normalizeBgmSettings,
+  parseBgmAnalysisJson,
+  saveBgmConfig,
+} from './bgm-manager.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -21,6 +54,8 @@ const PORT = process.env.PORT || 4000;
 const defaultProjectId = 'why_nikko_heritage_road_001';
 const renderJobs = new Map();
 const voiceJobs = new Map();
+const voiceJobControllers = new Map();
+const alignJobs = new Map();
 
 // 优先读取 .env
 function loadEnv() {
@@ -51,6 +86,9 @@ const MIME_TYPES = {
   '.webm': 'video/webm',
   '.wav': 'audio/wav',
   '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.ogg': 'audio/ogg',
+  '.aac': 'audio/aac',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -72,11 +110,13 @@ function getPaths(projectId = defaultProjectId) {
     assetIndexPath: path.join(projectDir, 'data', 'asset-index.json'),
     statusPath: path.join(projectDir, 'data', 'project-status.json'),
     promptConfigPath: path.join(projectDir, 'data', 'prompt-config.json'),
+    bgmConfigPath: path.join(projectDir, 'data', 'bgm-config.json'),
     writerPromptsPath: path.join(projectDir, 'data', 'writer-prompts.json'),
     finalScriptPath: path.join(projectDir, 'data', 'final-script.json'),
     materialsPath: path.join(projectDir, 'data', 'materials.txt'),
     videoPath: path.join(projectDir, 'output', 'final_video_1080p.mp4'),
     audioDir: path.join(projectDir, 'public', 'audio'),
+    bgmDir: path.join(projectDir, 'public', 'audio', 'bgm'),
     captionsPath: path.join(projectDir, 'public', 'captions', 'captions.srt'),
     propsPath: path.join(projectDir, 'public', 'render-props.json'),
   };
@@ -155,24 +195,63 @@ function msToSrt(ms) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')},${String(remMs).padStart(3, '0')}`;
 }
 
-function syncCaptions(manifest, captionsPath) {
+function projectIdFromCaptionsPath(captionsPath) {
+  // .../projects/<id>/public/captions/captions.srt
+  const parts = path.resolve(captionsPath).split(path.sep);
+  const i = parts.lastIndexOf('projects');
+  return i >= 0 ? parts[i + 1] : null;
+}
+
+/** 读取工程的逐字时间轴（配音生成后对齐得到）；没有则返回 null */
+function getProjectTiming(projectId) {
+  if (!projectId) return null;
+  return loadTiming(getPaths(projectId).dataDir);
+}
+
+function syncCaptions(manifest, captionsPath, projectId = null) {
   if (!manifest?.scenes || !captionsPath) return;
+  const pid = projectId || manifest.project_id || projectIdFromCaptionsPath(captionsPath);
+  const timing = getProjectTiming(pid);
   const srtLines = [];
-  manifest.scenes.forEach((sc, i) => {
-    srtLines.push(String(i + 1));
-    srtLines.push(`${msToSrt(sc.start_ms)} --> ${msToSrt(sc.end_ms)}`);
-    srtLines.push(sc.narration_text || '');
-    srtLines.push('');
-  });
+  // 有真实时间轴：字幕按短句独立切分，时间来自配音，与画面切点无关
+  const timedCaps = timing ? buildCaptionsFromTiming(manifest, timing) : [];
+  if (timedCaps.length) {
+    timedCaps.forEach((c, i) => {
+      srtLines.push(String(i + 1));
+      srtLines.push(`${msToSrt(c.start_ms)} --> ${msToSrt(c.end_ms)}`);
+      srtLines.push(c.text);
+      srtLines.push('');
+    });
+  } else {
+    manifest.scenes.forEach((sc, i) => {
+      srtLines.push(String(i + 1));
+      srtLines.push(`${msToSrt(sc.start_ms)} --> ${msToSrt(sc.end_ms)}`);
+      srtLines.push(sc.narration_text || '');
+      srtLines.push('');
+    });
+  }
   fs.mkdirSync(path.dirname(captionsPath), { recursive: true });
   fs.writeFileSync(captionsPath, srtLines.join('\n'), 'utf8');
 }
 
-function recalculateTimelines(manifest) {
+/**
+ * 重新计算镜头时间。
+ * - 有配音时间轴：镜头起点 = 该镜头第一个字被说出的时间（略提前），完全以音频为准
+ * - 没有：沿用旧的按字数估算
+ */
+function recalculateTimelines(manifest, projectId = null) {
+  const timing = getProjectTiming(projectId || manifest?.project_id);
+  if (timing && applyTimingToScenes(manifest, timing)) return;
+  if (manifest) manifest.timing_source = 'estimated';
   let cur = 0;
   (manifest.scenes || []).forEach((s, idx) => {
     s.scene_index = idx + 1;
     s.scene_id = `Shot-${String(idx + 1).padStart(3, '0')}`;
+    if (s.timing_source && s.timing_source.startsWith('aligned')) {
+      // 时间轴失效（文案大改）后，按字数重新估算，避免沿用旧的对齐时长
+      s.duration_ms = 0;
+      s.timing_source = 'estimated';
+    }
     const dur = s.duration_ms || Math.max(4200, Math.min(9500, Math.round((s.narration_text || '').length * 230)));
     s.duration_ms = dur;
     s.start_ms = cur;
@@ -251,13 +330,189 @@ function recompileProject(projectId) {
   const curPaths = getPaths(projectId);
   if (fs.existsSync(curPaths.manifestPath)) {
     const mf = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
-    syncCaptions(mf, curPaths.captionsPath);
+    // 有配音时间轴时，渲染前始终以音频真实时间为准
+    if (getProjectTiming(projectId)) {
+      const before = JSON.stringify((mf.scenes || []).map((s) => [s.start_ms, s.end_ms]));
+      recalculateTimelines(mf, projectId);
+      if (JSON.stringify((mf.scenes || []).map((s) => [s.start_ms, s.end_ms])) !== before) {
+        fs.writeFileSync(curPaths.manifestPath, JSON.stringify(mf, null, 2), 'utf8');
+      }
+    }
+    syncCaptions(mf, curPaths.captionsPath, projectId);
   }
   spawnSync(
     'node',
     ['packages/qc-tools/generate-render-props.mjs', '--project', projectId],
     { cwd: rootDir, stdio: 'inherit' }
   );
+}
+
+/** 查找工程下可用的配音音频文件（排除空 WAV 占位文件） */
+function findProjectAudioPath(curPaths, manifest = null) {
+  const isValidAudio = (p) => {
+    try {
+      if (!p || !fs.existsSync(p) || !fs.statSync(p).isFile()) return false;
+      if (fs.statSync(p).size <= 256) return false;
+      return probeDurationMs(p) > 0;
+    } catch (e) {
+      return false;
+    }
+  };
+  const candidates = [];
+  if (manifest?.audio_file) {
+    candidates.push(path.join(curPaths.publicDir, manifest.audio_file));
+  }
+  candidates.push(path.join(curPaths.audioDir, 'narration.wav'));
+  candidates.push(path.join(curPaths.audioDir, 'narration.mp3'));
+  for (const c of candidates) {
+    if (isValidAudio(c)) return c;
+  }
+  if (fs.existsSync(curPaths.audioDir)) {
+    const files = fs
+      .readdirSync(curPaths.audioDir)
+      .filter((f) => /\.(wav|mp3|m4a)$/i.test(f))
+      .map((f) => {
+        const full = path.join(curPaths.audioDir, f);
+        return { full, mtime: fs.statSync(full).mtimeMs };
+      })
+      .sort((a, b) => b.mtime - a.mtime);
+    for (const f of files) {
+      if (isValidAudio(f.full)) return f.full;
+    }
+  }
+  return null;
+}
+
+/** 生成工程当前的时间轴与节奏状态摘要，供前端顶部控制条展示 */
+function buildProjectTimingSummary(projectId, manifest) {
+  const curPaths = getPaths(projectId);
+  const timing = getProjectTiming(projectId);
+  const audioPath = findProjectAudioPath(curPaths, manifest);
+  const hasAudioFile = Boolean(audioPath);
+  const audioFileName = audioPath ? path.basename(audioPath) : null;
+  let stale = false;
+  let rhythm = null;
+  let pendingKeywordShifts = 0;
+  let pendingLongSplits = 0;
+
+  if (timing && manifest?.scenes?.length) {
+    const text = scenesText(manifest.scenes);
+    const lookup = buildTimeLookup(timing, text);
+    stale = Boolean(lookup.stale);
+    if (!stale) {
+      try {
+        const plan = planCuts(manifest, timing);
+        rhythm = plan.stats;
+        pendingKeywordShifts = plan.changes.length;
+        pendingLongSplits = plan.splitSuggestions.length;
+      } catch (e) {
+        // 忽略偶发诊断异常
+      }
+    }
+  }
+
+  return {
+    available: Boolean(timing),
+    stale,
+    method: timing?.method || null,
+    audio_duration_ms: timing?.audio_duration_ms || 0,
+    created_at: timing?.created_at || null,
+    warning: timing?.warning || null,
+    whisper_ready: whisperAvailable(),
+    has_audio_file: hasAudioFile,
+    audio_file_name: audioFileName,
+    rhythm,
+    pending_keyword_shifts: pendingKeywordShifts,
+    pending_long_splits: pendingLongSplits,
+  };
+}
+
+/**
+ * 调用大模型为每个镜头从原文中挑出 1~2 个"画面最先要表现的具体词"。
+ * 未配置 API Key 或调用失败时返回空对象，自动降级为 cut-planner 启发式关键词。
+ */
+async function extractVisualKeywordsMap(manifest, curPaths) {
+  const scenes = manifest?.scenes || [];
+  if (!scenes.length) return { map: {}, aiUsed: false };
+
+  let cfg = {};
+  if (fs.existsSync(curPaths.promptConfigPath)) {
+    try {
+      cfg = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8'));
+    } catch (e) {}
+  }
+  const model = cfg.keywordModel || cfg.textModel || cfg.model;
+  const apiKey = cfg.apiKey;
+  const baseUrl = cfg.baseUrl;
+
+  const { chars: spoken } = spokenIndex(scenesText(scenes));
+  const { ranges } = sceneSpokenRanges(scenes);
+  const keywordsByScene = {};
+  let aiUsed = false;
+
+  const CHUNK_SIZE = 24;
+  for (let start = 0; start < scenes.length; start += CHUNK_SIZE) {
+    const chunk = scenes.slice(start, start + CHUNK_SIZE);
+    const lines = chunk.map((s, offset) => {
+      const idx = start + offset;
+      const [a, b] = ranges[idx];
+      const prevA = idx > 0 ? ranges[idx - 1][0] : a;
+      // 带上上一镜后半段，让 AI 能发现"在上一句后半段就提到本镜核心物体"的情况
+      const prevTail = idx > 0 ? spoken.slice(Math.max(prevA, a - 18), a).join('') : '';
+      const curBody = spoken.slice(a, b).join('');
+      const hint = s.selected_search_keyword || (s.content_keywords || []).slice(0, 2).join('、') || '';
+      return `#${idx} [画面意图:${hint || '无'}] 参考文:${prevTail ? prevTail + ' / ' : ''}${curBody}`;
+    });
+
+    const sys = [
+      '你是纪录片剪辑师。下面每个镜头有一段【参考文】（斜杠前是上一镜结尾，斜杠后是本镜正文）。',
+      '请为每个镜头挑出 1~2 个「画面最先要表现的具体事物/人物/地点/动作/数字」关键词，用来决定什么时候把画面切到这一镜。',
+      '要求：',
+      '1. 关键词必须是该镜头【参考文】里连续原样出现的词（2~6个字，忽略斜杠和标点），绝对不要改写或自己造词；',
+      '2. 优先选名词、地名、人名、具体物品或核心数字，不要选「我们」「因为」「画面」「镜头」之类虚词；',
+      '3. 严格只输出 JSON 数组，不要其他文字：[{"i": 镜头序号数字, "kw": ["词1", "词2"]}, ...]。',
+    ].join('\n');
+
+    const reply = await callOpenRouterText(sys, lines.join('\n'), {
+      model,
+      apiKey,
+      baseUrl,
+      maxTokens: 2000,
+    });
+    if (!reply) {
+      // 未配置 API Key 或接口异常时直接终止剩余批次，退化为启发式关键词
+      break;
+    }
+
+    try {
+      const jsonMatch = reply.replace(/```json\s*|```/gi, '').match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed)) {
+          aiUsed = true;
+          for (const item of parsed) {
+            const idx = Number(item?.i);
+            if (!Number.isInteger(idx) || idx < start || idx >= start + chunk.length) continue;
+            const [a, b] = ranges[idx];
+            const prevA = idx > 0 ? ranges[idx - 1][0] : a;
+            const winStr = spoken.slice(prevA, b).join('');
+            const validKws = (Array.isArray(item.kw) ? item.kw : [])
+              .map((k) => spokenIndex(String(k || '')).chars.join(''))
+              .filter((k) => k.length >= 2 && k.length <= 8 && winStr.includes(k))
+              .slice(0, 2);
+            if (validKws.length) {
+              keywordsByScene[idx] = validKws;
+              scenes[idx].visual_keywords = validKws;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[auto-plan-cuts] AI 关键词解析跳过:', e.message);
+    }
+  }
+
+  return { map: keywordsByScene, aiUsed };
 }
 
 function scanLocalExportScripts() {
@@ -1154,8 +1409,29 @@ function syncLocalProjectAssets(projectId) {
     } catch (e) {}
   }
 
+  let audioProbed = false;
   for (const a of assetIndex.assets) {
-    a.exists_on_disk = Boolean(a.path && fs.existsSync(path.join(curPaths.publicDir, a.path)));
+    const fullDiskPath = a.path ? path.join(curPaths.publicDir, a.path) : '';
+    a.exists_on_disk = Boolean(fullDiskPath && fs.existsSync(fullDiskPath));
+    const isVid = a.type === 'video' || a.media_type === 'video' || /\.(mp4|mov|webm|mkv)$/i.test(a.path || '');
+    if (isVid && a.exists_on_disk && typeof a.has_audio !== 'boolean') {
+      try {
+        const probeAudio = spawnSync(
+          'ffprobe',
+          ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', fullDiskPath],
+          { encoding: 'utf8' }
+        );
+        a.has_audio = probeAudio.status === 0 && String(probeAudio.stdout || '').trim().length > 0;
+      } catch (e) {
+        a.has_audio = false;
+      }
+      audioProbed = true;
+    }
+  }
+  if (audioProbed) {
+    try {
+      fs.writeFileSync(curPaths.assetIndexPath, JSON.stringify(assetIndex, null, 2), 'utf8');
+    } catch (e) {}
   }
   return assetIndex;
 }
@@ -1308,7 +1584,7 @@ function parsePromptWithRules(prompt, hasAsset, assetType) {
 }
 
 // 🪐 大模型 API 智能 Remotion 动效与剪辑编译器
-async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, modelConfig = {}) {
+async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, modelConfig = {}, projectDir = '') {
   const p = (userPrompt || '').trim();
   const detRange = parseTimeRangeFromText(p);
   const apiKey = (modelConfig.apiKey || process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY || '').trim();
@@ -1316,60 +1592,7 @@ async function callLlmRemotionCompiler(userPrompt, scene, hasAsset, assetType, m
   const model = (modelConfig.textModel || modelConfig.model || 'deepseek/deepseek-chat').trim();
   const durationSec = Number((scene.duration_ms / 1000).toFixed(1));
 
-  const systemPrompt = `你是一位精通 Remotion 视频代码、FFmpeg 局部流式下载与视听美学的专业剪辑总监。
-核心任务
-面对用户针对当前镜头输入的任意口语化、自然语言要求，执行两项核心任务：
-1. 【用人话向用户说出你的剪辑/下载构思与操作细节】（专业、亲和的剪辑师口吻，写入 ai_speech_reply）；
-2. 【输出广义的视频调节与片段截取参数】（直接写入 media_modifiers，供自动化管线与 Remotion 精准执行）。
-
-重要规则
-- 时间单位强制统一：无论用户在指令中如何表达时间（如“第1分5秒到1分15秒”、“01:05~01:15”、“65秒”），必须将其全部换算为绝对秒数（浮点数），分别写入 trim_start_sec / trim_end_sec 或字幕的 start_sec / duration_sec 中。
-- Action 设定：只要涉及视频调节或区间截取，action 必须设为 "media_modifiers"！
-- 极度纯净输出：必须且仅返回原生 JSON 字符串。必须以 { 开头，以 } 结尾。严禁使用 \`\`\`json 这样的 Markdown 代码块标记，严禁在 JSON 结构外输出任何解释性文本。
-
-返回参数规范 (JSON)
-{
-  "ai_speech_reply": "用自然口语向用户说出你所做的具体剪辑、下载片段跳转操作或音效处理（例如：'好的！已将你的口令转换为片段跳转指令：提取原视频 65s 至 75s 的画面，加入缓慢推镜头并强化胶片质感，同时微调了环境音量……'）",
-  "action": "media_modifiers",
-  "scene_type": "data_card" | "timeline" | "versus_dual" | "kinetic_text",
-  "media_modifiers": {
-    "trim_start_sec": 裁剪或局部下载起始绝对秒数 (数字或 null，如 1分5秒 则填 65.0),
-    "trim_end_sec": 裁剪或局部下载结束绝对秒数 (数字或 null，如 1分15秒 则填 75.0),
-    "playback_rate": 视频播放倍率 (正常为 1.0, 慢动作如 0.5 ~ 0.8, 快放如 1.5 ~ 2.0),
-    "audio": {
-      "mute_original": 屏蔽原视频环境音 (true 或 false),
-      "volume_level": 原声保留时的音量大小 (0.0 ~ 1.0)
-    },
-    "filters": {
-      "brightness": 亮度系数 (如变亮 1.25, 强曝光 1.5, 压暗 0.8),
-      "contrast": 对比度 (如增强 1.2),
-      "saturate": 饱和度 (如鲜艳 1.3, 灰度衰减 0.7),
-      "hue_rotate_deg": 色相偏移角度 (用于任意变色，如变冷蓝 180, 泛金/偏黄 45, 偏绿 90 等),
-      "sepia": 复古胶片度 (0.0 ~ 1.0),
-      "grayscale": 黑白灰度 (0.0 ~ 1.0),
-      "blur_px": 虚化/模糊像素 (数字，0及以上)
-    },
-    "motion": {
-      "motion_type": "zoom_in (慢推聚焦)" | "zoom_out (拉远展现)" | "pan_left (左移)" | "pan_right (右移)" | "shake (微颤/顿挫打击感)" | "static (沉稳固定)",
-      "easing_curve": "linear (匀速)" | "ease_in_out (平滑缓动)" | "spring_bounce (弹性跳动)",
-      "duration_sec": 运镜持续时长秒数 (数字，如 5.0),
-      "scale_from": 画面起始缩放比例 (数字，如 1.0),
-      "scale_to": 画面结束缩放比例 (数字，如 1.15),
-      "translate_x_px": X轴平移位移像素 (数字),
-      "translate_y_px": Y轴平移位移像素 (数字)
-    },
-    "text_overlays": [
-      {
-        "text": "提取或提炼的关键艺术字/解说文字",
-        "style": "dramatic_shock (震撼大字)" | "warning_badge (警示标注)" | "neon_glow (霓虹发光)" | "minimal_clean (极简高级)",
-        "animation": "slide_from_left (左侧滑入)" | "pop_bounce (弹跳放大)" | "fade_in (渐显浮现)" | "shock_shake (震颤冲击)",
-        "position": "center" | "center_left" | "top_left" | "bottom_center",
-        "start_sec": 文本出现的起始绝对秒数 (数字，如 66.0),
-        "duration_sec": 文本停留的持续时长秒数 (数字，如 3.0)
-      }
-    ]
-  }
-}`;
+  const systemPrompt = renderProducerPrompt(projectDir, 'P5_clip_compiler');
 
   const userContext = `【分镜序号】：${scene.scene_id}
 【解说台词】：${scene.narration_text || ''}
@@ -1665,7 +1888,7 @@ function extractLocalSmartPrompt(narrationText, targetMode, keywords = [], templ
   }
 }
 
-async function callOpenRouterPromptExtractor(cfg, narrationText, targetMode, keywords = [], templateStyle = 'data_card', projectContext = {}) {
+async function callOpenRouterPromptExtractor(cfg, narrationText, targetMode, keywords = [], templateStyle = 'data_card', projectContext = {}, projectDir = '') {
   const apiKey = (cfg.apiKey || '').trim();
   const baseUrl = (cfg.baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
   const model = (cfg.textModel || cfg.model || 'deepseek/deepseek-chat').trim();
@@ -1682,50 +1905,19 @@ async function callOpenRouterPromptExtractor(cfg, narrationText, targetMode, key
   const projSummary = projectContext.short_answer || projectContext.subtitle || '';
 
   let modeName = '🎬 真实实体视频 (Text-to-Video MP4)';
-  let modeRequirement = `【实体视频提炼要求】：
-必须输出为如下结构：
-【镜头叙事核心】必须紧扣台词中的历史人物动作、政权军事遗存、宗教法器或地理工程实体，严禁空洞死景；
-【运镜轨迹】电影摄影运镜（如：45度低角度向前推进聚焦主体、悬崖俯瞰慢速环绕拉远、浅景深焦点从前景转移至后景）；
-【具象细节与动态】人物袍服随风扬起、香火薄雾流淌、微雨浸润石壁等真实物理动态；
-【光影与时代质感】符合该历史时期电影级光影质感与空气透视，真实自然光。`;
-
+  let templateId = 'P2_video_prompt';
   if (targetMode === 'image') {
     modeName = '🖼️ 超写实实景图 (FLUX / Midjourney HD)';
-    modeRequirement = `【超写实实景图提炼要求】：
-必须输出为如下结构：
-【画面叙事核心】必须紧扣台词中的核心时代实体与历史隐喻（如：苦行僧白衣持杖身影、德川幕府葵纹关防与险峰鸟居），绝对严禁脱离文案仅拍摄无意义的自然死风景；
-【构图与空间透视】大师级电影摄影构图与视觉纵深（如：悬崖险隘对角线构图，前景为...，远景为...）；
-【具象细节与材质】特定历史实体的真实微观质感（粗麻白衣纤维、斑驳金刚杖、黑金铜雕葵纹、湿润险峰玄武岩）；
-【光影与时代氛围】晨雾穿透林冠的圣洁丁达尔光线，深沉苍凉的历史色调与胶片景深，无任何杂乱文字。`;
+    templateId = 'P3_image_prompt';
   } else if (targetMode === 'card') {
     modeName = '📊 大模型视觉排版调优 (AI Smart Layout)';
-    modeRequirement = `【大模型视觉排版调优要求】：
-请根据台词的核心认知冲突与论据类型（数据对比、史料考据、时空演变、观点重音等），由大模型自主推导最佳排版指示词：
-【核心大字】从台词提炼极具视觉冲击力与认知反差的醒目标题（4~10字）；
-【副级阐述】14~28 字直击要害的解说精要；
-【排版与视觉重点】结构化核心论据或工艺细节，由大模型自适应规划版式构图与信息层级；
-【版式视觉】16:9 现代暗色顶级信息图卡片风格，微光磨砂玻璃容器，冷蓝与渐变紫/金珀氛围辉光，极致专业排版。`;
+    templateId = 'P4_card_prompt';
   }
 
-  const systemPrompt = `你是一位享誉全球的顶级历史文化、地理发现与科技深度纪录片视觉分镜总监。
-任务：根据给定的【旁白台词】、【关键词】与【项目全局背景】，为该镜头提炼出与解说词语义高度咬合、具象写实、视听冲击力极强的画面指示词（Prompt）。
-
-【项目全局背景】：
-纪录片主题：《${projTitle}》
-${projSummary ? `核心叙事概要：${projSummary}\n` : ''}
-【最高法则：抽象概念强制具象化（Iconography Mapping）】：
-1. 绝对严禁“死风景敷衍”！严禁仅用“石阶、树林、水面、青苔、石缝蕨类”等无主观意图的通用自然静物充当主角！画面必须出现直接承载台词历史/文化/事件意义的【具象历史符号 / 实体人物行动 / 建筑遗存】。
-2. 历史、文化与政治概念具象化规则：
-   - 出现“信仰 / 神域 / 修验道 / 苦行僧”：必须出现具体的宗教实体符号，如【悬崖险峰间头戴斑驳斗笠、身着粗麻白衣、手持金刚杖的修验僧背影】、【险峰古杉上缠绕的粗大白色注连绳与纸垂结界】、【山伏石碑与法器】；
-   - 出现“幕府 / 王权 / 军事防线 / 权力政治”：必须出现具体的政权实体符号，如【险峰关口处刻有德川三叶葵纹的森严黑漆铜装石鸟居】、【崇山峻岭间构筑的森严巨石关防石垣与青铜常夜灯】、【德川家康金箔灵庙在深林云雾中的巍然一隅】；
-   - 出现“工程 / 交通 / 盘山公路 / 险道”：必须出现具体的工程视觉线索，如【绝壁急弯发卡弯的连续沥青折叠轨迹】、【险峻海拔标牌与盘山防护落石网】；
-   - 出现“近代开国 / 外交使节 / 避暑胜地”：必须转化为近代具象符号，如【高山冷凉湖畔的洋风木造使馆别墅百叶窗、高山湖泊上的西洋帆船与遮阳伞】。
-3. 音画咬合度原则：让观众即使静音不听解说，仅看画面，也能立刻读懂其传达的特定时代、核心人物与历史意境！
-
-请严格遵循指定形态的结构规范进行输出：
-${modeRequirement}
-
-请直接输出提炼后的最终提示词文本，字数控制在 160~240 字之间，严禁包含任何前缀客套、说明或额外markdown代码块：`;
+  const systemPrompt = renderProducerPrompt(projectDir, templateId, {
+    project_title: projTitle,
+    project_summary: projSummary ? `核心叙事概要：${projSummary}` : '',
+  });
 
   const userMessage = `【镜头旁白台词】：${narrationText}
 【关键词参考】：${keywords.length ? keywords.join('、') : '无'}
@@ -1813,6 +2005,94 @@ function registerGeneratedAsset(curPaths, projectId, sceneId, relPath, type = 'v
   return assetId;
 }
 
+async function callSearchKeywordExtractor(cfg, narrationText, projectContext = {}, chapterRef = '', projectDir = '', excludeKeyword = '') {
+  const apiKey = (cfg.apiKey || '').trim();
+  const baseUrl = (cfg.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
+  const model = (cfg.keywordModel || cfg.textModel || cfg.model || 'deepseek/deepseek-chat').trim();
+
+  if (!apiKey) {
+    throw new Error('未配置统一 API Key，请先在「AI 全流程模型调度中心」中填写 API Key');
+  }
+
+  const projTitle = projectContext.title || '深度知识纪录片';
+  const systemPrompt = renderProducerPrompt(projectDir, 'P1_keywords', {
+    project_title: projTitle,
+    chapter_ref: chapterRef || '',
+  });
+
+  const excludeLine = excludeKeyword
+    ? `\n【避开已用词】：请不要重复“${excludeKeyword}”，换一个同样贴合本句旁白的具体画面搜索词。`
+    : '';
+  const userMessage = `【视频主题】：${projTitle}${chapterRef ? `\n【所属章节】：${chapterRef}` : ''}
+【本镜头旁白】：${narrationText}${excludeLine}
+
+请直接输出 1 个唯一最佳纯中文搜索词（JSON 对象 {"keyword": "..."}）：`;
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(30000),
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+      'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+      'X-Title': 'WhyVideo Studio',
+    },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
+      temperature: excludeKeyword ? 0.55 : 0.25,
+      max_tokens: 120,
+    }),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`关键词提炼模型请求失败 (HTTP ${response.status}): ${errText.slice(0, 160)}`);
+  }
+
+  const resJson = await response.json();
+  const raw = resJson.choices?.[0]?.message?.content?.trim() || '';
+  if (!raw) {
+    throw new Error('模型未返回有效关键词内容');
+  }
+
+  let candidates = [];
+  const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+  try {
+    const objOrArrMatch = cleaned.match(/[\[{][\s\S]*[\]}]/);
+    const jsonVal = JSON.parse(objOrArrMatch ? objOrArrMatch[0] : cleaned);
+    if (typeof jsonVal === 'string') {
+      candidates = [jsonVal];
+    } else if (jsonVal && typeof jsonVal.keyword === 'string') {
+      candidates = [jsonVal.keyword];
+    } else if (Array.isArray(jsonVal)) {
+      candidates = jsonVal;
+    } else if (Array.isArray(jsonVal?.keywords)) {
+      candidates = jsonVal.keywords;
+    }
+  } catch (e) {
+    candidates = cleaned.split(/[\n,，、；;]+/);
+  }
+
+  const cleanList = Array.from(
+    new Set(
+      candidates
+        .map((item) => String(item || '').replace(/^[\s\-*•\d.、"'「」【】\[\]{}:：]+|[\s"'「」【】\[\]{}，。！？,.!?]+$/g, '').trim())
+        .filter((kw) => kw.length >= 2 && kw.length <= 24)
+    )
+  );
+
+  const keyword = cleanList[0] || '';
+  if (!keyword) {
+    throw new Error('未能从模型输出中解析出有效中文搜索词');
+  }
+
+  return { keyword, keywords: [keyword], usedModel: model };
+}
+
 function normalizePromptConfig(cfg = {}) {
   let vModel = cfg.videoModel || 'minimax/hailuo-3-max';
   if (vModel === 'minimax/video-01' || vModel === 'minimax/hailuo' || vModel === 'video-01') {
@@ -1827,6 +2107,7 @@ function normalizePromptConfig(cfg = {}) {
     baseUrl: cfg.baseUrl || 'https://openrouter.ai/api/v1',
     apiKey: cfg.apiKey || '',
     textModel: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
+    keywordModel: cfg.keywordModel || cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
     videoModel: vModel,
     imageModel: iModel,
     bgmModel: cfg.bgmModel || 'deepseek/deepseek-chat',
@@ -2366,6 +2647,86 @@ function getFinalScriptRawText(finalScript) {
   return '';
 }
 
+function parseMarkdownToScriptSegments(mdText, fallbackTitle = '完整正文') {
+  const lines = String(mdText || '').replace(/\r\n/g, '\n').split('\n');
+  let opening = '';
+  let ending = '';
+  const chapters = [];
+  let currentType = null;
+  let currentTitle = '';
+  let currentNum = 0;
+  let buf = [];
+
+  const flush = () => {
+    const body = buf
+      .join('\n')
+      .replace(/^---\s*$/gm, '')
+      .trim();
+    buf = [];
+    if (!body) return;
+    if (currentType === 'opening') {
+      opening = opening ? `${opening}\n\n${body}` : body;
+    } else if (currentType === 'ending') {
+      ending = ending ? `${ending}\n\n${body}` : body;
+    } else if (currentType === 'chapter') {
+      chapters.push({
+        chapter_number: currentNum || chapters.length + 1,
+        chapter_title: currentTitle || `第${chapters.length + 1}章`,
+        narration_text: body,
+      });
+    }
+  };
+
+  for (const line of lines) {
+    const h2 = line.match(/^##\s+(.+)$/);
+    if (h2) {
+      flush();
+      const rawHeader = h2[1].trim();
+      const cleanHeader = rawHeader.replace(/^【([^】]+)】\s*/, '$1 ').trim();
+      if (/^(?:开篇|开场|导[言读]|引言)/.test(cleanHeader)) {
+        currentType = 'opening';
+        currentTitle = cleanHeader;
+      } else if (/^(?:结[尾局]|终局|全片终局|全片唯一|终局收尾)/.test(cleanHeader)) {
+        currentType = 'ending';
+        currentTitle = cleanHeader;
+      } else {
+        currentType = 'chapter';
+        currentNum = chapters.length + 1;
+        const numMatch = cleanHeader.match(/第\s*(\d+)\s*章/);
+        if (numMatch) currentNum = Number(numMatch[1]);
+        currentTitle = rawHeader.replace(/^【[^】]+】\s*/, '').trim() || cleanHeader;
+      }
+      continue;
+    }
+    if (!currentType && /^#\s+/.test(line)) {
+      continue; // skip top-level document title
+    }
+    if (currentType) {
+      buf.push(line);
+    } else if (line.trim() && !/^---\s*$/.test(line.trim())) {
+      buf.push(line);
+    }
+  }
+  flush();
+
+  if (!opening && !ending && chapters.length === 0) {
+    const trimmed = String(mdText || '').trim();
+    if (trimmed) {
+      chapters.push({
+        chapter_number: 1,
+        chapter_title: fallbackTitle,
+        narration_text: trimmed,
+      });
+    }
+  }
+
+  return {
+    ...(opening ? { opening } : {}),
+    chapters,
+    ...(ending ? { ending } : {}),
+  };
+}
+
 function getWriterProjectData(projectId) {
   const paths = getPaths(projectId);
   let brief = null;
@@ -2453,6 +2814,25 @@ function getWriterProjectData(projectId) {
             },
           ],
         };
+      } else {
+        const mdCandidates = [
+          finalScript.final_script_markdown_path,
+          path.join(paths.dataDir, 'narration-script.md'),
+        ].filter(Boolean);
+        for (const mdPath of mdCandidates) {
+          if (fs.existsSync(mdPath)) {
+            try {
+              const mdText = fs.readFileSync(mdPath, 'utf8');
+              if (mdText.trim()) {
+                finalScript.script_segments = parseMarkdownToScriptSegments(
+                  mdText,
+                  finalScript.title || '完整正文'
+                );
+                break;
+              }
+            } catch (e) {}
+          }
+        }
       }
     }
     const rawText = getFinalScriptRawText(finalScript);
@@ -3111,7 +3491,12 @@ async function runProjectRenderJob(job) {
   try {
     if (!fs.existsSync(curPaths.manifestPath)) throw new Error('工程缺少镜头清单，无法渲染');
     const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
-    syncCaptions(manifest, curPaths.captionsPath);
+    const before = JSON.stringify((manifest.scenes || []).map((s) => [s.start_ms, s.end_ms]));
+    recalculateTimelines(manifest, job.projectId);
+    if (JSON.stringify((manifest.scenes || []).map((s) => [s.start_ms, s.end_ms])) !== before) {
+      fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    }
+    syncCaptions(manifest, curPaths.captionsPath, job.projectId);
     await new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [
         'packages/qc-tools/generate-render-props.mjs', '--project', job.projectId,
@@ -3137,10 +3522,94 @@ async function runProjectRenderJob(job) {
   }
 }
 
+/** 把长篇文案按句末/逗号标点安全拆分为适合 TTS 单次请求的片段 */
+function splitScriptForTts(fullText, maxChars = 1200) {
+  const cleaned = String(fullText || '').trim();
+  if (!cleaned) return [];
+  if (cleaned.length <= maxChars) return [cleaned];
+
+  const pushHardChunks = (piece, out) => {
+    for (let i = 0; i < piece.length; i += maxChars) {
+      const sub = piece.slice(i, i + maxChars).trim();
+      if (sub) out.push(sub);
+    }
+  };
+
+  // 先按句末标点切分，遇到过长单句再按逗号二次切分
+  const rawSentences = cleaned.split(/(?<=[。！？!?；;\n])/);
+  const units = [];
+  for (const s of rawSentences) {
+    const t = s.trim();
+    if (!t) continue;
+    if (t.length <= maxChars) {
+      units.push(t);
+    } else {
+      for (const c of t.split(/(?<=[，,、：:])/)) {
+        const ct = c.trim();
+        if (!ct) continue;
+        if (ct.length <= maxChars) units.push(ct);
+        else pushHardChunks(ct, units);
+      }
+    }
+  }
+
+  const chunks = [];
+  let buf = '';
+  for (const u of units) {
+    if (buf && buf.length + u.length > maxChars) {
+      chunks.push(buf);
+      buf = u;
+    } else {
+      buf += u;
+    }
+  }
+  if (buf) chunks.push(buf);
+  return chunks;
+}
+
+/** 成片旁白落盘后：自动对齐逐字时间轴、重算镜头时长与字幕并同步 render-props.json */
+async function finalizeProjectNarration(job, curPaths, wavPath, fullText, signal) {
+  const narrationPath = path.join(curPaths.audioDir, 'narration.wav');
+  if (path.resolve(wavPath) !== path.resolve(narrationPath)) {
+    fs.copyFileSync(wavPath, narrationPath);
+  }
+  const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+  manifest.audio_file = 'audio/narration.wav';
+
+  job.voiceboxStatus = 'aligning_timing';
+  job.progressText = '正在对齐配音逐字时间轴 (Whisper)…';
+  try {
+    const scriptForAlign = scenesText(manifest.scenes || []) || fullText;
+    const timing = await alignNarration({
+      audioPath: narrationPath,
+      scriptText: scriptForAlign,
+      signal,
+    });
+    fs.writeFileSync(timingPath(curPaths.dataDir), JSON.stringify(timing, null, 2), 'utf8');
+    recalculateTimelines(manifest, job.projectId);
+    syncTableToManifest(manifest);
+    if (timing.warning) job.timingWarning = timing.warning;
+  } catch (alignErr) {
+    if (signal?.aborted) throw alignErr;
+    job.timingWarning = alignErr.message;
+    console.warn('[配音时间轴对齐跳过]:', alignErr.message);
+  }
+
+  fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+  recompileProject(job.projectId);
+  const compiledProps = JSON.parse(fs.readFileSync(curPaths.propsPath, 'utf8'));
+  if (compiledProps.audio_track?.src !== 'audio/narration.wav') {
+    throw new Error('旁白已保存，但渲染参数未同步，请重新保存工程');
+  }
+  return narrationPath;
+}
+
 async function runVoiceboxJob(job, text) {
   const curPaths = getPaths(job.projectId);
   const fileName = 'voicebox_' + randomUUID() + '.wav';
   const outputPath = path.join(curPaths.audioDir, fileName);
+  const controller = new AbortController();
+  voiceJobControllers.set(job.projectId, controller);
   try {
     fs.mkdirSync(curPaths.audioDir, { recursive: true });
     const result = await synthesizeWithVoicebox({
@@ -3148,32 +3617,123 @@ async function runVoiceboxJob(job, text) {
       profileId: job.profileId || undefined,
       outputPath,
       maxWaitMs: 2 * 60 * 60 * 1000,
+      loadingTimeoutMs: 180000,
+      signal: controller.signal,
       onProgress: (status, generationId) => {
         job.status = 'generating';
         job.voiceboxStatus = status;
         job.generationId = generationId;
+        job.progressText = status === 'loading_model'
+          ? 'Voicebox 正在加载模型 (loading_model)…'
+          : `Voicebox 正在生成音频 (${status})…`;
       },
     });
     if (job.useAsNarration) {
-      const narrationPath = path.join(curPaths.audioDir, 'narration.wav');
-      fs.copyFileSync(outputPath, narrationPath);
-      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
-      manifest.audio_file = 'audio/narration.wav';
-      fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-      recompileProject(job.projectId);
-      const compiledProps = JSON.parse(fs.readFileSync(curPaths.propsPath, 'utf8'));
-      if (compiledProps.audio_track?.src !== 'audio/narration.wav') {
-        throw new Error('旁白已保存，但渲染参数未同步，请重新保存工程');
-      }
+      await finalizeProjectNarration(job, curPaths, outputPath, text, controller.signal);
     }
     job.status = 'completed';
-    job.audioUrl = '/public/' + job.projectId + '/audio/' + fileName;
+    job.progressText = job.useAsNarration ? '全片旁白生成与逐字时间轴已同步' : '配音已完成';
+    job.audioUrl = '/public/' + job.projectId + '/audio/' + fileName + '?t=' + Date.now();
     job.duration = result.duration;
     job.profileName = result.profileName;
   } catch (error) {
-    job.status = 'failed';
-    job.error = error.message;
+    if (controller.signal.aborted) {
+      job.status = 'cancelled';
+      job.error = '已手动取消配音任务';
+    } else {
+      job.status = 'failed';
+      job.error = error.message;
+    }
   } finally {
+    voiceJobControllers.delete(job.projectId);
+    job.finishedAt = new Date().toISOString();
+  }
+}
+
+/** ElevenLabs 全片旁白分段合成任务：分段拉取 MP3 -> ffmpeg 拼接转成 narration.wav -> 对齐时间轴 */
+async function runElevenlabsFullJob(job, { fullText, voiceId, modelId, stability, similarityBoost, languageCode, apiKey }) {
+  const curPaths = getPaths(job.projectId);
+  const controller = new AbortController();
+  voiceJobControllers.set(job.projectId, controller);
+  let tmpDir = null;
+  try {
+    fs.mkdirSync(curPaths.audioDir, { recursive: true });
+    const chunks = splitScriptForTts(fullText, 1200);
+    if (!chunks.length) throw new Error('当前工程分镜文案为空，无法生成全片旁白');
+
+    tmpDir = fs.mkdtempSync(path.join(curPaths.audioDir, '.el-tmp-'));
+    const segNames = [];
+    for (let i = 0; i < chunks.length; i++) {
+      if (controller.signal.aborted) throw new Error('已手动取消配音任务');
+      job.status = 'generating';
+      job.progressText = `ElevenLabs 正在生成全片旁白（第 ${i + 1}/${chunks.length} 段）…`;
+
+      const ttsPayload = buildElevenlabsTtsPayload({
+        text: chunks[i],
+        modelId,
+        stability,
+        similarityBoost,
+        languageCode,
+      });
+
+      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+        method: 'POST',
+        headers: {
+          Accept: 'audio/mpeg',
+          'Content-Type': 'application/json',
+          'xi-api-key': apiKey,
+        },
+        body: JSON.stringify(ttsPayload),
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        throw new Error(`ElevenLabs 第 ${i + 1}/${chunks.length} 段合成失败 (${response.status}): ${errText}`);
+      }
+
+      const buf = Buffer.from(await response.arrayBuffer());
+      const segName = `seg_${String(i + 1).padStart(3, '0')}.mp3`;
+      fs.writeFileSync(path.join(tmpDir, segName), buf);
+      segNames.push(segName);
+    }
+
+    job.progressText = '正在拼接音频并转为成片标准 WAV…';
+    const narrationPath = path.join(curPaths.audioDir, 'narration.wav');
+    let ffmpegArgs;
+    if (segNames.length === 1) {
+      ffmpegArgs = ['-y', '-i', segNames[0], '-ar', '44100', '-ac', '1', '-c:a', 'pcm_s16le', narrationPath];
+    } else {
+      const listTxt = segNames.map((n) => `file '${n}'`).join('\n');
+      fs.writeFileSync(path.join(tmpDir, 'list.txt'), listTxt, 'utf8');
+      ffmpegArgs = ['-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-ar', '44100', '-ac', '1', '-c:a', 'pcm_s16le', narrationPath];
+    }
+
+    const ff = spawnSync('ffmpeg', ffmpegArgs, { cwd: tmpDir, encoding: 'utf8' });
+    if (ff.status !== 0) {
+      throw new Error(`ffmpeg 拼接转换旁白失败: ${(ff.stderr || '').slice(-400)}`);
+    }
+
+    await finalizeProjectNarration(job, curPaths, narrationPath, fullText, controller.signal);
+
+    job.status = 'completed';
+    job.progressText = `ElevenLabs 全片旁白已生成并对齐时间轴（共 ${chunks.length} 段）`;
+    job.audioUrl = `/public/${job.projectId}/audio/narration.wav?t=${Date.now()}`;
+    const durMs = probeDurationMs(narrationPath);
+    job.duration = durMs ? Number((durMs / 1000).toFixed(1)) : null;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      job.status = 'cancelled';
+      job.error = '已手动取消配音任务';
+    } else {
+      job.status = 'failed';
+      job.error = error.message;
+    }
+  } finally {
+    if (tmpDir) {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
+    voiceJobControllers.delete(job.projectId);
     job.finishedAt = new Date().toISOString();
   }
 }
@@ -3231,6 +3791,86 @@ const server = http.createServer(async (req, res) => {
       const job = voiceJobs.get(queryProject) || { projectId: queryProject, status: 'idle' };
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: true, job }));
+    }
+
+    if (req.method === 'POST' && pathname === '/api/voicebox/cancel') {
+      const body = await readBody(req).catch(() => ({}));
+      const projectId = body.projectId || queryProject;
+      projectRenderPaths(projectId);
+      const controller = voiceJobControllers.get(projectId);
+      const job = voiceJobs.get(projectId);
+      if (controller) controller.abort();
+      if (job && ['queued', 'generating'].includes(job.status)) {
+        job.status = 'cancelled';
+        job.error = '已手动取消配音任务';
+        job.finishedAt = new Date().toISOString();
+      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, job: job || { projectId, status: 'idle' } }));
+    }
+
+    if (req.method === 'POST' && pathname === '/api/elevenlabs/voices') {
+      const body = await readBody(req).catch(() => ({}));
+      const effectiveKey = String(body.apiKey || '').trim() || process.env.ELEVENLABS_API_KEY;
+      if (!effectiveKey) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '请先输入 ElevenLabs API Key（或在根目录 .env 中写入 ELEVENLABS_API_KEY）' }));
+      }
+
+      const categoryRank = { cloned: 0, professional: 1, generated: 2, premade: 4 };
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      try {
+        const response = await fetch('https://api.elevenlabs.io/v1/voices', {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            'xi-api-key': effectiveKey,
+          },
+          signal: controller.signal,
+        });
+        const rawText = await response.text();
+        let parsed = null;
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {}
+
+        if (!response.ok) {
+          const detailMsg = parsed?.detail?.message || parsed?.detail || parsed?.error || rawText || `HTTP ${response.status}`;
+          res.writeHead(response.status >= 400 && response.status < 600 ? response.status : 502, {
+            'Content-Type': 'application/json; charset=utf-8',
+          });
+          return res.end(JSON.stringify({ ok: false, error: `拉取 ElevenLabs 音色失败: ${detailMsg}` }));
+        }
+
+        const rawVoices = Array.isArray(parsed?.voices) ? parsed.voices : [];
+        const voices = rawVoices
+          .map((v) => ({
+            voice_id: String(v.voice_id || ''),
+            name: String(v.name || '未命名音色'),
+            category: String(v.category || 'other').toLowerCase(),
+            labels: v.labels && typeof v.labels === 'object' ? v.labels : {},
+            preview_url: v.preview_url ? String(v.preview_url) : '',
+            description: v.description ? String(v.description) : '',
+          }))
+          .filter((v) => v.voice_id)
+          .sort((a, b) => {
+            const ra = Object.prototype.hasOwnProperty.call(categoryRank, a.category) ? categoryRank[a.category] : 3;
+            const rb = Object.prototype.hasOwnProperty.call(categoryRank, b.category) ? categoryRank[b.category] : 3;
+            if (ra !== rb) return ra - rb;
+            return a.name.localeCompare(b.name, 'zh-CN');
+          });
+
+        const customCount = voices.filter((v) => v.category !== 'premade').length;
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: true, voices, customCount, totalCount: voices.length }));
+      } catch (err) {
+        const isTimeout = err?.name === 'AbortError';
+        res.writeHead(isTimeout ? 504 : 502, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: isTimeout ? '连接 ElevenLabs 超时（15s），请检查网络或代理' : `拉取 ElevenLabs 音色异常: ${err.message}` }));
+      } finally {
+        clearTimeout(timeoutId);
+      }
     }
 
     // 0. 工程列表 API
@@ -3481,6 +4121,29 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname === '/api/writer/prompts/reset') {
       const body = await readBody(req);
       const resetRes = resetProjectWriterPromptPreset(paths.projectDir, queryProject, body.template_id || null);
+      res.writeHead(resetRes.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(resetRes));
+    }
+
+    // 0.741 获取视觉分镜台提示词模板与视觉风格预设（按当前工程独立生效）
+    if (req.method === 'GET' && pathname === '/api/producer/prompts') {
+      const state = getProducerPromptsState(paths.projectDir, queryProject);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(state));
+    }
+
+    // 0.742 保存视觉分镜台自定义提示词模板（仅对当前工程生效）
+    if (req.method === 'POST' && pathname === '/api/producer/prompts/save') {
+      const body = await readBody(req);
+      const saved = saveProjectProducerPromptPreset(paths.projectDir, queryProject, body);
+      res.writeHead(saved.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(saved));
+    }
+
+    // 0.743 重置视觉分镜台提示词模板（支持单阶段或全部恢复出厂默认）
+    if (req.method === 'POST' && pathname === '/api/producer/prompts/reset') {
+      const body = await readBody(req);
+      const resetRes = resetProjectProducerPromptPreset(paths.projectDir, queryProject, body.template_id || null);
       res.writeHead(resetRes.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify(resetRes));
     }
@@ -3831,7 +4494,7 @@ const server = http.createServer(async (req, res) => {
         }));
       }
       finalScript.project_id = queryProject;
-      saveWriterProjectData(queryProject, 'finalScript', finalScript);
+      // 统稿结果先返回供审阅；只有用户确认后才通过保存接口写入。
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: true, finalScript, usedFallback: useDraftMerge }));
     }
@@ -4042,6 +4705,8 @@ const server = http.createServer(async (req, res) => {
 
       const hasVideo = fs.existsSync(paths.videoPath);
       const videoUrl = hasVideo ? `/output/${queryProject}/final_video_1080p.mp4` : null;
+      const bgmCfg = loadBgmConfig(paths.projectDir, paths.publicDir);
+      const selectedBgmTrack = bgmCfg.tracks.find((t) => t.track_id === bgmCfg.selected_track_id) || null;
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(
@@ -4054,6 +4719,12 @@ const server = http.createServer(async (req, res) => {
           videoUrl,
           audioUrl: audioFile,
           elevenlabsKeyConfigured: Boolean(process.env.ELEVENLABS_API_KEY),
+          timingSummary: buildProjectTimingSummary(queryProject, manifest),
+          bgmSummary: {
+            enabled: bgmCfg.enabled,
+            trackTitle: selectedBgmTrack?.title || null,
+            tracksCount: bgmCfg.tracks.length,
+          },
         })
       );
     }
@@ -4081,7 +4752,7 @@ const server = http.createServer(async (req, res) => {
         );
       }
       if (body.manifest) {
-        recalculateTimelines(body.manifest);
+        recalculateTimelines(body.manifest, targetProject);
         syncTableToManifest(body.manifest);
         fs.writeFileSync(
           curPaths.manifestPath,
@@ -4092,13 +4763,19 @@ const server = http.createServer(async (req, res) => {
       recompileProject(targetProject);
       const updatedManifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: true, manifest: updatedManifest }));
+      return res.end(
+        JSON.stringify({
+          ok: true,
+          manifest: updatedManifest,
+          timingSummary: buildProjectTimingSummary(targetProject, updatedManifest),
+        })
+      );
     }
 
-    // 3. ✂️ 画面切分 (Split Shot)
+    // 3. ✂️ 画面切分 (Split Shot / 在指定字前加换画面点)
     if (req.method === 'POST' && pathname === '/api/split-shot') {
       const body = await readBody(req);
-      const { sceneIndex, splitCharIndex, projectId } = body;
+      const { sceneIndex, splitCharIndex, splitSpokenOffset, projectId } = body;
       const targetProject = projectId || queryProject;
       const curPaths = getPaths(targetProject);
 
@@ -4111,9 +4788,22 @@ const server = http.createServer(async (req, res) => {
         const fullText = original.narration_text || '';
 
         let splitPos = splitCharIndex;
+        if (typeof splitSpokenOffset === 'number' && splitSpokenOffset > 0) {
+          let cnt = 0;
+          for (let i = 0; i < fullText.length; i++) {
+            if (isSpoken(fullText[i])) {
+              if (cnt === splitSpokenOffset) {
+                splitPos = i;
+                break;
+              }
+              cnt++;
+            }
+          }
+        }
         if (typeof splitPos !== 'number' || splitPos <= 0 || splitPos >= fullText.length) {
-          const matchComma = fullText.slice(10).search(/[，,；;。]/);
-          splitPos = matchComma !== -1 ? 10 + matchComma + 1 : Math.floor(fullText.length / 2);
+          const offset = fullText.length > 12 ? 8 : 2;
+          const matchComma = fullText.slice(offset).search(/[，,；;。！？!?]/);
+          splitPos = matchComma !== -1 ? offset + matchComma + 1 : Math.floor(fullText.length / 2);
         }
 
         const text1 = fullText.slice(0, splitPos).trim();
@@ -4121,8 +4811,9 @@ const server = http.createServer(async (req, res) => {
 
         if (text1 && text2) {
           const ratio = text1.length / (text1.length + text2.length);
-          const dur1 = Math.max(3500, Math.round(original.duration_ms * ratio));
-          const dur2 = Math.max(3500, original.duration_ms - dur1);
+          const origDur = original.duration_ms || 5000;
+          const dur1 = Math.max(1500, Math.round(origDur * ratio));
+          const dur2 = Math.max(1500, origDur - dur1);
 
           original.narration_text = text1;
           original.duration_ms = dur1;
@@ -4133,6 +4824,7 @@ const server = http.createServer(async (req, res) => {
           const newShot = JSON.parse(JSON.stringify(original));
           newShot.narration_text = text2;
           newShot.duration_ms = dur2;
+          delete newShot.cut_offset_ms;
           newShot.ppt_slide_spec = {
             theme_title: text2.slice(0, 10),
             subtitle: text2.slice(0, 24),
@@ -4142,22 +4834,31 @@ const server = http.createServer(async (req, res) => {
           newShot.shared_asset_with_prev = false;
 
           scenes.splice(idx + 1, 0, newShot);
-          recalculateTimelines(manifest);
+          recalculateTimelines(manifest, targetProject);
           syncTableToManifest(manifest);
 
           fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
           recompileProject(targetProject);
 
+          const actualDur1 = (scenes[idx].duration_ms || dur1) / 1000;
+          const actualDur2 = (scenes[idx + 1].duration_ms || dur2) / 1000;
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          return res.end(JSON.stringify({ ok: true, manifest, message: `成功切分为两个镜头：${(dur1/1000).toFixed(1)}s 和 ${(dur2/1000).toFixed(1)}s` }));
+          return res.end(
+            JSON.stringify({
+              ok: true,
+              manifest,
+              timingSummary: buildProjectTimingSummary(targetProject, manifest),
+              message: `成功新增换画面点：${actualDur1.toFixed(1)}s 和 ${actualDur2.toFixed(1)}s`,
+            })
+          );
         }
       }
 
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: '切分失败：未找到有效切分点' }));
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '切分失败：未找到有效切分点' }));
     }
 
-    // 4. 🔗 画面合并 (Merge Shot with Next)
+    // 4. 🔗 画面合并 (Merge Shot with Next / 删掉两个画面之间的切点)
     if (req.method === 'POST' && pathname === '/api/merge-shot') {
       const body = await readBody(req);
       const { sceneIndex, projectId } = body;
@@ -4172,7 +4873,10 @@ const server = http.createServer(async (req, res) => {
         const s1 = scenes[idx];
         const s2 = scenes[idx + 1];
 
-        s1.narration_text = `${s1.narration_text} ${s2.narration_text}`.trim();
+        const t1 = String(s1.narration_text || '').trim();
+        const t2 = String(s2.narration_text || '').trim();
+        const sep = /[A-Za-z0-9]$/.test(t1) && /^[A-Za-z0-9]/.test(t2) ? ' ' : '';
+        s1.narration_text = `${t1}${sep}${t2}`.trim();
         s1.duration_ms = (s1.duration_ms || 5000) + (s2.duration_ms || 5000);
         s1.content_keywords = Array.from(new Set([...(s1.content_keywords || []), ...(s2.content_keywords || [])]));
 
@@ -4185,18 +4889,296 @@ const server = http.createServer(async (req, res) => {
         }
 
         scenes.splice(idx + 1, 1);
-        recalculateTimelines(manifest);
+        recalculateTimelines(manifest, targetProject);
         syncTableToManifest(manifest);
 
         fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
         recompileProject(targetProject);
 
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: true, manifest, message: `成功合并两个镜头，总时长为 ${(s1.duration_ms/1000).toFixed(1)}s` }));
+        return res.end(
+          JSON.stringify({
+            ok: true,
+            manifest,
+            timingSummary: buildProjectTimingSummary(targetProject, manifest),
+            message: `成功合并两个镜头，总时长为 ${((s1.duration_ms || 0) / 1000).toFixed(1)}s`,
+          })
+        );
       }
 
-      res.writeHead(400, { 'Content-Type': 'application/json' });
-      return res.end(JSON.stringify({ error: '合并失败：下一镜头不存在' }));
+      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '合并失败：下一镜头不存在' }));
+    }
+
+    // 4.0.1 🎯 对齐配音逐字时间轴 (Whisper / 停顿对齐)
+    if (req.method === 'POST' && pathname === '/api/align-timing') {
+      const body = await readBody(req).catch(() => ({}));
+      const targetProject = body.projectId || queryProject;
+      const curPaths = getPaths(targetProject);
+
+      if (!fs.existsSync(curPaths.manifestPath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: `工程 ${targetProject} 缺少镜头清单` }));
+      }
+      if (alignJobs.get(targetProject)) {
+        res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '当前工程正在对齐配音时间轴，请稍等片刻' }));
+      }
+
+      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      const audioPath = findProjectAudioPath(curPaths, manifest);
+      if (!audioPath) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '当前工程还没有可用的配音音频，请先生成或上传配音' }));
+      }
+      const scriptText = scenesText(manifest.scenes || []);
+      if (!scriptText.trim()) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '镜头文案为空，无法对齐时间轴' }));
+      }
+
+      alignJobs.set(targetProject, true);
+      try {
+        const timing = await alignNarration({ audioPath, scriptText, method: body.method || 'auto' });
+        fs.writeFileSync(timingPath(curPaths.dataDir), JSON.stringify(timing, null, 2), 'utf8');
+        manifest.audio_file = path.relative(curPaths.publicDir, audioPath).split(path.sep).join('/');
+        recalculateTimelines(manifest, targetProject);
+        syncTableToManifest(manifest);
+        fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+        recompileProject(targetProject);
+
+        const timingSummary = buildProjectTimingSummary(targetProject, manifest);
+        const methodLabel = timing.method === 'whisper' ? 'Whisper 逐字听写对齐' : '音频停顿与标点对齐';
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(
+          JSON.stringify({
+            ok: true,
+            manifest,
+            timingSummary,
+            message: `已完成${methodLabel}（音频 ${(timing.audio_duration_ms / 1000).toFixed(1)}s，全片 ${manifest.total_scenes} 镜）${timing.warning ? ' · 注意：' + timing.warning : ''}`,
+          })
+        );
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '时间轴对齐失败: ' + err.message }));
+      } finally {
+        alignJobs.delete(targetProject);
+      }
+    }
+
+    // 4.0.2 ⚡ 按关键词与停顿智能排切点（支持句中换画面 + 长镜头自动补切点）
+    if (req.method === 'POST' && pathname === '/api/auto-plan-cuts') {
+      const body = await readBody(req).catch(() => ({}));
+      const targetProject = body.projectId || queryProject;
+      const curPaths = getPaths(targetProject);
+
+      if (!fs.existsSync(curPaths.manifestPath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: `工程 ${targetProject} 缺少镜头清单` }));
+      }
+      if (alignJobs.get(targetProject)) {
+        res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '当前工程正在对齐配音时间轴，请稍后再试' }));
+      }
+
+      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      const scenes = manifest.scenes || [];
+      if (scenes.length < 2) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '镜头数不足 2 个，无需重排切点' }));
+      }
+
+      try {
+        let timing = getProjectTiming(targetProject);
+        const text = scenesText(scenes);
+        if (!timing || buildTimeLookup(timing, text).stale) {
+          const audioPath = findProjectAudioPath(curPaths, manifest);
+          if (!audioPath) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: '请先生成或上传配音音频，再按声音时间轴排切点' }));
+          }
+          alignJobs.set(targetProject, true);
+          try {
+            timing = await alignNarration({ audioPath, scriptText: text });
+            fs.writeFileSync(timingPath(curPaths.dataDir), JSON.stringify(timing, null, 2), 'utf8');
+            manifest.audio_file = path.relative(curPaths.publicDir, audioPath).split(path.sep).join('/');
+          } finally {
+            alignJobs.delete(targetProject);
+          }
+        }
+
+        let keywordsByScene = {};
+        let aiKeywordsUsed = false;
+        if (body.useAiKeywords !== false) {
+          const kwRes = await extractVisualKeywordsMap(manifest, curPaths);
+          keywordsByScene = kwRes.map;
+          aiKeywordsUsed = kwRes.aiUsed;
+        }
+
+        const minShotMs = Number(body.minShotMs) || 1500;
+        const maxShotMs = Number(body.maxShotMs) || 8000;
+        const plan = planCuts(manifest, timing, { keywordsByScene, minShotMs, maxShotMs });
+
+        resliceSceneTexts(scenes, plan.newRanges);
+
+        let splitCount = 0;
+        if (body.autoSplitLongShots !== false && plan.splitSuggestions.length > 0) {
+          const sortedSplits = [...plan.splitSuggestions].sort((a, b) => b.split_char - a.split_char);
+          for (const sp of sortedSplits) {
+            const addedIdx = splitAtSpokenIndex(scenes, sp.split_char);
+            if (addedIdx >= 0) splitCount++;
+          }
+        }
+
+        for (const s of scenes) {
+          if (s.ppt_slide_spec) {
+            s.ppt_slide_spec.subtitle = (s.narration_text || '').slice(0, 24);
+          }
+        }
+
+        recalculateTimelines(manifest, targetProject);
+        syncTableToManifest(manifest);
+        fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+        recompileProject(targetProject);
+
+        const timingSummary = buildProjectTimingSummary(targetProject, manifest);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(
+          JSON.stringify({
+            ok: true,
+            manifest,
+            timingSummary,
+            changes: plan.changes,
+            splitCount,
+            stats: timingSummary.rhythm || plan.stats,
+            aiKeywordsUsed,
+            message: `智能排切完成：调整了 ${plan.changes.length} 处换画面点${splitCount ? `，补充切分 ${splitCount} 个长镜头` : ''}${aiKeywordsUsed ? '（已启用 AI 画面关键词）' : '（本地关键词/停顿规则）'}`,
+          })
+        );
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '智能排切失败: ' + err.message }));
+      }
+    }
+
+    // 4.0.3 ⏪⏩ 挪动换画面点（在相邻两镜之间移动切点，或微调画面提前量）
+    if (req.method === 'POST' && pathname === '/api/move-cut') {
+      const body = await readBody(req);
+      const targetProject = body.projectId || queryProject;
+      const curPaths = getPaths(targetProject);
+
+      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      const scenes = manifest.scenes || [];
+      const idx = typeof body.sceneIndex === 'number' ? body.sceneIndex : scenes.findIndex((s) => s.scene_id === body.sceneId);
+
+      if (idx < 0 || idx >= scenes.length) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '无效的镜头索引' }));
+      }
+
+      const mode = body.mode || 'move_between';
+      let actionMsg = '';
+
+      if (mode === 'offset') {
+        const clamped = Math.max(-1000, Math.min(1000, Math.round(Number(body.cutOffsetMs) || 0)));
+        scenes[idx].cut_offset_ms = clamped;
+        actionMsg = `${scenes[idx].scene_id} 画面提前量已调为 ${clamped}ms`;
+      } else {
+        if (idx <= 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '第 1 个镜头没有前一个切点可以挪动' }));
+        }
+        const sPrev = scenes[idx - 1];
+        const sCurr = scenes[idx];
+        const prevText = String(sPrev.narration_text || '');
+        const currText = String(sCurr.narration_text || '');
+        const { ranges } = sceneSpokenRanges(scenes);
+        const [pStart, pEnd] = ranges[idx - 1];
+        const [cStart, cEnd] = ranges[idx];
+
+        const rawPosToSpoken = (str, rawPos) => {
+          let cnt = 0;
+          const lim = Math.max(0, Math.min(str.length, rawPos));
+          for (let k = 0; k < lim; k++) if (isSpoken(str[k])) cnt++;
+          return cnt;
+        };
+
+        let targetJ = null;
+        if (typeof body.splitInPrevAtChar === 'number') {
+          const off = rawPosToSpoken(prevText, body.splitInPrevAtChar);
+          if (off <= 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: '至少保留上一镜头的第 1 个字，或者直接点「合并」' }));
+          }
+          targetJ = pStart + off;
+        } else if (typeof body.splitInCurrAtChar === 'number') {
+          const off = rawPosToSpoken(currText, body.splitInCurrAtChar);
+          if (cStart + off >= cEnd) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: '至少保留当前镜头的最后 1 个字' }));
+          }
+          targetJ = cStart + off;
+        } else if (body.step === 'earlier') {
+          const prevSpoken = pEnd - pStart;
+          if (prevSpoken <= 2) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: '上一镜头旁白已太短，不能再往前挪' }));
+          }
+          // 优先在上一镜尾部 3~14 字内找最近的停顿标点，找不到则往前拨半截（2~5字）实现句中提前切入
+          let chosenOff = null;
+          let sIdx = 0;
+          const candidates = [];
+          for (let k = 0; k < prevText.length; k++) {
+            if (isSpoken(prevText[k])) sIdx++;
+            else if (/[，,；;。！？!?、：:]/.test(prevText[k]) && sIdx >= 2 && prevSpoken - sIdx >= 2 && prevSpoken - sIdx <= 14) {
+              candidates.push(sIdx);
+            }
+          }
+          if (candidates.length) chosenOff = candidates[candidates.length - 1];
+          else chosenOff = Math.max(1, prevSpoken - Math.min(5, Math.max(2, Math.floor(prevSpoken / 2))));
+          targetJ = pStart + chosenOff;
+        } else if (body.step === 'later') {
+          const currSpoken = cEnd - cStart;
+          if (currSpoken <= 2) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: '当前镜头旁白已太短，不能再往后挪' }));
+          }
+          let chosenOff = null;
+          let sIdx = 0;
+          for (let k = 0; k < currText.length; k++) {
+            if (isSpoken(currText[k])) sIdx++;
+            else if (/[，,；;。！？!?、：:]/.test(currText[k]) && sIdx >= 2 && currSpoken - sIdx >= 2 && sIdx <= 14) {
+              chosenOff = sIdx;
+              break;
+            }
+          }
+          if (chosenOff === null) chosenOff = Math.min(currSpoken - 1, Math.min(5, Math.max(2, Math.floor(currSpoken / 2))));
+          targetJ = cStart + chosenOff;
+        }
+
+        if (targetJ === null || !moveCutTo(scenes, idx, targetJ)) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '无法移动到目标切点位置' }));
+        }
+        if (sPrev.ppt_slide_spec) sPrev.ppt_slide_spec.subtitle = (sPrev.narration_text || '').slice(0, 24);
+        if (sCurr.ppt_slide_spec) sCurr.ppt_slide_spec.subtitle = (sCurr.narration_text || '').slice(0, 24);
+        actionMsg = `已调整 ${sPrev.scene_id} / ${sCurr.scene_id} 的换画面位置`;
+      }
+
+      recalculateTimelines(manifest, targetProject);
+      syncTableToManifest(manifest);
+      fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+      recompileProject(targetProject);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(
+        JSON.stringify({
+          ok: true,
+          manifest,
+          timingSummary: buildProjectTimingSummary(targetProject, manifest),
+          message: actionMsg,
+        })
+      );
     }
 
     // 4.1 测试各平台 API 连接 (OpenRouter / SiliconFlow / Runway / Remotion)
@@ -4348,7 +5330,8 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' && pathname === '/api/test-tavily') {
       const body = await readBody(req);
       const curPaths = getPaths(body.projectId || queryProject);
-      const effectiveKey = String(body.apiKey || '').trim() || getWriterTavilyKey(curPaths.projectDir);
+      const rawKey = String(body.apiKey || '').trim();
+      const effectiveKey = (rawKey && !/^•+$/.test(rawKey)) ? rawKey : getWriterTavilyKey(curPaths.projectDir);
       if (!effectiveKey) {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         return res.end(JSON.stringify({ ok: false, error: '请先填入有效的 Tavily API Key' }));
@@ -4409,8 +5392,14 @@ const server = http.createServer(async (req, res) => {
           error: '未检测到本机哼哼猫桌面端 CLI (meowload)，请确认已安装并登录本机哼哼猫桌面端',
         }));
       }
-      const verRes = spawnSync(cliPath, ['--version'], { encoding: 'utf8', timeout: 5000 });
-      const verText = (verRes.stdout || verRes.stderr || '').trim().split('\n')[0] || '';
+      const verRes = spawnSync(cliPath, ['version'], { encoding: 'utf8', timeout: 5000 });
+      let verText = '';
+      try {
+        const parsed = JSON.parse((verRes.stdout || '').trim());
+        if (parsed?.version) verText = 'v' + parsed.version;
+      } catch (e) {
+        verText = (verRes.stdout || verRes.stderr || '').trim().split('\n')[0] || '';
+      }
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({
         ok: true,
@@ -4420,132 +5409,228 @@ const server = http.createServer(async (req, res) => {
       }));
     }
 
-    // 4.15 获取 OpenRouter 真实支持的最新模型列表
+    // 4.15 获取 OpenRouter / 当前网关真实支持的最新模型列表
     if (req.method === 'GET' && pathname === '/api/openrouter-models') {
+      const curPaths = getPaths(queryProject);
+      let savedCfg = {};
+      if (fs.existsSync(curPaths.promptConfigPath)) {
+        try { savedCfg = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8')) || {}; } catch (e) {}
+      }
+      const reqKey = String(url.searchParams.get('apiKey') || savedCfg.apiKey || process.env.OPENROUTER_API_KEY || '').trim();
+      const rawBaseUrl = String(url.searchParams.get('baseUrl') || savedCfg.baseUrl || 'https://openrouter.ai/api/v1').trim();
+      const cleanBase = (rawBaseUrl || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
+      const priorityPrefixes = ['deepseek/', 'google/', 'anthropic/', 'openai/', 'qwen/', 'meta-llama/', 'x-ai/', 'mistralai/'];
+      const rankOf = (id) => {
+        const idx = priorityPrefixes.findIndex((p) => String(id || '').startsWith(p));
+        return idx === -1 ? 99 : idx;
+      };
+      const normalizeAndSort = (rawItems, stripModelsPrefix = false) =>
+        (Array.isArray(rawItems) ? rawItems : [])
+          .map((m) => {
+            let id = String(m?.id || m?.name || '').trim();
+            if (stripModelsPrefix && id.startsWith('models/')) id = id.slice('models/'.length);
+            const rawName = String(m?.displayName || m?.name || id).trim();
+            const desc = String(m?.description || '').trim().slice(0, 80);
+            return {
+              id,
+              name: rawName || id,
+              description: desc,
+              context_length: m?.context_length || m?.inputTokenLimit || null,
+            };
+          })
+          .filter((m) => m.id)
+          .sort((a, b) => rankOf(a.id) - rankOf(b.id) || String(a.id).localeCompare(String(b.id)));
+
+      let lastErr = '';
+
+      // 若配置了非 OpenRouter 的自定义/官方 OpenAI 兼容网关且具备 Key，优先请求该网关 /models
+      if (!cleanBase.includes('openrouter.ai') && reqKey) {
+        try {
+          const gwRes = await fetch(`${cleanBase}/models`, {
+            signal: AbortSignal.timeout(15000),
+            headers: {
+              Authorization: `Bearer ${reqKey}`,
+              'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+              'X-Title': 'WhyVideo Studio',
+            },
+          });
+          if (gwRes.ok) {
+            const gwJson = await gwRes.json();
+            const rawList = gwJson.data || gwJson.models || [];
+            const list = normalizeAndSort(rawList, cleanBase.includes('googleapis.com'));
+            if (list.length > 0) {
+              res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+              return res.end(JSON.stringify({
+                ok: true,
+                source: 'live',
+                gateway: cleanBase.includes('googleapis.com') ? 'gemini' : 'custom',
+                count: list.length,
+                models: list,
+              }));
+            }
+          } else {
+            lastErr = `网关 HTTP ${gwRes.status}`;
+          }
+        } catch (e) {
+          lastErr = e.message;
+        }
+      }
+
+      // 默认拉取 OpenRouter 全量文本模型目录
       try {
         const headers = {
           'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
-          'X-Title': 'WhyVideo Studio'
+          'X-Title': 'WhyVideo Studio',
         };
-        const curPaths = getPaths(queryProject);
-        let savedKey = '';
-        if (fs.existsSync(curPaths.promptConfigPath)) {
-          try { savedKey = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8'))?.apiKey || ''; } catch (e) {}
-        }
-        const reqKey = String(urlObj.searchParams.get('apiKey') || savedKey || '').trim();
         if (reqKey && reqKey.startsWith('sk-or-')) {
           headers['Authorization'] = `Bearer ${reqKey}`;
         }
         const resModels = await fetch('https://openrouter.ai/api/v1/models', {
           signal: AbortSignal.timeout(15000),
-          headers
+          headers,
         });
         if (resModels.ok) {
           const mJson = await resModels.json();
-          const priorityPrefixes = ['deepseek/', 'google/', 'anthropic/', 'openai/', 'qwen/', 'meta-llama/', 'x-ai/', 'mistralai/'];
-          const rankOf = (id) => {
-            const idx = priorityPrefixes.findIndex((p) => String(id || '').startsWith(p));
-            return idx === -1 ? 99 : idx;
-          };
+          const list = normalizeAndSort(mJson.data || []);
+          if (list.length > 0) {
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({
+              ok: true,
+              source: 'live',
+              gateway: 'openrouter',
+              count: list.length,
+              models: list,
+            }));
+          }
+          lastErr = 'OpenRouter 返回空模型列表';
+        } else {
+          lastErr = `OpenRouter HTTP ${resModels.status}`;
+        }
+      } catch (e) {
+        lastErr = e.message;
+        console.error('Failed to fetch openrouter models:', e.message);
+      }
+
+      const fallbackModels = [
+        { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat' },
+        { id: 'google/gemini-2.5-flash', name: 'Google Gemini 2.5 Flash' },
+        { id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic Claude Sonnet 4.5' },
+        { id: 'openai/gpt-4o-mini', name: 'OpenAI GPT-4o Mini' },
+        { id: 'google/gemini-2.5-flash-image', name: 'Gemini 2.5 Flash Image' },
+      ];
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({
+        ok: true,
+        source: 'fallback',
+        gateway: 'fallback',
+        count: fallbackModels.length,
+        error: lastErr || '无法连接在线模型目录',
+        models: fallbackModels,
+      }));
+    }
+
+    // 4.16 获取 OpenRouter 原生支持的全部 AI 视频生成模型列表
+    if (req.method === 'GET' && pathname === '/api/openrouter-video-models') {
+      const curPaths = getPaths(queryProject);
+      let savedKey = '';
+      if (fs.existsSync(curPaths.promptConfigPath)) {
+        try { savedKey = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8'))?.apiKey || ''; } catch (e) {}
+      }
+      const reqKey = String(url.searchParams.get('apiKey') || savedKey || process.env.OPENROUTER_API_KEY || '').trim();
+      let lastErr = '';
+      try {
+        const headers = {
+          'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+          'X-Title': 'WhyVideo Studio',
+        };
+        if (reqKey && reqKey.startsWith('sk-or-')) {
+          headers['Authorization'] = `Bearer ${reqKey}`;
+        }
+        const resModels = await fetch('https://openrouter.ai/api/v1/videos/models', {
+          signal: AbortSignal.timeout(15000),
+          headers,
+        });
+        if (resModels.ok) {
+          const mJson = await resModels.json();
           const list = (mJson.data || [])
             .map((m) => ({
               id: m.id,
               name: m.name || m.id,
-              description: m.description ? m.description.slice(0, 80) : '',
-              context_length: m.context_length
+              description: m.description ? m.description.slice(0, 100) : '',
+              durations: m.supported_durations,
+              aspect_ratios: m.supported_aspect_ratios,
             }))
-            .sort((a, b) => rankOf(a.id) - rankOf(b.id) || String(a.id).localeCompare(String(b.id)));
+            .filter((m) => m.id)
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)));
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          return res.end(JSON.stringify({ ok: true, models: list }));
+          return res.end(JSON.stringify({ ok: true, source: 'live', count: list.length, models: list }));
         }
+        lastErr = `OpenRouter HTTP ${resModels.status}`;
       } catch (e) {
-        console.error('Failed to fetch openrouter models:', e.message);
-      }
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({
-        ok: true,
-        models: [
-          { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat' },
-          { id: 'google/gemini-2.5-flash', name: 'Google Gemini 2.5 Flash' },
-          { id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic Claude Sonnet 4.5' },
-          { id: 'openai/gpt-4o-mini', name: 'OpenAI GPT-4o Mini' },
-          { id: 'google/gemini-2.5-flash-image', name: 'Gemini 2.5 Flash Image' }
-        ]
-      }));
-    }
-
-    // 4.16 获取 OpenRouter 原生支持的全部 31+ 款 AI 视频生成模型列表
-    if (req.method === 'GET' && pathname === '/api/openrouter-video-models') {
-      try {
-        const resModels = await fetch('https://openrouter.ai/api/v1/videos/models', {
-          headers: {
-            'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
-            'X-Title': 'WhyVideo Studio'
-          }
-        });
-        if (resModels.ok) {
-          const mJson = await resModels.json();
-          const list = (mJson.data || []).map((m) => ({
-            id: m.id,
-            name: m.name || m.id,
-            description: m.description ? m.description.slice(0, 100) : '',
-            durations: m.supported_durations,
-            aspect_ratios: m.supported_aspect_ratios
-          }));
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          return res.end(JSON.stringify({ ok: true, models: list }));
-        }
-      } catch (e) {
+        lastErr = e.message;
         console.error('Failed to fetch openrouter video models:', e.message);
       }
+      const fallbackVideoModels = [
+        { id: 'minimax/hailuo-3-max', name: 'MiniMax: H3 Max' },
+        { id: 'minimax/hailuo-3', name: 'MiniMax: H3 (海螺视频 3)' },
+        { id: 'bytedance/seedance-2.0', name: 'ByteDance: Seedance 2.0' },
+        { id: 'alibaba/wan-2.6', name: 'Alibaba: Wan 2.6' },
+        { id: 'kwaivgi/kling-v3.0-std', name: 'Kling: Video v3.0 Standard' },
+        { id: 'google/veo-3.1-fast', name: 'Google: Veo 3.1 Fast' },
+        { id: 'runway/gen-4.5', name: 'Runway: Gen-4.5' },
+      ];
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({
-        ok: true,
-        models: [
-          { id: 'minimax/hailuo-3-max', name: 'MiniMax: H3 Max' },
-          { id: 'minimax/hailuo-3', name: 'MiniMax: H3 (海螺视频 3)' },
-          { id: 'bytedance/seedance-2.0', name: 'ByteDance: Seedance 2.0' },
-          { id: 'alibaba/wan-2.6', name: 'Alibaba: Wan 2.6' },
-          { id: 'kwaivgi/kling-v3.0-std', name: 'Kling: Video v3.0 Standard' },
-          { id: 'google/veo-3.1-fast', name: 'Google: Veo 3.1 Fast' },
-          { id: 'runway/gen-4.5', name: 'Runway: Gen-4.5' }
-        ]
-      }));
+      return res.end(JSON.stringify({ ok: true, source: 'fallback', count: fallbackVideoModels.length, error: lastErr, models: fallbackVideoModels }));
     }
 
-    // 4.17 获取 OpenRouter 原生支持的全部 62+ 款 AI 生图模型列表
+    // 4.17 获取 OpenRouter 原生支持的全部 AI 生图模型列表
     if (req.method === 'GET' && pathname === '/api/openrouter-image-models') {
+      const curPaths = getPaths(queryProject);
+      let savedKey = '';
+      if (fs.existsSync(curPaths.promptConfigPath)) {
+        try { savedKey = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8'))?.apiKey || ''; } catch (e) {}
+      }
+      const reqKey = String(url.searchParams.get('apiKey') || savedKey || process.env.OPENROUTER_API_KEY || '').trim();
+      let lastErr = '';
       try {
+        const headers = {
+          'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
+          'X-Title': 'WhyVideo Studio',
+        };
+        if (reqKey && reqKey.startsWith('sk-or-')) {
+          headers['Authorization'] = `Bearer ${reqKey}`;
+        }
         const resModels = await fetch('https://openrouter.ai/api/v1/images/models', {
-          headers: {
-            'HTTP-Referer': 'https://github.com/mingdewu/WhyVideo',
-            'X-Title': 'WhyVideo Studio'
-          }
+          signal: AbortSignal.timeout(15000),
+          headers,
         });
         if (resModels.ok) {
           const mJson = await resModels.json();
-          const list = (mJson.data || []).map((m) => ({
-            id: m.id,
-            name: m.name || m.id,
-            description: m.description ? m.description.slice(0, 100) : ''
-          }));
+          const list = (mJson.data || [])
+            .map((m) => ({
+              id: m.id,
+              name: m.name || m.id,
+              description: m.description ? m.description.slice(0, 100) : '',
+            }))
+            .filter((m) => m.id)
+            .sort((a, b) => String(a.id).localeCompare(String(b.id)));
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          return res.end(JSON.stringify({ ok: true, models: list }));
+          return res.end(JSON.stringify({ ok: true, source: 'live', count: list.length, models: list }));
         }
+        lastErr = `OpenRouter HTTP ${resModels.status}`;
       } catch (e) {
+        lastErr = e.message;
         console.error('Failed to fetch openrouter image models:', e.message);
       }
+      const fallbackImageModels = [
+        { id: 'black-forest-labs/flux-3-image', name: 'FLUX 3 Image' },
+        { id: 'black-forest-labs/flux.2-max', name: 'FLUX.2 Max' },
+        { id: 'recraft/recraft-v4.1', name: 'Recraft V4.1' },
+        { id: 'google/gemini-3.1-flash-image', name: 'Gemini 3.1 Flash Image' },
+        { id: 'openai/gpt-image-2', name: 'GPT Image 2' },
+      ];
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({
-        ok: true,
-        models: [
-          { id: 'black-forest-labs/flux-3-image', name: 'FLUX 3 Image' },
-          { id: 'black-forest-labs/flux.2-max', name: 'FLUX.2 Max' },
-          { id: 'recraft/recraft-v4.1', name: 'Recraft V4.1' },
-          { id: 'google/gemini-3.1-flash-image', name: 'Gemini 3.1 Flash Image' },
-          { id: 'openai/gpt-image-2', name: 'GPT Image 2' }
-        ]
-      }));
+      return res.end(JSON.stringify({ ok: true, source: 'fallback', count: fallbackImageModels.length, error: lastErr, models: fallbackImageModels }));
     }
 
     // 4.2 保存模型网关配置 (统一 OpenRouter / 网关多模型映射)
@@ -4557,17 +5642,19 @@ const server = http.createServer(async (req, res) => {
       if (fs.existsSync(curPaths.promptConfigPath)) {
         try { existing = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8')); } catch (e) {}
       }
+      const rawTavily = typeof body.tavilyApiKey === 'string' ? body.tavilyApiKey.trim() : '';
       const updated = {
         ...existing,
         provider: 'openrouter',
         baseUrl: body.baseUrl || existing.baseUrl || 'https://openrouter.ai/api/v1',
         apiKey: body.apiKey !== undefined ? body.apiKey : (existing.apiKey || ''),
-        tavilyApiKey: typeof body.tavilyApiKey === 'string' && body.tavilyApiKey.trim()
-          ? body.tavilyApiKey.trim() : (existing.tavilyApiKey || ''),
+        tavilyApiKey: (rawTavily && !/^•+$/.test(rawTavily))
+          ? rawTavily : (existing.tavilyApiKey || ''),
         meowloadApiKey: typeof body.meowloadApiKey === 'string' && body.meowloadApiKey.trim()
           ? body.meowloadApiKey.trim() : (existing.meowloadApiKey || ''),
         writerModel: body.writerModel || existing.writerModel || 'deepseek/deepseek-chat',
         textModel: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
+        keywordModel: body.keywordModel || existing.keywordModel || body.textModel || existing.textModel || 'deepseek/deepseek-chat',
         videoModel: body.videoModel || existing.videoModel || 'minimax/hailuo-3-max',
         imageModel: body.imageModel || existing.imageModel || 'black-forest-labs/flux-3-image',
         bgmModel: body.bgmModel || existing.bgmModel || 'deepseek/deepseek-chat',
@@ -4606,9 +5693,50 @@ const server = http.createServer(async (req, res) => {
         try { projectContext = JSON.parse(fs.readFileSync(curPaths.briefPath, 'utf8')); } catch (e) {}
       }
       const normalizedCfg = normalizePromptConfig(promptCfg);
-      const result = await callOpenRouterPromptExtractor(normalizedCfg, narrationText, targetMode, keywords, templateStyle, projectContext);
+      const result = await callOpenRouterPromptExtractor(normalizedCfg, narrationText, targetMode, keywords, templateStyle, projectContext, curPaths.projectDir);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: true, ...result }));
+    }
+
+    // 4.55 AI 搜索关键词提炼 API (唯一最佳纯中文素材搜索词，支持单镜头或批量逐镜调用)
+    if (req.method === 'POST' && pathname === '/api/extract-search-keywords') {
+      const body = await readBody(req);
+      const { projectId, sceneId, narrationText = '', chapterRef = '', keywordModel: overrideModel = '', excludeKeyword = '', persist = true } = body;
+      const targetProj = projectId || queryProject;
+      const curPaths = getPaths(targetProj);
+      let promptCfg = {};
+      if (fs.existsSync(curPaths.promptConfigPath)) {
+        try { promptCfg = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8')); } catch (e) {}
+      }
+      let projectContext = {};
+      if (fs.existsSync(curPaths.briefPath)) {
+        try { projectContext = JSON.parse(fs.readFileSync(curPaths.briefPath, 'utf8')); } catch (e) {}
+      }
+      const normalizedCfg = normalizePromptConfig(promptCfg);
+      if (overrideModel && String(overrideModel).trim()) {
+        normalizedCfg.keywordModel = String(overrideModel).trim();
+      }
+      try {
+        const result = await callSearchKeywordExtractor(normalizedCfg, narrationText, projectContext, chapterRef, curPaths.projectDir, excludeKeyword);
+        if (persist && sceneId && fs.existsSync(curPaths.manifestPath)) {
+          try {
+            const mf = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+            const targetScene = (mf.scenes || []).find((s) => s.scene_id === sceneId);
+            if (targetScene) {
+              targetScene.selected_search_keyword = result.keyword;
+              targetScene.search_keyword_candidates = [result.keyword];
+              fs.writeFileSync(curPaths.manifestPath, JSON.stringify(mf, null, 2), 'utf8');
+            }
+          } catch (persistErr) {
+            console.warn('[extract-search-keywords persist warning]:', persistErr.message);
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: true, ...result }));
+      } catch (err) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: err.message || '关键词提炼失败' }));
+      }
     }
 
     // 5. 单行或批量生成 AI 画面与真实实体视频
@@ -5068,6 +6196,7 @@ const server = http.createServer(async (req, res) => {
         let diskPath = '';
         let detectedDuration = null;
         let detectedResolution = '1920x1080';
+        let detectedHasAudio = false;
         let downloadSourceMode = 'desktop_app';
 
         try {
@@ -5220,6 +6349,12 @@ const server = http.createServer(async (req, res) => {
                 detectedResolution = `${w}x${h}`;
               }
             }
+            const audioProbe = spawnSync(
+              'ffprobe',
+              ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', diskPath],
+              { encoding: 'utf8' }
+            );
+            detectedHasAudio = audioProbe.status === 0 && String(audioProbe.stdout || '').trim().length > 0;
           } catch (e) {}
         }
 
@@ -5243,6 +6378,7 @@ const server = http.createServer(async (req, res) => {
           duration_seconds: detectedDuration,
           duration_sec: detectedDuration,
           resolution: detectedResolution,
+          has_audio: isVideo ? detectedHasAudio : false,
           license_status: 'approved',
           source_url: targetUrl,
           tags: [
@@ -5388,6 +6524,34 @@ const server = http.createServer(async (req, res) => {
       return res.end(JSON.stringify({ ok: true, manifest }));
     }
 
+    // 6.8 更新指定镜头的原视频音轨保留开关与音量
+    if (req.method === 'POST' && pathname === '/api/update-scene-audio') {
+      const body = await readBody(req);
+      const { sceneId, projectId, keepOriginalAudio, originalAudioVolume } = body;
+      const targetProject = projectId || queryProject;
+      const curPaths = getPaths(targetProject);
+
+      const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+      const scene = manifest.scenes.find((s) => s.scene_id === sceneId);
+      if (!scene) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '未找到指定分镜' }));
+      }
+
+      const volNum = Number(originalAudioVolume);
+      const safeVol = Number.isFinite(volNum) ? Math.max(0, Math.min(1, Number(volNum.toFixed(2)))) : 0.3;
+      scene.media_modifiers = scene.media_modifiers || {};
+      scene.media_modifiers.keep_original_audio = Boolean(keepOriginalAudio);
+      scene.media_modifiers.original_audio_volume = safeVol;
+
+      syncTableToManifest(manifest);
+      fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+      recompileProject(targetProject);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, manifest }));
+    }
+
     // 7. 一句话 AI 剪辑指令
     if (req.method === 'POST' && pathname === '/api/trim-asset') {
       const body = await readBody(req);
@@ -5467,7 +6631,7 @@ const server = http.createServer(async (req, res) => {
         try { promptCfg = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8')); } catch (e) {}
       }
       const normalizedCfg = normalizePromptConfig(promptCfg);
-      const parsed = await callLlmRemotionCompiler(pStr, scene, Boolean(hasAsset), assetType || 'video', normalizedCfg);
+      const parsed = await callLlmRemotionCompiler(pStr, scene, Boolean(hasAsset), assetType || 'video', normalizedCfg, curPaths.projectDir);
 
       const assetIndex = fs.existsSync(curPaths.assetIndexPath)
         ? JSON.parse(fs.readFileSync(curPaths.assetIndexPath, 'utf8'))
@@ -5624,40 +6788,134 @@ const server = http.createServer(async (req, res) => {
     // 10. 配音合成接口 (ElevenLabs / Voicebox)
     if (req.method === 'POST' && pathname === '/api/synthesize-voice') {
       const body = await readBody(req);
-      const { projectId = queryProject, provider = 'elevenlabs', voiceId = '21m00Tcm4TlvDq8ikWAM', apiKey, text, sceneId } = body;
+      const {
+        projectId = queryProject,
+        provider = 'elevenlabs',
+        voiceId = '',
+        modelId = 'eleven_v4',
+        stability,
+        similarityBoost,
+        languageCode,
+        apiKey,
+        text,
+        sceneId,
+      } = body;
+      const fullScript = Boolean(body.fullScript);
+      const useAsNarration = Boolean(body.useAsNarration || fullScript);
       projectRenderPaths(projectId);
       const curPaths = getPaths(projectId);
       fs.mkdirSync(curPaths.audioDir, { recursive: true });
 
+      if (fullScript) {
+        if (!fs.existsSync(curPaths.manifestPath)) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '工程缺少镜头清单，请先导入文案或创建分镜' }));
+        }
+        const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+        const fullText = scenesText(manifest.scenes || []);
+        if (!fullText.trim()) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '当前工程分镜文案为空，无法生成全片旁白' }));
+        }
+        const existing = voiceJobs.get(projectId);
+        if (existing && ['queued', 'generating'].includes(existing.status)) {
+          res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '这个工程已有配音任务正在运行', job: existing }));
+        }
+        const activeRender = renderJobs.get(projectId);
+        if (['preparing', 'rendering'].includes(activeRender?.status)) {
+          res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '当前工程正在渲染，请完成后再替换旁白音频' }));
+        }
+
+        if (provider === 'elevenlabs') {
+          const effectiveKey = String(apiKey || '').trim() || process.env.ELEVENLABS_API_KEY;
+          if (!effectiveKey) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: '未配置 ElevenLabs API Key。请在操作界面中输入或在根目录 .env 中写入 ELEVENLABS_API_KEY=xxx' }));
+          }
+          const selectedVoiceId = String(voiceId || '').trim();
+          if (!selectedVoiceId) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: '请先拉取并选择一个 ElevenLabs 音色' }));
+          }
+          const job = {
+            projectId,
+            provider: 'elevenlabs',
+            useAsNarration: true,
+            fullScript: true,
+            status: 'queued',
+            progressText: '正在准备用 ElevenLabs 生成全片旁白…',
+            startedAt: new Date().toISOString(),
+          };
+          voiceJobs.set(projectId, job);
+          void runElevenlabsFullJob(job, {
+            fullText,
+            voiceId: selectedVoiceId,
+            modelId: String(modelId || 'eleven_v4').trim(),
+            stability,
+            similarityBoost,
+            languageCode,
+            apiKey: effectiveKey,
+          });
+          res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: true, job }));
+        } else if (provider === 'voicebox') {
+          const job = {
+            projectId,
+            provider: 'voicebox',
+            profileId: body.profileId || null,
+            useAsNarration: true,
+            fullScript: true,
+            status: 'queued',
+            progressText: '已提交至本地 Voicebox，准备生成全片旁白…',
+            startedAt: new Date().toISOString(),
+          };
+          voiceJobs.set(projectId, job);
+          void runVoiceboxJob(job, fullText);
+          res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: true, job }));
+        }
+      }
+
       if (provider === 'elevenlabs') {
-        const effectiveKey = apiKey || process.env.ELEVENLABS_API_KEY;
+        const effectiveKey = String(apiKey || '').trim() || process.env.ELEVENLABS_API_KEY;
         if (!effectiveKey) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          return res.end(JSON.stringify({ error: '未配置 ElevenLabs API Key。请在操作界面中输入或在根目录 .env 中写入 ELEVENLABS_API_KEY=xxx' }));
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '未配置 ElevenLabs API Key。请在操作界面中输入或在根目录 .env 中写入 ELEVENLABS_API_KEY=xxx' }));
+        }
+        const selectedVoiceId = String(voiceId || '').trim();
+        if (!selectedVoiceId) {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: '请先拉取并选择一个 ElevenLabs 音色' }));
         }
 
         const safeSceneId = String(sceneId || '').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
         const outFileName = `${safeSceneId ? `voice_${safeSceneId}` : 'narration'}_${randomUUID()}.mp3`;
         const outFilePath = path.join(curPaths.audioDir, outFileName);
 
-        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+        const ttsPayload = buildElevenlabsTtsPayload({
+          text: text || '这是来自 WhyVideo 操作界面的测试旁白音频。',
+          modelId: String(modelId || 'eleven_v4').trim(),
+          stability,
+          similarityBoost,
+          languageCode,
+        });
+
+        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(selectedVoiceId)}`, {
           method: 'POST',
           headers: {
             Accept: 'audio/mpeg',
             'Content-Type': 'application/json',
             'xi-api-key': effectiveKey,
           },
-          body: JSON.stringify({
-            text: text || '这是来自 WhyVideo 操作界面的测试旁白音频。',
-            model_id: 'eleven_multilingual_v2',
-            voice_settings: { stability: 0.65, similarity_boost: 0.8, style: 0.15, use_speaker_boost: true },
-          }),
+          body: JSON.stringify(ttsPayload),
         });
 
         if (!response.ok) {
           const errText = await response.text();
-          res.writeHead(response.status, { 'Content-Type': 'application/json' });
-          return res.end(JSON.stringify({ error: `ElevenLabs 接口调用失败: ${errText}` }));
+          res.writeHead(response.status, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: `ElevenLabs 接口调用失败: ${errText}` }));
         }
 
         const arrayBuffer = await response.arrayBuffer();
@@ -5676,7 +6934,6 @@ const server = http.createServer(async (req, res) => {
           res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
           return res.end(JSON.stringify({ ok: false, error: '这个工程已有 Voicebox 配音任务在运行', job: existing }));
         }
-        const useAsNarration = Boolean(body.useAsNarration);
         if (useAsNarration && !fs.existsSync(curPaths.manifestPath)) {
           res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
           return res.end(JSON.stringify({ ok: false, error: '工程缺少镜头清单，无法设置成片旁白' }));
@@ -5688,6 +6945,7 @@ const server = http.createServer(async (req, res) => {
         }
         const job = {
           projectId,
+          provider: 'voicebox',
           profileId: body.profileId || null,
           useAsNarration,
           status: 'queued',
@@ -5700,9 +6958,388 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // 10.5 AI 自适应 BGM 工作台后端接口
+    const resolveBgmGatewayLabel = (baseUrl = '') => {
+      const lower = String(baseUrl || '').toLowerCase();
+      if (lower.includes('googleapis.com')) return 'Gemini Official';
+      if (lower.includes('openrouter.ai')) return 'OpenRouter';
+      try {
+        return new URL(baseUrl).hostname || 'Custom Gateway';
+      } catch (e) {
+        return 'Custom Gateway';
+      }
+    };
+
+    const safeRecompileBgmProject = (curPaths, targetProj) => {
+      if (fs.existsSync(curPaths.manifestPath) && fs.existsSync(curPaths.assetIndexPath)) {
+        try {
+          recompileProject(targetProj);
+          return true;
+        } catch (err) {
+          console.warn('[BGM Recompile Warning]', err.message);
+        }
+      }
+      return false;
+    };
+
+    const loadBgmProjectContext = (targetProj) => {
+      projectRenderPaths(targetProj);
+      const curPaths = getPaths(targetProj);
+      let manifest = {};
+      if (fs.existsSync(curPaths.manifestPath)) {
+        try {
+          manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
+        } catch (e) {}
+      }
+      let promptCfg = {};
+      if (fs.existsSync(curPaths.promptConfigPath)) {
+        try {
+          promptCfg = JSON.parse(fs.readFileSync(curPaths.promptConfigPath, 'utf8'));
+        } catch (e) {}
+      }
+      const normalizedCfg = normalizePromptConfig(promptCfg);
+      const scenes = Array.isArray(manifest?.scenes) ? manifest.scenes : [];
+      const totalDurationMs = Math.max(
+        Number(manifest?.total_duration_ms) || 0,
+        scenes.length > 0 ? Number(scenes[scenes.length - 1]?.end_ms) || 0 : 0
+      );
+      return { curPaths, manifest, normalizedCfg, scenes, totalDurationMs };
+    };
+
+    const buildBgmApiResponse = (targetProj, configOverride = null, extra = {}) => {
+      const { curPaths, manifest, normalizedCfg, scenes, totalDurationMs } = loadBgmProjectContext(targetProj);
+      const config = configOverride || loadBgmConfig(curPaths.projectDir, curPaths.publicDir);
+      const tracksWithUrl = (config.tracks || []).map((tr) => ({
+        ...tr,
+        url: `/public/${encodeURIComponent(targetProj)}/${tr.src}`,
+      }));
+      const computedAudit = buildBgmAudit(config, manifest, {
+        modelUsed: config.audit?.model_used || 'deterministic',
+      });
+      if (config.audit?.summary && config.audit?.model_used && config.audit.model_used !== 'deterministic') {
+        computedAudit.model_summary = config.audit.model_summary || config.audit.summary;
+      }
+      return {
+        ok: true,
+        projectId: targetProj,
+        config: {
+          ...config,
+          tracks: tracksWithUrl,
+          audit: computedAudit,
+        },
+        modelInfo: {
+          baseUrl: normalizedCfg.baseUrl,
+          bgmModel: normalizedCfg.bgmModel,
+          providerLabel: resolveBgmGatewayLabel(normalizedCfg.baseUrl),
+          hasApiKey: Boolean(normalizedCfg.apiKey || process.env.OPENROUTER_API_KEY),
+        },
+        totalDurationMs,
+        scenesCount: scenes.length,
+        ...extra,
+      };
+    };
+
+    if (req.method === 'GET' && pathname === '/api/bgm/state') {
+      const payload = buildBgmApiResponse(queryProject);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify(payload));
+    }
+
+    if (req.method === 'POST' && pathname === '/api/bgm/upload') {
+      const body = await readBody(req);
+      const targetProj = body.projectId || queryProject;
+      const { curPaths, manifest } = loadBgmProjectContext(targetProj);
+
+      const rawName = path.basename(String(body.fileName || '').trim());
+      const ext = path.extname(rawName).toLowerCase();
+      if (!rawName || !ALLOWED_AUDIO_EXTS.has(ext)) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '仅支持 .mp3 / .wav / .m4a / .ogg / .aac 音频文件' }));
+      }
+
+      const matches = String(body.dataUrl || '').match(/^data:([^;]+);base64,(.+)$/);
+      if (!matches) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '无效的音频文件内容 (dataUrl)' }));
+      }
+
+      const buffer = Buffer.from(matches[2], 'base64');
+      if (buffer.length === 0 || buffer.length > 40 * 1024 * 1024) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '音频文件大小需在 1B ~ 40MB 之间' }));
+      }
+
+      const baseStem = path.basename(rawName, ext).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 48) || 'track';
+      const safeFile = `bgm_${Date.now()}_${baseStem}${ext}`;
+      fs.mkdirSync(curPaths.bgmDir, { recursive: true });
+      const diskPath = path.join(curPaths.bgmDir, safeFile);
+      fs.writeFileSync(diskPath, buffer);
+
+      const durationMs = probeDurationMs(diskPath);
+      const config = loadBgmConfig(curPaths.projectDir, curPaths.publicDir);
+      const newTrack = {
+        track_id: `bgm_${randomUUID().slice(0, 8)}`,
+        title: path.basename(rawName, ext) || safeFile,
+        file_name: safeFile,
+        src: `${BGM_PUBLIC_SUBDIR}/${safeFile}`,
+        duration_ms: durationMs > 0 ? durationMs : null,
+        size_bytes: buffer.length,
+        source_type: 'manual_upload',
+        license_status: 'approved',
+        added_at: new Date().toISOString(),
+      };
+
+      const existingIdx = config.tracks.findIndex((t) => t.src === newTrack.src);
+      if (existingIdx >= 0) {
+        config.tracks[existingIdx] = newTrack;
+      } else {
+        config.tracks.push(newTrack);
+      }
+      config.selected_track_id = newTrack.track_id;
+      config.enabled = true;
+      config.audit = buildBgmAudit(config, manifest, {
+        modelUsed: config.audit?.model_used || 'deterministic',
+      });
+
+      const saved = saveBgmConfig(curPaths.projectDir, config);
+      const compiledToRenderProps = safeRecompileBgmProject(curPaths, targetProj);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(
+        JSON.stringify(
+          buildBgmApiResponse(targetProj, saved, {
+            uploadedTrack: {
+              ...newTrack,
+              url: `/public/${encodeURIComponent(targetProj)}/${newTrack.src}`,
+            },
+            compiledToRenderProps,
+          })
+        )
+      );
+    }
+
+    if (req.method === 'POST' && pathname === '/api/bgm/delete-track') {
+      const body = await readBody(req);
+      const targetProj = body.projectId || queryProject;
+      const trackId = String(body.trackId || '').trim();
+      const { curPaths, manifest } = loadBgmProjectContext(targetProj);
+      const config = loadBgmConfig(curPaths.projectDir, curPaths.publicDir);
+
+      const idx = config.tracks.findIndex((t) => t.track_id === trackId);
+      if (idx === -1) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '未找到指定 BGM 音轨' }));
+      }
+
+      const target = config.tracks[idx];
+      const bgmRoot = path.resolve(curPaths.bgmDir);
+      const resolvedFile = path.resolve(curPaths.publicDir, target.src);
+      if (resolvedFile.startsWith(bgmRoot + path.sep) && fs.existsSync(resolvedFile)) {
+        fs.unlinkSync(resolvedFile);
+      }
+
+      config.tracks.splice(idx, 1);
+      if (config.selected_track_id === trackId) {
+        config.selected_track_id = config.tracks[0]?.track_id || null;
+      }
+      if (!config.selected_track_id) {
+        config.enabled = false;
+      }
+      config.audit = buildBgmAudit(config, manifest, {
+        modelUsed: config.audit?.model_used || 'deterministic',
+      });
+
+      const saved = saveBgmConfig(curPaths.projectDir, config);
+      const compiledToRenderProps = safeRecompileBgmProject(curPaths, targetProj);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(
+        JSON.stringify(
+          buildBgmApiResponse(targetProj, saved, {
+            deletedTrackId: trackId,
+            compiledToRenderProps,
+          })
+        )
+      );
+    }
+
+    if (req.method === 'POST' && pathname === '/api/bgm/analyze') {
+      const body = await readBody(req);
+      const targetProj = body.projectId || queryProject;
+      const { curPaths, manifest, normalizedCfg, scenes, totalDurationMs } = loadBgmProjectContext(targetProj);
+      if (scenes.length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '当前工程尚无镜头清单，请先切分镜头后再分析情绪弧度' }));
+      }
+
+      const effectiveModel = String(body.bgmModel || normalizedCfg.bgmModel || 'deepseek/deepseek-chat').trim();
+      const effectiveBaseUrl = String(body.baseUrl || normalizedCfg.baseUrl || 'https://openrouter.ai/api/v1').trim();
+      const effectiveApiKey = String(body.apiKey || normalizedCfg.apiKey || '').trim();
+
+      const config = loadBgmConfig(curPaths.projectDir, curPaths.publicDir);
+      const step = Math.max(1, Math.ceil(scenes.length / 45));
+      const sceneDigest = scenes
+        .filter((_, idx) => idx % step === 0 || idx === scenes.length - 1)
+        .map((s) => ({
+          scene_id: s.scene_id,
+          chapter_ref: s.chapter_ref || 'section',
+          start_ms: s.start_ms,
+          end_ms: s.end_ms,
+          visual_type: s.visual_type || s.scene_type,
+          narration: String(s.narration_text || '').slice(0, 90),
+        }));
+
+      const sysPrompt = `你是资深纪录片与知识类视频音乐总监（Music Supervisor）。
+根据提供的【视频标题】与【按时间顺序的镜头台词摘要】，把全片划分为 3~6 个连贯、无空隙、完全覆盖 [0, ${totalDurationMs}] 毫秒的情绪配乐阶段，并给出风格配乐方向建议。
+严格输出合法 JSON（不要 markdown 代码块，不要多余解释），格式如下：
+{
+  "segments": [
+    {
+      "label": "阶段标题（如 01 悬念引入）",
+      "start_ms": 0,
+      "end_ms": 15000,
+      "mood": "情绪与张力概括（6~12字）",
+      "energy": "low" | "medium" | "high",
+      "target_db": -18,
+      "music_style_hint": "具体乐器与律动建议",
+      "reason": "结合台词内容的配乐理由"
+    }
+  ],
+  "style_recommendations": [
+    {
+      "title": "推荐配乐风格方向名称",
+      "bpm_range": "90-115 BPM",
+      "instrumentation": "主要乐器编排",
+      "fit_reason": "为何契合本片叙事与听感"
+    }
+  ],
+  "audit_summary": "一句话总结全片背景音乐混音策略与听感注意事项"
+}`;
+
+      const userPrompt = `【视频标题】：${manifest.title || targetProj}
+【全片总时长】：${totalDurationMs} ms (${(totalDurationMs / 1000).toFixed(1)} 秒)
+【当前配乐设置】：基准音量 ${config.settings.base_volume_db} dB，Ducking ${config.settings.ducking_enabled ? config.settings.ducking_db + ' dB' : '关闭'}
+【镜头摘要（共 ${scenes.length} 镜，采样展示 ${sceneDigest.length} 镜）】：
+${JSON.stringify(sceneDigest, null, 2)}`;
+
+      let segments = null;
+      let styleRecommendations = [];
+      let modelAuditSummary = '';
+      let usedFallback = false;
+      let fallbackReason = '';
+
+      try {
+        const aiText = await callOpenRouterText(sysPrompt, userPrompt, {
+          model: effectiveModel,
+          apiKey: effectiveApiKey,
+          baseUrl: effectiveBaseUrl,
+          maxTokens: 2500,
+        });
+        if (!aiText) {
+          throw new Error(globalThis.__lastWriterLlmError || '模型返回为空');
+        }
+        const parsed = parseBgmAnalysisJson(aiText, manifest);
+        segments = parsed.segments;
+        styleRecommendations = parsed.style_recommendations;
+        modelAuditSummary = parsed.audit_note;
+      } catch (err) {
+        usedFallback = true;
+        fallbackReason = String(err.message || err);
+        segments = buildDeterministicSegments(manifest);
+        styleRecommendations = [
+          {
+            title: '克制纪实氛围铺底 (Minimal Documentary Bed)',
+            bpm_range: '88-105 BPM',
+            instrumentation: '温暖钢琴、低频脉冲与柔和弦乐铺底',
+            fit_reason: '频段主要避开中文旁白中高频区，长时间解说不易引发听觉疲劳。',
+          },
+          {
+            title: '历史/机制推进律动 (Tension & Pulse)',
+            bpm_range: '108-122 BPM',
+            instrumentation: '大提琴拨弦、轻打击乐与环境合成器',
+            fit_reason: '适合证据拆解与高潮转折段落，配合 Ducking 可兼顾节奏感与台词清晰度。',
+          },
+        ];
+      }
+
+      config.segments = segments;
+      config.style_recommendations = styleRecommendations;
+      config.audit = buildBgmAudit(config, manifest, {
+        modelUsed: usedFallback ? 'deterministic_fallback' : effectiveModel,
+      });
+      if (modelAuditSummary) {
+        config.audit.model_summary = modelAuditSummary;
+      }
+
+      const saved = saveBgmConfig(curPaths.projectDir, config);
+      const compiledToRenderProps =
+        saved.enabled && saved.selected_track_id ? safeRecompileBgmProject(curPaths, targetProj) : false;
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(
+        JSON.stringify(
+          buildBgmApiResponse(targetProj, saved, {
+            usedFallback,
+            fallbackReason,
+            compiledToRenderProps,
+          })
+        )
+      );
+    }
+
+    if (req.method === 'POST' && pathname === '/api/bgm/save') {
+      const body = await readBody(req);
+      const targetProj = body.projectId || queryProject;
+      const { curPaths, manifest, totalDurationMs } = loadBgmProjectContext(targetProj);
+      const config = loadBgmConfig(curPaths.projectDir, curPaths.publicDir);
+
+      if (body.selected_track_id !== undefined) {
+        if (body.selected_track_id === null || body.selected_track_id === '') {
+          config.selected_track_id = null;
+        } else {
+          const exists = config.tracks.some((t) => t.track_id === body.selected_track_id);
+          if (!exists) {
+            res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+            return res.end(JSON.stringify({ ok: false, error: '所选 BGM 音轨不存在或已被删除' }));
+          }
+          config.selected_track_id = body.selected_track_id;
+        }
+      }
+
+      if (body.settings && typeof body.settings === 'object') {
+        config.settings = normalizeBgmSettings({ ...config.settings, ...body.settings });
+      }
+      if (Array.isArray(body.segments)) {
+        config.segments = normalizeBgmSegments(body.segments, totalDurationMs);
+      }
+
+      config.enabled = Boolean(body.enabled) && Boolean(config.selected_track_id);
+      config.audit = buildBgmAudit(config, manifest, {
+        modelUsed: config.audit?.model_used || 'deterministic',
+      });
+
+      const saved = saveBgmConfig(curPaths.projectDir, config);
+      const compiledToRenderProps = safeRecompileBgmProject(curPaths, targetProj);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(
+        JSON.stringify(
+          buildBgmApiResponse(targetProj, saved, {
+            saved: true,
+            compiledToRenderProps,
+          })
+        )
+      );
+    }
+
     // 11. 静态媒体文件路由
     if (pathname.startsWith('/output/') || pathname.startsWith('/public/')) {
-      const parts = pathname.split('/').filter(Boolean);
+      let decodedPathname = pathname;
+      try {
+        decodedPathname = decodeURIComponent(pathname);
+      } catch (e) {}
+
+      const parts = decodedPathname.split('/').filter(Boolean);
       let proj = queryProject;
       let relSubPath = '';
 
@@ -5713,8 +7350,9 @@ const server = http.createServer(async (req, res) => {
         relSubPath = parts.slice(1).join('/');
       }
 
-      const filePath = path.join(rootDir, 'projects', proj, parts[0], relSubPath);
-      if (fs.existsSync(filePath)) {
+      const baseDir = path.resolve(rootDir, 'projects', proj, parts[0]);
+      const filePath = path.resolve(baseDir, relSubPath);
+      if (filePath.startsWith(baseDir + path.sep) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
         const ext = path.extname(filePath).toLowerCase();
         const contentType = MIME_TYPES[ext] || 'application/octet-stream';
         const stat = fs.statSync(filePath);
@@ -5738,6 +7376,8 @@ const server = http.createServer(async (req, res) => {
           return fs.createReadStream(filePath).pipe(res);
         }
       }
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Not Found');
     }
 
     // 主页面渲染
@@ -5831,12 +7471,16 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         padding-inline: 0.5rem;
         text-align: center;
       }
+      #producerHeaderActions > :last-child:nth-child(odd),
+      #writerHeaderActions > :last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+      }
       #writerMainGrid > *, .writer-step-panel { min-width: 0; }
       #writerMainGrid, .writer-step-panel { scroll-margin-block-start: 0.75rem; }
       #writerSteps button > div { white-space: normal; }
       #wStep1ImportDuration, #importTargetDuration { flex: 1; }
 
-      #producerSceneList { max-height: none; overflow: visible; }
+      #producerSceneList { max-height: none; min-height: 0; overflow: visible; }
       .scene-list .db-table { display: block; }
       .scene-list thead {
         position: absolute;
@@ -5858,6 +7502,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         border: 0;
         padding: 0.75rem;
         text-align: left;
+        min-width: 0;
+        max-width: 100%;
       }
       .scene-list td:first-child {
         background: #1a2436;
@@ -5905,16 +7551,16 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     }
   </style>
 </head>
-<body class="studio-page min-h-screen p-4 sm:p-6">
-  <div id="appRootShell" class="max-w-[1720px] mx-auto space-y-5">
+<body class="studio-page min-h-screen p-3 sm:p-5">
+  <div id="appRootShell" class="max-w-[1720px] mx-auto space-y-3">
 
     <!-- 顶部导航栏与工程选择 -->
-    <header id="appHeader" class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] items-start gap-x-6 gap-y-3 pb-4 border-b border-gray-800">
+    <header id="appHeader" class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] items-start gap-x-6 gap-y-2.5 pb-3 border-b border-gray-800">
       <div class="min-w-0 space-y-2.5">
-        <!-- 第一行：左上角黄色标牌 + 制作工程黄色框 + 【同等级】AI 画面/视频模型指定按钮 -->
-        <div class="flex flex-wrap items-center gap-3">
+        <!-- 第一行：左上角黄色标牌 + 制作工程黄色框 -->
+        <div class="flex flex-wrap items-center gap-2.5">
           <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 shrink-0">
-            WhyVideo Studio · AI 视频模型调度版
+            WhyVideo Studio
           </span>
           
           <!-- 制作工程黄色选择框 -->
@@ -5926,19 +7572,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             <button id="btnConfirmProject" onclick="confirmSwitchProject()" class="px-3 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-gray-950 font-black text-xs shadow transition cursor-pointer shrink-0">确定</button>
             <button id="btnDeleteProject" onclick="deleteCurrentProject()" class="px-2.5 py-1 rounded-lg bg-rose-950/70 hover:bg-rose-600 border border-rose-500/50 text-rose-300 hover:text-white text-xs font-bold transition cursor-pointer shrink-0" title="删除当前工程">🗑️ 删除</button>
           </div>
-
-          <!-- 同等级核心配置：AI 文案·画面·视频模型指定 (三大方针全局常驻可用) -->
-          <button onclick="toggleVisualModelModal()" class="px-4 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer shrink-0" title="打开全流程 AI 模型与统一网关调度中心">
-            🪐 AI 文案·画面·视频模型指令
-          </button>
-
-          <span id="projectStageBadge" class="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">
-            加载中...
-          </span>
         </div>
 
-        <!-- 第二行：【文案创作台 / 视觉分镜台】导航切换胶囊 (精确位于左上角黄色字体下方) 与 页面大标题 -->
-        <div class="flex flex-wrap items-center gap-3 pt-0.5">
+        <!-- 第二行：【文案创作台 / 视觉分镜台】导航切换胶囊 与 页面大标题 -->
+        <div class="flex flex-wrap sm:flex-nowrap items-center gap-3 pt-0.5 min-w-0">
           <div class="workspace-tabs inline-flex p-1 bg-gray-950/90 rounded-xl border border-purple-500/40 shadow-inner shrink-0">
             <button id="navTabWriter" type="button" onclick="switchWorkspaceTab('writer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
               ✍️ 文案创作台 (Writer)
@@ -5948,8 +7585,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             </button>
           </div>
 
-          <h1 id="projectHeaderTitle" class="text-lg sm:text-xl font-black text-white truncate">
-            视觉镜头工作台（AI 视频模型指定 · 行内即时生成与 16:9 预览 · 桌面拖拽）
+          <h1 id="projectHeaderTitle" class="text-base sm:text-lg font-black text-white truncate min-w-0">
+            视觉镜头工作台
           </h1>
         </div>
       </div>
@@ -5957,23 +7594,29 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       <!-- 右侧：对应工作台快捷动作组 -->
       <div class="min-w-0 flex flex-col items-end gap-2 w-full">
         <!-- 两种工作台共用固定高度的操作区，避免下方内容随按钮换行跳动 -->
-        <div class="min-h-[60px] w-full flex items-start justify-end">
+        <div class="min-h-[56px] w-full flex items-start justify-end">
           <!-- 视觉分镜制作台快捷操作组 -->
-          <div id="producerHeaderActions" class="w-full flex flex-wrap content-start justify-end items-center gap-2.5">
-            <button onclick="toggleVisualModelModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="打开 AI 全流程模型调度中心">
+          <div id="producerHeaderActions" class="w-full flex flex-wrap content-start justify-end items-center gap-2">
+            <button type="button" id="producerPromptsModalBtn" onclick="openProducerPromptsModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-teal-600/20 hover:bg-teal-600/35 text-teal-300 border border-teal-500/40 transition shadow flex items-center gap-1.5 cursor-pointer" title="查看并全量自定义当前工程的视觉分镜台 AI 提示词模板（关键词、视频、实景图、卡片、口语剪辑）">
+              ⚙️ 提示词设置: <span id="producerPromptsBtnStatus" class="text-teal-200 font-extrabold">出厂默认</span>
+            </button>
+            <button type="button" onclick="toggleVisualModelModal('video')" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="查看与切换文案、视频、分镜、生图与关键词模型">
               🪐 AI 全流程模型调度中心
             </button>
-            <button onclick="toggleAudioModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
-              🎙️ 配音引擎配置
+            <button onclick="toggleAudioModal()" id="btnOpenAudioModal" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="配置 AI 配音引擎（ElevenLabs 云端 / Voicebox 本地）">
+              🎙️ 配音引擎配置 <span id="audioProviderHeaderBadge" class="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-black/25 text-rose-100">Voicebox本地</span>
             </button>
-            <button onclick="toggleBgmModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-gray-950 transition shadow-lg flex items-center gap-1.5 cursor-pointer">
-              🎵 AI 自适应 BGM 工作台
+            <button type="button" id="btnOpenBgmModal" onclick="toggleBgmModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-gray-950 transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="配置 AI 自适应 BGM 与自动人声避让 (Ducking)">
+              🎵 AI 自适应 BGM <span id="bgmHeaderBadge" class="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-black/20 text-gray-950">未启用</span>
             </button>
-            <button onclick="saveAll()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 transition shadow-lg cursor-pointer">
-              💾 保存镜头表并同步 Remotion
+            <button onclick="saveAll()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 transition shadow-lg cursor-pointer">
+              💾 保存并同步 Remotion
             </button>
-            <a href="http://localhost:3100" target="_blank" class="px-3.5 py-1.5 text-xs font-semibold rounded-xl card hover:border-blue-500 text-blue-300 transition">
-              🎬 打开 Remotion 预览 (:3100) ↗
+            <button type="button" id="startFinalRenderBtn" onclick="openFinalRenderConfirmModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="开始当前工程最终渲染（含已配置音频）">
+              🎬 最终渲染
+            </button>
+            <a href="http://localhost:3100" target="_blank" class="px-3 py-1.5 text-xs font-semibold rounded-xl card hover:border-blue-500 text-blue-300 transition">
+              🎬 Remotion (:3100) ↗
             </a>
           </div>
 
@@ -6003,79 +7646,92 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     </header>
 
     <!-- 视图 1：视觉分镜制作台 (Producer Workspace) -->
-    <div id="viewProducerContainer" class="space-y-5">
+    <div id="viewProducerContainer" class="space-y-3">
 
-    <!-- 视频预览 / 工程状态概览 -->
-    <div id="videoContainer" class="card p-4 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
+    <!-- 渲染进度 / 成片反馈条（平时隐藏，仅在渲染中、报错或已有成片时按需出现） -->
+    <div id="renderStatusBanner" class="hidden card px-3.5 py-2 rounded-xl border border-emerald-500/25 space-y-2">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center gap-2.5 min-w-0">
+          <span id="renderJobStatus" class="text-xs font-semibold text-emerald-300"></span>
+          <a id="renderJobOutput" class="hidden text-xs font-bold text-emerald-300 hover:text-emerald-200 underline" target="_blank" rel="noopener">↗ 新窗口打开成片</a>
+        </div>
+        <button type="button" id="toggleVideoPreviewBtn" onclick="toggleVideoPreviewDrawer()" class="hidden px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold transition cursor-pointer">
+          ▶ 预览成片
+        </button>
+      </div>
+      <div id="videoContainer" class="hidden pt-1"></div>
+      <pre id="renderJobError" class="hidden w-full whitespace-pre-wrap text-xs text-rose-300 bg-rose-950/30 border border-rose-500/30 rounded-lg p-2"></pre>
     </div>
 
-    <div class="card p-4 rounded-2xl flex flex-wrap items-center gap-3 border border-emerald-500/25">
-      <button type="button" id="startFinalRenderBtn" onclick="startFinalRender()" class="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold">
-        🎬 开始当前工程最终渲染（含已配置音频）
-      </button>
-      <span id="renderJobStatus" class="text-xs text-gray-300">等待查看渲染状态</span>
-      <a id="renderJobOutput" class="hidden text-xs text-emerald-300 underline" target="_blank" rel="noopener">查看成片</a>
-      <pre id="renderJobError" class="hidden w-full whitespace-pre-wrap text-xs text-rose-300"></pre>
-    </div>
-
-    <!-- 统计卡片与节拍看板 -->
-    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
-      <div class="lg:col-span-8 card p-4 rounded-2xl space-y-2">
-        <div class="flex items-center justify-between">
-          <div class="flex items-center gap-2 flex-wrap">
-            <span class="text-xs font-bold text-purple-300">🤖 当前指定模型：</span>
-            <span id="currentWriterModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/25 text-amber-200 border border-amber-500/40">
-              📝 文案: deepseek-chat
-            </span>
-            <span id="currentVideoModelBadge" class="px-2 py-0.5 rounded text-[11px] font-extrabold bg-emerald-500/25 text-emerald-300 border border-emerald-500/40">
-              🎬 视频: minimax/hailuo-3
-            </span>
-            <span id="currentTextModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-purple-500/25 text-purple-200 border border-purple-500/40">
-              ✍️ 分镜: deepseek-chat
-            </span>
-            <span id="currentImageModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-500/25 text-blue-200 border border-blue-500/40">
-              🖼️ 生图: flux-3-image
-            </span>
-          </div>
-          <button onclick="toggleVisualModelModal('video')" class="text-xs text-purple-400 hover:underline flex items-center gap-1" title="在全流程控制中心中切换视频、分镜与生图模型">
-            ⚙️ 切换各阶段 AI 模型
+    <!-- 紧凑单行信息栏：当前指定模型 + 可折叠全局画面规则 + 节拍统计 -->
+    <div class="card px-3.5 py-2 rounded-xl border border-gray-800/90 space-y-2">
+      <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <!-- 左侧：全局画面规则与批量关键词工具 -->
+        <div class="flex flex-wrap items-center gap-1.5 min-w-0">
+          <button type="button" id="toggleGlobalPromptBtn" onclick="toggleGlobalPromptDrawer()" class="px-2 py-0.5 rounded text-[11px] font-semibold text-gray-300 hover:text-white bg-gray-900/90 hover:bg-gray-800 border border-gray-700/80 transition cursor-pointer" title="展开或收起 AI 全局画面生成规则">
+            ✏️ 全局画面规则 <span id="globalPromptChevron">▸</span>
+          </button>
+          <button type="button" id="btnBatchExtractKeywords" onclick="batchExtractAllSearchKeywords()" class="px-2.5 py-0.5 rounded text-[11px] font-bold text-cyan-100 bg-cyan-700/70 hover:bg-cyan-600 border border-cyan-400/50 transition cursor-pointer shadow-sm" title="使用选定的关键词模型，为本工程全部镜头批量提炼纯中文素材搜索关键词">
+            ✨ 批量提炼全部镜头关键词
           </button>
         </div>
-        <textarea id="globalPromptInput" rows="2" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-gray-100 focus:outline-none focus:border-purple-500" placeholder="在此输入你的 AI 画面生成规则..."></textarea>
+
+        <!-- 右侧：紧凑内联节拍统计 -->
+        <div class="flex flex-wrap items-center gap-2 text-[11px] min-w-0 max-w-full lg:shrink-0">
+          <span class="px-2.5 py-0.5 rounded-lg bg-gray-900/90 border border-gray-700/80 text-gray-300">
+            总数 <strong class="text-white font-black" id="statTotal">-</strong>
+            <span class="text-gray-400 ml-1" id="statAvgDur">平均 -s/镜</span>
+          </span>
+          <span class="px-2.5 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300" title="最适眼球留存">
+            🟢 ≤8.5s <strong class="font-black" id="statGold">-</strong>
+          </span>
+          <span class="px-2.5 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300" title="建议点击 ✂️ 加切点">
+            🔴 >10s <strong class="font-black" id="statOver">-</strong>
+          </span>
+        </div>
       </div>
 
-      <div class="lg:col-span-4 grid grid-cols-3 gap-3">
-        <div class="card p-3 rounded-2xl flex flex-col justify-center">
-          <span class="text-xs text-gray-400">镜头总数</span>
-          <span class="text-xl font-black text-white mt-0.5" id="statTotal">-</span>
-          <span class="text-[10px] text-gray-500" id="statAvgDur">平均 -s/镜</span>
+      <!-- 真实配音时间轴与关键词智能切点控制条 -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-gray-800/70 text-[11px]">
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
+          <span id="timingStatusBadge" class="px-2.5 py-0.5 rounded-lg bg-gray-900 border border-gray-700 text-gray-300 font-semibold">
+            📐 时间轴：等待载入...
+          </span>
+          <span id="timingRhythmBadge" class="hidden px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300"></span>
         </div>
-        <div class="card p-3 rounded-2xl flex flex-col justify-center">
-          <span class="text-xs text-emerald-400">🟢 黄金节奏 (≤8.5s)</span>
-          <span class="text-xl font-black text-emerald-400 mt-0.5" id="statGold">-</span>
-          <span class="text-[10px] text-emerald-500/80">最适眼球留存</span>
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <button type="button" id="btnSynthFull" onclick="synthesizeFullNarration()" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white border border-emerald-400/40 font-extrabold transition cursor-pointer shadow-sm" title="使用已保存的配音引擎设置，自动合并全部分镜文案生成整部视频配音并对齐时间轴">
+            🎙️ 一键生成全片旁白
+          </button>
+          <button type="button" id="btnCancelVoiceboxMain" onclick="cancelVoiceboxJob()" class="hidden px-2.5 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-700 border border-rose-500/60 text-rose-200 font-bold transition cursor-pointer shadow-sm" title="取消当前正在运行的配音任务">
+            🛑 取消配音
+          </button>
+          <button type="button" id="btnAlignTiming" onclick="alignProjectTiming()" class="px-2.5 py-1 rounded-lg bg-sky-700/70 hover:bg-sky-600 text-sky-100 border border-sky-400/40 font-bold transition cursor-pointer shadow-sm" title="用本地 Whisper 对齐配音音频，得到每个字的真实出场毫秒">
+            🎯 对齐配音时间轴
+          </button>
+          <button type="button" id="btnAutoPlanCuts" onclick="autoPlanProjectCuts()" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:brightness-110 text-white border border-purple-400/40 font-bold transition cursor-pointer shadow-sm" title="保留既有素材，自动把换画面点对齐到关键词说出时刻或停顿处，并切分过长镜头">
+            ⚡ 按关键词/停顿智能排切点
+          </button>
         </div>
-        <div class="card p-3 rounded-2xl flex flex-col justify-center">
-          <span class="text-xs text-rose-400">🔴 超时镜头 (>10s)</span>
-          <span class="text-xl font-black text-rose-400 mt-0.5" id="statOver">-</span>
-          <span class="text-[10px] text-rose-500/80">点击 ✂️ 一键切分</span>
-        </div>
+      </div>
+
+      <!-- 默认收起的全局画面规则输入框 -->
+      <div id="globalPromptDrawer" class="hidden pt-1 border-t border-gray-800/80">
+        <textarea id="globalPromptInput" rows="2" class="w-full px-3 py-1.5 text-xs rounded-lg bg-gray-950 border border-gray-700 text-gray-100 focus:outline-none focus:border-purple-500" placeholder="在此输入你的 AI 画面生成规则..."></textarea>
       </div>
     </div>
 
     <!-- 视觉镜头主表格 -->
     <div class="card rounded-2xl overflow-hidden border border-gray-800">
-      <div id="producerSceneList" class="scene-list max-h-[720px] overflow-y-auto overflow-x-auto">
-        <table class="w-full text-left text-xs db-table border-collapse" role="table" aria-label="分镜列表">
+      <div id="producerSceneList" class="scene-list max-h-[calc(100vh-210px)] min-h-[520px] overflow-y-auto overflow-x-auto">
+        <table class="w-full lg:table-fixed text-left text-xs db-table border-collapse" role="table" aria-label="分镜列表">
           <thead role="rowgroup">
             <tr class="text-gray-300 font-bold uppercase tracking-wider text-[11px]" role="row">
-              <th role="columnheader" scope="col" class="p-3 w-32 text-center">镜头序号 / 时长</th>
-              <th role="columnheader" scope="col" class="p-3 min-w-[240px]">当前镜头覆盖的旁白文本</th>
-              <th role="columnheader" scope="col" class="p-3 min-w-[160px]">16:9 核心标志关键词</th>
-              <th role="columnheader" scope="col" class="p-3 w-36">画面方式</th>
-              <th role="columnheader" scope="col" class="p-3 min-w-[340px]">🎨 AI 生成画面（点击按钮即时生成 16:9 预览视觉卡）</th>
-              <th role="columnheader" scope="col" class="p-3 min-w-[260px] text-center">📥 素材上传 / 即时检验与 AI 剪辑</th>
-              <th role="columnheader" scope="col" class="p-3 w-28 text-center">节拍调整</th>
+              <th role="columnheader" scope="col" class="p-3 lg:w-28 text-center">镜头序号 / 时长</th>
+              <th role="columnheader" scope="col" class="p-3">当前镜头覆盖的旁白文本（支持点字切画面）</th>
+              <th role="columnheader" scope="col" class="p-3 lg:w-36">画面方式</th>
+              <th role="columnheader" scope="col" class="p-3 lg:w-[40%]">🎨 AI 生成画面 / 📥 素材上传与 AI 剪辑（随画面方式切换）</th>
+              <th role="columnheader" scope="col" class="p-3 lg:w-32 text-center">节拍调整</th>
             </tr>
           </thead>
           <tbody id="tableBody" class="lg:divide-y lg:divide-gray-800" role="rowgroup">
@@ -6681,6 +8337,19 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             </div>
           </div>
 
+          <section id="wFinalizeReview" class="hidden rounded-xl border border-purple-500/50 bg-gray-950 p-3 space-y-3" aria-label="AI 统稿结果审阅">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div><h4 class="text-sm font-bold text-purple-200">🔍 AI 统稿结果 · 待审阅</h4>
+                <p id="wFinalizeReviewNote" class="text-xs text-gray-400 mt-1">左侧为生成前定稿，右侧为 AI 统稿结果；红色为原文删改，绿色为新增或改写。确认前不会覆盖已保存的定稿。</p></div>
+              <div class="flex gap-2"><button type="button" id="btnAcceptFinalize" onclick="acceptFinalizedScript()" class="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold">✅ 确认替换并保存</button>
+                <button type="button" id="btnDiscardFinalize" onclick="discardFinalizedScript()" class="px-3 py-1.5 rounded-lg border border-gray-600 text-gray-200 text-xs font-bold">放弃结果</button></div>
+            </div>
+            <div class="flex flex-wrap items-center gap-4 text-xs"><span class="text-rose-300">−<span id="wFinalizeRemovedCount">0</span> 原文删改</span><span class="text-emerald-300">+<span id="wFinalizeAddedCount">0</span> 新增或改写</span>
+              <label class="text-gray-300"><input id="wFinalizeChangesOnly" type="checkbox" onchange="renderFinalizeDiffView()" class="accent-purple-500"> 仅看改动</label></div>
+            <div id="wFinalizeDiffBody" class="max-h-[55vh] overflow-auto rounded-lg border border-gray-800 bg-[#0d1117] text-xs leading-relaxed divide-y divide-gray-800/60"></div>
+            <p class="text-[11px] text-gray-400">对比按句子显示；刷新或切换工程后，未确认的结果不会保留。统稿依据章节稿生成，可能与当前定稿不同。</p>
+          </section>
+
           <!-- 统稿编辑报告 (可折叠，默认收起节省一屏空间) -->
           <div id="wEditorialLogContainer" class="px-3 py-1.5 rounded-xl bg-gray-950 border border-gray-800 text-xs shrink-0">
             <div class="font-bold text-gray-300 flex items-center justify-between cursor-pointer select-none" onclick="toggleEditorialLogDetails()">
@@ -6821,6 +8490,43 @@ function renderMainHtml(curProjectId = defaultProjectId) {
   </div>
   <!-- ✍️ 知识长视频文案创作工坊结束 -->
 
+  <!-- 最终渲染确认弹窗 -->
+  <div id="finalRenderConfirmModal" onclick="if(event.target===this) closeFinalRenderConfirmModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 hidden" role="dialog" aria-modal="true" aria-labelledby="finalRenderConfirmTitle">
+    <div class="card w-full max-w-md p-5 rounded-2xl border border-emerald-500/40 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-2.5 border-b border-gray-800">
+        <h3 id="finalRenderConfirmTitle" class="text-base font-black text-white flex items-center gap-2">
+          🎬 确认开始最终渲染
+        </h3>
+        <button type="button" onclick="closeFinalRenderConfirmModal()" class="w-8 h-8 rounded-lg bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white flex items-center justify-center transition cursor-pointer" aria-label="关闭">✕</button>
+      </div>
+
+      <div class="space-y-2.5 text-xs text-gray-300">
+        <div class="p-3 rounded-xl bg-gray-950/90 border border-gray-800 space-y-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-gray-400">当前工程</span>
+            <span id="finalRenderProjectName" class="font-bold text-amber-300 truncate">-</span>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-gray-400">镜头规模</span>
+            <span id="finalRenderSceneSummary" class="font-semibold text-white">-</span>
+          </div>
+        </div>
+        <p class="text-[11px] text-gray-400 leading-relaxed">
+          将使用当前已保存的镜头配置、配音及 BGM 进行 1080p 后台渲染。渲染期间切换工程或刷新页面不会中断任务。
+        </p>
+      </div>
+
+      <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-gray-800">
+        <button type="button" onclick="closeFinalRenderConfirmModal()" class="px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 text-gray-300 border border-gray-700 text-xs font-bold transition cursor-pointer">
+          取消
+        </button>
+        <button type="button" id="confirmStartFinalRenderBtn" onclick="confirmStartFinalRender()" class="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg transition cursor-pointer">
+          🚀 确认并开始渲染
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- 【核心升级】：全功能 AI 模型指令调度中心 (紧凑自适应·折叠免滑动版) -->
   <div id="visualModelModal" onclick="if(event.target===this) toggleVisualModelModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 hidden">
     <div class="card w-full max-w-4xl p-4 sm:p-5 rounded-2xl border border-purple-500/50 shadow-2xl flex flex-col max-h-[96vh] overflow-hidden">
@@ -6835,17 +8541,27 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         <button type="button" onclick="toggleVisualModelModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-300 hover:text-white bg-gray-800/80 hover:bg-rose-600/80 hover:border-rose-400 border border-gray-700 transition text-lg font-bold cursor-pointer shrink-0 shadow" title="关闭退出 (Esc)">✕</button>
       </div>
 
-      <!-- 弹窗内部主体（固定高度自适应，内部零上下滑动） -->
-      <div class="studio-modal-content space-y-2.5 pt-2.5 flex-1 flex flex-col justify-between overflow-hidden">
+      <!-- 弹窗内部主体（自适应高度，小屏幕支持内部滚动避免底部保存按钮被裁切） -->
+      <div class="studio-modal-content space-y-2.5 pt-2.5 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto pr-0.5">
+        <!-- 当前各阶段生效模型总览 -->
+        <div class="flex flex-wrap items-center gap-1.5 px-2.5 py-2 rounded-xl bg-gray-950/70 border border-gray-800 shrink-0">
+          <span class="text-[11px] font-bold text-purple-300 shrink-0">🤖 当前生效：</span>
+          <span id="currentWriterModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-200 border border-amber-500/35">📝 文案: deepseek-chat</span>
+          <span id="currentVideoModelBadge" class="px-2 py-0.5 rounded text-[11px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/35">🎬 视频: minimax/hailuo-3</span>
+          <span id="currentTextModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-purple-500/20 text-purple-200 border border-purple-500/35">✍️ 分镜: deepseek-chat</span>
+          <span id="currentImageModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-500/20 text-blue-200 border border-blue-500/35">🖼️ 生图: flux-3-image</span>
+          <span id="currentKeywordModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-cyan-500/20 text-cyan-200 border border-cyan-500/35">🔎 关键词: deepseek-chat</span>
+        </div>
         <!-- 1. 顶层快捷预设条与统一网关 (两列自适应高 ~75px) -->
         <div class="p-2.5 rounded-xl bg-gradient-to-r from-blue-950/60 via-purple-950/50 to-cyan-950/60 border border-cyan-500/30 shrink-0 space-y-1.5">
           <div class="flex flex-wrap items-center justify-between gap-1.5">
-            <div class="flex items-center gap-1.5 text-xs font-black text-cyan-300">
+            <div class="flex items-center gap-2 text-xs font-black text-cyan-300 flex-wrap">
               <span>🪐 一键载入全家桶预设：</span>
+              <span id="modelCatalogStatusBadge" class="text-[10px] font-mono font-normal text-gray-400">⏳ 正在拉取实时模型列表...</span>
             </div>
             <div class="flex flex-wrap items-center gap-1">
               <button type="button" onclick="refreshAllOpenRouterModels(true)" id="btnRefreshOrModels" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-600/30 hover:bg-emerald-600/60 text-emerald-200 border border-emerald-400/50 transition shadow-sm cursor-pointer">
-                <span>🔄 刷新 OpenRouter 模型列表</span>
+                <span>🔄 刷新全部模型列表</span>
               </button>
               <button type="button" onclick="applyModelPreset('gemini')" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-600/30 hover:bg-blue-600/60 text-blue-200 border border-blue-400/50 transition shadow-sm">
                 <span>🪐 Gemini 生态</span>
@@ -6873,8 +8589,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <div class="flex items-center justify-between mb-0.5">
                 <label class="text-[10px] font-bold text-gray-300">🌐 统一 Base URL 网关：</label>
                 <div class="flex items-center gap-1.5 text-[9px]">
-                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://openrouter.ai/api/v1'" class="text-purple-400 hover:underline">OpenRouter</button>
-                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://generativelanguage.googleapis.com/v1beta/openai'" class="text-blue-400 hover:underline">Gemini</button>
+                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://openrouter.ai/api/v1'; refreshAllOpenRouterModels(false);" class="text-purple-400 hover:underline cursor-pointer">OpenRouter</button>
+                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://generativelanguage.googleapis.com/v1beta/openai'; refreshAllOpenRouterModels(false);" class="text-blue-400 hover:underline cursor-pointer">Gemini</button>
                 </div>
               </div>
               <div class="flex items-center gap-1">
@@ -6925,11 +8641,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             </button>
             <div id="accordionBodyModel1" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5">
               <datalist id="openrouterModelsList"></datalist>
+              <input type="search" id="writerModelSearch" oninput="filterModelSelect('writer')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-purple-400" />
               <select id="writerModelSelect" onchange="if(this.value) selectWriterModelSlug(this.value)" style="color-scheme: dark;"
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-purple-500/40 text-purple-100 font-mono focus:outline-none focus:border-purple-400 cursor-pointer">
                 <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
               </select>
-              <input type="text" id="currentWriterModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" placeholder="从上方下拉选择，或手动输入/搜索模型 slug..."
+              <input type="text" id="currentWriterModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入/搜索模型 slug..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-purple-500/50 text-purple-200 font-mono font-bold focus:outline-none focus:border-purple-400" />
             </div>
           </div>
@@ -6945,11 +8663,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span id="accordionArrowModel2" class="text-[10px] text-gray-400 font-mono transition">▶</span>
             </button>
             <div id="accordionBodyModel2" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="videoModelSearch" oninput="filterModelSelect('video')" placeholder="🔍 实时搜索视频模型（如 veo / seedance / kling / hailuo / wan）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-emerald-400" />
               <select id="videoModelSelect" onchange="if(this.value) selectVideoModelSlug(this.value)" style="color-scheme: dark;"
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-emerald-500/40 text-emerald-100 font-mono focus:outline-none focus:border-emerald-400 cursor-pointer">
                 <option value="">⏳ 正在从 OpenRouter 拉取视频模型列表...</option>
               </select>
-              <input type="text" id="currentVideoModelInput" list="openrouterVideoModelsList" value="minimax/hailuo-3" placeholder="从上方下拉选择，或手动输入视频模型 slug..."
+              <input type="text" id="currentVideoModelInput" list="openrouterVideoModelsList" value="minimax/hailuo-3" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入视频模型 slug..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-emerald-500/50 text-emerald-200 font-mono font-bold focus:outline-none focus:border-emerald-400" />
               <datalist id="openrouterVideoModelsList"></datalist>
             </div>
@@ -6966,11 +8686,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span id="accordionArrowModel3" class="text-[10px] text-gray-400 font-mono transition">▶</span>
             </button>
             <div id="accordionBodyModel3" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="textModelSearch" oninput="filterModelSelect('text')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-purple-400" />
               <select id="textModelSelect" onchange="if(this.value) selectTextModelSlug(this.value)" style="color-scheme: dark;"
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-purple-500/40 text-purple-100 font-mono focus:outline-none focus:border-purple-400 cursor-pointer">
                 <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
               </select>
-              <input type="text" id="currentTextModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" placeholder="从上方下拉选择，或手动输入分镜提炼模型 slug..."
+              <input type="text" id="currentTextModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入分镜提炼模型 slug..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-purple-400" />
             </div>
           </div>
@@ -6986,11 +8708,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span id="accordionArrowModel4" class="text-[10px] text-gray-400 font-mono transition">▶</span>
             </button>
             <div id="accordionBodyModel4" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="imageModelSearch" oninput="filterModelSelect('image')" placeholder="🔍 实时搜索生图模型（如 flux / gemini / recraft / gpt-image / seedream）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-blue-400" />
               <select id="imageModelSelect" onchange="if(this.value) selectImageModelSlug(this.value)" style="color-scheme: dark;"
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-blue-500/40 text-blue-100 font-mono focus:outline-none focus:border-blue-400 cursor-pointer">
                 <option value="">⏳ 正在从 OpenRouter 拉取生图模型列表...</option>
               </select>
-              <input type="text" id="currentImageModelInput" list="openrouterImageModelsList" value="black-forest-labs/flux-3-image" placeholder="从上方下拉选择，或手动输入生图模型 slug..."
+              <input type="text" id="currentImageModelInput" list="openrouterImageModelsList" value="black-forest-labs/flux-3-image" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入生图模型 slug..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-blue-400" />
               <datalist id="openrouterImageModelsList"></datalist>
             </div>
@@ -7007,12 +8731,36 @@ function renderMainHtml(curProjectId = defaultProjectId) {
               <span id="accordionArrowModel5" class="text-[10px] text-gray-400 font-mono transition">▶</span>
             </button>
             <div id="accordionBodyModel5" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="bgmModelSearch" oninput="filterModelSelect('bgm')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-amber-400" />
               <select id="bgmModelSelect" onchange="if(this.value) selectBgmModelSlug(this.value)" style="color-scheme: dark;"
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-amber-500/40 text-amber-100 font-mono focus:outline-none focus:border-amber-400 cursor-pointer">
                 <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
               </select>
-              <input type="text" id="currentBgmModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" placeholder="从上方下拉选择，或手动输入 BGM 模型 slug..."
+              <input type="text" id="currentBgmModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入 BGM 模型 slug..."
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-amber-400" />
+            </div>
+          </div>
+
+          <!-- Item 6: 🔎 AI 搜索关键词提炼模型 (Keyword Extractor) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(6)" id="accordionHeaderModel6" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-300 font-bold flex items-center justify-center text-[10px] shrink-0">6</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🔎 AI 搜索关键词提炼模型（纯中文素材检索词）</span>
+                <span id="modelHeaderBadgeKeyword" class="px-2 py-0.2 rounded text-[10px] font-mono bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 truncate max-w-[200px]">deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel6" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel6" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="keywordModelSearch" oninput="filterModelSelect('keyword')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-cyan-400" />
+              <select id="keywordModelSelect" onchange="if(this.value) selectKeywordModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-cyan-500/40 text-cyan-100 font-mono focus:outline-none focus:border-cyan-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentKeywordModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入关键词提炼模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-cyan-400" />
             </div>
           </div>
         </div>
@@ -7044,11 +8792,11 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         <div>
           <label class="block text-xs font-semibold text-gray-300 mb-1">选择配音提供商：</label>
           <div class="grid grid-cols-2 gap-3">
-            <label class="flex items-center gap-2 p-2.5 rounded-xl border border-rose-500 bg-rose-500/10 cursor-pointer text-xs font-bold text-rose-200">
+            <label id="labelAudioProviderElevenlabs" class="flex items-center gap-2 p-2.5 rounded-xl border border-gray-700 bg-gray-900 cursor-pointer text-xs font-bold text-gray-400 transition">
               <input type="radio" name="audioProvider" value="elevenlabs" onchange="updateAudioProviderUI()" />
-              <span>ElevenLabs (Multilingual v2)</span>
+              <span>ElevenLabs 云端配音</span>
             </label>
-            <label class="flex items-center gap-2 p-2.5 rounded-xl border border-gray-700 bg-gray-900 cursor-pointer text-xs font-bold text-gray-400">
+            <label id="labelAudioProviderVoicebox" class="flex items-center gap-2 p-2.5 rounded-xl border border-rose-500 bg-rose-500/10 cursor-pointer text-xs font-bold text-rose-200 transition">
               <input type="radio" name="audioProvider" value="voicebox" checked onchange="updateAudioProviderUI()" />
               <span>Voicebox 本地模型</span>
             </label>
@@ -7061,179 +8809,289 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             ElevenLabs API Key：
             <a href="https://elevenlabs.io" target="_blank" class="text-rose-400 hover:underline text-[11px] font-normal ml-2">获取 API Key ↗</a>
           </label>
-          <input type="password" id="elevenlabsKeyInput" placeholder="在此输入 xi-api-key（或在根目录 .env 中写入）..." class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500" />
+          <div class="flex items-center gap-2">
+            <input type="password" id="elevenlabsKeyInput" oninput="onElevenlabsKeyInputChange()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadElevenlabsVoices(true);}" placeholder="在此输入 xi-api-key（或在根目录 .env 中写入）..." class="flex-1 px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500" />
+            <button type="button" id="btnFetchElevenlabsVoices" onclick="loadElevenlabsVoices(true)" class="px-3 py-2 text-xs font-bold rounded-xl bg-rose-600/25 hover:bg-rose-600 text-rose-100 border border-rose-500/40 transition shrink-0 cursor-pointer">
+              🔄 拉取我的音色
+            </button>
+          </div>
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-gray-300 mb-1">精选纪录片音色 (Voice ID)：</label>
-          <select id="voiceIdSelect" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">
-            <option value="21m00Tcm4TlvDq8ikWAM">Rachel - 知性沉稳纪录片女主播 (推荐中文)</option>
-            <option value="ErXwobaYiN019PkySvjV">Antoni - 沉静克制学术旁白 (男声)</option>
-            <option value="pNInz6obpgDQGcFmaJgB">Adam - 权威宏大历史讲述 (深沉男声)</option>
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <label class="block text-xs font-semibold text-gray-300">我的 ElevenLabs 音色列表 (Voice ID)：</label>
+            <div class="flex items-center gap-2">
+              <span id="elevenlabsVoiceStatus" class="text-[11px] text-gray-400"></span>
+              <button type="button" id="btnPreviewElevenlabsVoice" onclick="previewSelectedElevenlabsVoice()" disabled class="px-2 py-0.5 text-[11px] font-semibold rounded-lg bg-gray-800 hover:bg-gray-700 text-rose-200 border border-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer">
+                ▶ 试听原声
+              </button>
+            </div>
+          </div>
+          <select id="voiceIdSelect" onchange="onElevenlabsVoiceSelectChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">
+            <option value="">请先输入 API Key 并点击「拉取我的音色」</option>
           </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 mb-1">语音模型 (Model)：</label>
+            <select id="elevenlabsModelSelect" onchange="syncElevenlabsStabilityStep(true)" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">
+              <option value="eleven_v4">Eleven v4（推荐，精细可调）</option>
+              <option value="eleven_v4_turbo">Eleven v4 Turbo（极速）</option>
+              <option value="eleven_v3">Eleven v3（表现力强，3档稳定度）</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 mb-1">语言 (Language)：</label>
+            <select id="elevenlabsLanguageSelect" onchange="onElevenlabsParamChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">
+              <option value="zh">中文（推荐）</option>
+              <option value="">自动检测</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 p-3 rounded-xl bg-gray-950/70 border border-gray-800">
+          <div>
+            <div class="flex items-center justify-between text-xs mb-1">
+              <span class="font-semibold text-gray-300">稳定性 (Stability)</span>
+              <span id="elevenlabsStabilityLabel" class="font-mono text-rose-300 font-bold">35%</span>
+            </div>
+            <input type="range" id="elevenlabsStabilitySlider" min="0" max="1" step="0.05" value="0.35" oninput="onElevenlabsParamChange()" class="w-full accent-rose-500 cursor-pointer" />
+            <div class="flex justify-between text-[10px] text-gray-500 mt-0.5">
+              <span>创意</span>
+              <span>稳健</span>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-xs mb-1">
+              <span class="font-semibold text-gray-300">相似度 (Similarity)</span>
+              <span id="elevenlabsSimilarityLabel" class="font-mono text-rose-300 font-bold">80%</span>
+            </div>
+            <input type="range" id="elevenlabsSimilaritySlider" min="0" max="1" step="0.05" value="0.8" oninput="onElevenlabsParamChange()" class="w-full accent-rose-500 cursor-pointer" />
+            <div class="flex justify-between text-[10px] text-gray-500 mt-0.5">
+              <span>低</span>
+              <span>高</span>
+            </div>
+          </div>
         </div>
         </div>
 
         <div id="voiceboxFields">
           <label class="block text-xs font-semibold text-gray-300 mb-1">Voicebox 本地音色：</label>
-          <select id="voiceboxProfileSelect" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white">
+          <select id="voiceboxProfileSelect" onchange="onVoiceboxProfileSelectChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white">
             <option value="">正在读取本地音色…</option>
           </select>
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-gray-300 mb-1">试听或测试文本：</label>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">试听测试文本（仅用于「试听测试」）：</label>
           <textarea id="sampleAudioText" rows="2" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">这是来自 WhyVideo 工作台的高保真纪录片旁白语音测试。</textarea>
+        </div>
+        <div id="fullScriptSummaryBox" class="px-3 py-2 rounded-xl bg-emerald-950/35 border border-emerald-500/30 text-xs text-emerald-200">
+          📄 全片旁白：确认保存当前配音引擎设置后，点击主界面顶部的「🎙️ 一键生成全片旁白」即可生成整部视频配音并对齐时间轴
         </div>
         <label id="useAsNarrationLabel" class="flex items-center gap-2 text-xs text-gray-300">
           <input type="checkbox" id="useAsNarrationCheckbox" class="accent-emerald-500" />
-          将本次完整配音设为当前工程成片旁白
+          试听测试时也设为当前工程成片旁白（Voicebox）
         </label>
-        <div id="voiceboxJobStatus" class="text-xs text-gray-400"></div>
+        <div id="voiceboxJobStatus" class="text-xs text-gray-300 font-medium"></div>
 
         <div id="audioPlayerContainer" class="hidden p-3 rounded-xl bg-gray-950 border border-gray-800">
           <audio id="audioPreviewPlayer" controls class="w-full h-8"></audio>
         </div>
       </div>
 
-      <div class="flex justify-end gap-3 pt-3 border-t border-gray-800">
-        <button onclick="toggleAudioModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300">
-          关闭
+      <div class="flex flex-wrap justify-end gap-2.5 pt-3 border-t border-gray-800">
+        <button onclick="toggleAudioModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+          取消
         </button>
-        <button onclick="synthesizeTestVoice()" id="btnSynth" class="px-5 py-2 text-xs font-bold rounded-xl bg-rose-600 hover:bg-rose-500 text-white transition shadow-lg">
-          🔊 立即生成测试配音
+        <button onclick="cancelVoiceboxJob()" id="btnCancelVoicebox" class="hidden px-4 py-2 text-xs font-semibold rounded-xl bg-gray-800 hover:bg-gray-700 border border-rose-500/50 text-rose-300 transition cursor-pointer">
+          🛑 取消配音
+        </button>
+        <button onclick="synthesizeTestVoice()" id="btnSynth" class="px-4 py-2 text-xs font-bold rounded-xl bg-rose-600/80 hover:bg-rose-500 text-white transition shadow cursor-pointer">
+          🔊 试听测试配音
+        </button>
+        <button onclick="confirmSaveAudioConfig()" id="btnConfirmAudioConfig" class="px-5 py-2 text-xs font-extrabold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white transition shadow-lg cursor-pointer">
+          ✅ 确认保存设置
         </button>
       </div>
     </div>
   </div>
 
   <!-- 🎵 AI 自适应 BGM 背景音乐与闭环 Review 工作台 -->
-  <div id="bgmModal" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
-    <div class="card w-full max-w-2xl p-6 rounded-2xl border border-amber-500/50 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+  <div id="bgmModal" onclick="if(event.target===this) toggleBgmModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-3xl p-6 rounded-2xl border border-amber-500/50 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
       <div class="flex items-center justify-between pb-3 border-b border-gray-800">
         <div>
           <h3 class="text-lg font-bold text-white flex items-center gap-2">
             🎵 AI 自适应 BGM 音乐与审查工作台
           </h3>
           <p class="text-xs text-amber-300/80 mt-0.5">
-            根据旁白抑扬顿挫自适应编曲 · 4 点闭环审查 · 自动人声避让 (Ducking)
+            AI 台词情绪弧度分析 · 本地授权音轨管理 · 自动人声避让 (Ducking) · 同步 Remotion 渲染
           </p>
         </div>
         <button type="button" onclick="toggleBgmModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800/80 transition duration-150 text-xl font-bold cursor-pointer shrink-0 border border-transparent hover:border-gray-700" title="关闭退出 (Esc)">✕</button>
       </div>
 
       <div class="space-y-4">
-        <!-- 调度模型提示 -->
-        <div class="flex items-center justify-between px-3.5 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
-          <span>🧠 当前调度模型：<b id="bgmModelActiveDisplay" class="font-mono text-white">OpenRouter / deepseek-chat</b></span>
-          <button type="button" onclick="toggleBgmModal(); toggleVisualModelModal();" class="text-purple-400 hover:underline font-bold text-[11px]">
-            ⚙️ 切换模型 ↗
-          </button>
+        <!-- 顶部调度模型 + 启用开关 -->
+        <div class="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
+          <div class="flex items-center gap-3 flex-wrap">
+            <span>🧠 当前调度模型：<b id="bgmModelActiveDisplay" class="font-mono text-white">加载中...</b></span>
+            <button type="button" onclick="toggleBgmModal(); toggleVisualModelModal('bgm');" class="text-purple-400 hover:underline font-bold text-[11px] cursor-pointer">
+              ⚙️ 切换模型 ↗
+            </button>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer select-none px-2.5 py-1 rounded-lg bg-gray-900/80 border border-amber-500/40">
+            <input type="checkbox" id="bgmEnabledToggle" onchange="onBgmSettingsInput()" class="accent-amber-400 w-4 h-4 cursor-pointer" />
+            <span class="text-xs font-bold text-white">启用 BGM 音轨（挂载至成片）</span>
+          </label>
         </div>
 
         <!-- 步骤 1：台词情绪起伏与节奏曲线 -->
-        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-gray-200 flex items-center gap-1.5">
-              <span>📈 步骤一：全片台词情绪起伏与节奏弧度</span>
-            </span>
-            <span class="text-[10px] text-gray-400 font-mono">已智能解析当前工程 3 个章节的情绪阶段</span>
-          </div>
-          <div class="grid grid-cols-3 gap-2 text-center text-xs">
-            <div class="p-2.5 rounded-xl bg-gray-900 border border-gray-800">
-              <div class="text-[10px] text-gray-400">01 序幕引入 (0~15s)</div>
-              <div class="font-bold text-blue-300 mt-1">悬念探索 · 平和</div>
-              <div class="text-[10px] text-gray-500 mt-0.5 font-mono">建议电平: -18dB</div>
-            </div>
-            <div class="p-2.5 rounded-xl bg-gray-900 border border-amber-500/40 bg-amber-500/5">
-              <div class="text-[10px] text-amber-300">02 危机与高潮 (15~45s)</div>
-              <div class="font-bold text-amber-400 mt-1">48急弯悬崖 · 紧张激昂</div>
-              <div class="text-[10px] text-amber-300/80 mt-0.5 font-mono">建议电平: -12dB</div>
-            </div>
-            <div class="p-2.5 rounded-xl bg-gray-900 border border-gray-800">
-              <div class="text-[10px] text-gray-400">03 结语沉思 (45~60s)</div>
-              <div class="font-bold text-emerald-300 mt-1">湖泊使馆 · 宁静深远</div>
-              <div class="text-[10px] text-gray-500 mt-0.5 font-mono">建议电平: -20dB</div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 步骤 2：推荐自适应 BGM 候选轨 -->
         <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2.5">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-gray-200">🎼 步骤二：AI 自适应配乐候选轨</span>
-            <span class="text-[10px] text-gray-400">点击试听并对比审查得分</span>
-          </div>
-          <div class="space-y-2">
-            <div class="flex items-center justify-between p-3 rounded-xl bg-gray-900/90 border border-amber-500/50 hover:border-amber-400 transition">
-              <div>
-                <div class="text-xs font-bold text-white flex items-center gap-2">
-                  <span>Track A: 险峻史诗与东方空灵 (Epic History & Strings)</span>
-                  <span class="px-1.5 py-0.2 rounded text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30">推荐匹配 96%</span>
-                </div>
-                <div class="text-[10px] text-gray-400 mt-0.5">管弦交响 · 沉静启动后渐强 · 112 BPM · 契合急弯险峻山路与金箔灵庙</div>
-              </div>
-              <div class="flex items-center gap-2">
-                <button type="button" onclick="playBgmSample('epic')" id="btnPlayEpic" class="px-2.5 py-1 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-amber-300 border border-gray-700 transition">
-                  ▶ 试听片段
-                </button>
-              </div>
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span class="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                <span>📈 步骤一：全片台词情绪起伏与分段电平曲线</span>
+              </span>
+              <span id="bgmAnalyzeStatus" class="text-[11px] text-gray-400 block mt-0.5">读取当前工程镜头与台词时间轴...</span>
             </div>
-            <div class="flex items-center justify-between p-3 rounded-xl bg-gray-900/40 border border-gray-800 hover:border-gray-700 transition">
-              <div>
-                <div class="text-xs font-bold text-gray-300 flex items-center gap-2">
-                  <span>Track B: 现代公路纪实律动 (Modern Documentary Pulse)</span>
-                  <span class="px-1.5 py-0.2 rounded text-[9px] bg-blue-500/20 text-blue-300 border border-blue-500/30">匹配度 89%</span>
-                </div>
-                <div class="text-[10px] text-gray-400 mt-0.5">极简电音鼓点 · 沉浸推进 · 120 BPM · 适合自驾行驶感镜头</div>
-              </div>
-              <div class="flex items-center gap-2">
-                <button type="button" onclick="playBgmSample('pulse')" id="btnPlayPulse" class="px-2.5 py-1 text-xs rounded-lg bg-gray-800 hover:bg-gray-700 text-blue-300 border border-gray-700 transition">
-                  ▶ 试听片段
-                </button>
-              </div>
+            <button type="button" id="btnAnalyzeBgm" onclick="analyzeBgmWithAi()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-purple-600/30 hover:bg-purple-600/60 text-purple-100 border border-purple-400/50 transition cursor-pointer shrink-0">
+              🤖 AI 分析全片情绪弧度
+            </button>
+          </div>
+          <div id="bgmSegmentsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+            <div class="col-span-full p-3 rounded-xl bg-gray-900/70 border border-gray-800 text-gray-400 text-center">
+              正在加载当前工程情绪分段...
             </div>
           </div>
         </div>
 
-        <!-- 步骤 3：AI 闭环 Review 审查结果 -->
-        <div class="p-3.5 rounded-xl bg-gradient-to-br from-gray-950 via-purple-950/20 to-gray-900 border border-purple-500/30 space-y-2">
-          <div class="flex items-center justify-between">
+        <!-- 步骤 2：本地授权 BGM 曲库与真实试听 -->
+        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span class="text-xs font-bold text-gray-200">🎼 步骤二：本地授权 BGM 音轨选择与真实试听</span>
+              <span class="text-[10px] text-gray-400 block mt-0.5">支持上传 .mp3 / .wav / .m4a / .ogg / .aac（或直接放入工程 <code class="text-amber-300">public/audio/bgm/</code>）</span>
+            </div>
+            <div>
+              <input type="file" id="bgmFileInput" accept=".mp3,.wav,.m4a,.ogg,.aac,audio/*" class="hidden" onchange="handleBgmFileUpload(this)" />
+              <button type="button" id="btnUploadBgm" onclick="document.getElementById('bgmFileInput').click()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-500/20 hover:bg-amber-500/40 text-amber-200 border border-amber-400/50 transition cursor-pointer">
+                📤 上传本地 BGM
+              </button>
+            </div>
+          </div>
+
+          <div id="bgmTracksList" class="space-y-2">
+            <div class="p-3 rounded-xl bg-gray-900/60 border border-gray-800 text-xs text-gray-400 text-center">
+              正在读取工程本地 BGM 音轨...
+            </div>
+          </div>
+
+          <div id="bgmAudioPlayerWrap" class="hidden p-3 rounded-xl bg-gray-900/90 border border-amber-500/30 space-y-1.5">
+            <div id="bgmNowPlayingLabel" class="text-[11px] text-amber-300 font-semibold">正在试听...</div>
+            <audio id="bgmPreviewAudio" controls class="w-full h-9"></audio>
+          </div>
+
+          <div id="bgmRecommendationsBox" class="hidden pt-1 space-y-1.5">
+            <div class="text-[11px] font-bold text-purple-300">💡 AI 配乐选曲方向参考（可按此关键词挑选本地授权配乐）：</div>
+            <div id="bgmRecommendationsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+          </div>
+        </div>
+
+        <!-- 步骤 3：混音与人声避让参数 + 实时审查报告 -->
+        <div class="p-3.5 rounded-xl bg-gradient-to-br from-gray-950 via-purple-950/20 to-gray-900 border border-purple-500/30 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
             <span class="text-xs font-bold text-purple-200 flex items-center gap-1.5">
-              <span>🔍 步骤三：AI 音乐闭环审查报告 (Review Audit)</span>
+              <span>🎛️ 步骤三：混音参数、自动人声避让 (Ducking) 与审查报告</span>
             </span>
-            <span class="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-              综合评级: A+ (极佳匹配)
+            <span id="bgmAuditGradeBadge" class="px-2 py-0.5 rounded text-[10px] font-black bg-gray-800 text-gray-300 border border-gray-700">
+              待检测
             </span>
           </div>
-          <div class="grid grid-cols-3 gap-2 text-[11px] pt-1">
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-black/30 p-3 rounded-xl border border-gray-800/80">
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-gray-300 font-semibold">基准音量 (Base Gain)</label>
+                <span id="bgmBaseVolVal" class="font-mono text-amber-300 font-bold">-16 dB</span>
+              </div>
+              <input type="range" id="bgmBaseVolSlider" min="-30" max="-6" step="1" value="-16" oninput="onBgmSettingsInput()" class="w-full accent-amber-400 cursor-pointer" />
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="flex items-center gap-1.5 text-gray-300 font-semibold cursor-pointer">
+                  <input type="checkbox" id="bgmDuckingToggle" onchange="onBgmSettingsInput()" class="accent-emerald-400 cursor-pointer" checked />
+                  <span>人声避让深度 (Ducking)</span>
+                </label>
+                <span id="bgmDuckingDbVal" class="font-mono text-emerald-300 font-bold">-8 dB</span>
+              </div>
+              <input type="range" id="bgmDuckingDbSlider" min="-18" max="0" step="1" value="-8" oninput="onBgmSettingsInput()" class="w-full accent-emerald-400 cursor-pointer" />
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-gray-300 font-semibold">片头淡入 (Fade In)</label>
+                <span id="bgmFadeInVal" class="font-mono text-blue-300 font-bold">1.2s</span>
+              </div>
+              <input type="range" id="bgmFadeInSlider" min="0" max="5000" step="200" value="1200" oninput="onBgmSettingsInput()" class="w-full accent-blue-400 cursor-pointer" />
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-gray-300 font-semibold">片尾淡出 (Fade Out)</label>
+                <span id="bgmFadeOutVal" class="font-mono text-blue-300 font-bold">2.0s</span>
+              </div>
+              <input type="range" id="bgmFadeOutSlider" min="0" max="5000" step="200" value="2000" oninput="onBgmSettingsInput()" class="w-full accent-blue-400 cursor-pointer" />
+            </div>
+
+            <div class="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-gray-800/80 text-[11px]">
+              <label class="flex items-center gap-1.5 text-gray-300 cursor-pointer">
+                <input type="checkbox" id="bgmLoopToggle" onchange="onBgmSettingsInput()" class="accent-amber-400 cursor-pointer" checked />
+                <span>BGM 短于成片时自动循环播放 (Loop)</span>
+              </label>
+              <div class="flex items-center gap-3 text-gray-400">
+                <label class="flex items-center gap-1">起音(ms)
+                  <input type="number" id="bgmAttackMsInput" min="20" max="2000" step="20" value="180" oninput="onBgmSettingsInput()" class="w-16 px-1.5 py-0.5 rounded bg-gray-900 border border-gray-700 text-white font-mono text-[11px]" />
+                </label>
+                <label class="flex items-center gap-1">释放(ms)
+                  <input type="number" id="bgmReleaseMsInput" min="50" max="3000" step="20" value="420" oninput="onBgmSettingsInput()" class="w-16 px-1.5 py-0.5 rounded bg-gray-900 border border-gray-700 text-white font-mono text-[11px]" />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div id="bgmAuditSummary" class="text-[11px] text-gray-300"></div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
             <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
               <div class="text-[10px] text-gray-400">人声避让 (Ducking)</div>
-              <div class="font-bold text-emerald-400 mt-0.5">自动下潜 -6dB</div>
-              <div class="text-[9px] text-gray-500 mt-0.5">台词清晰不被掩盖</div>
+              <div id="bgmAuditDucking" class="font-semibold text-emerald-300 mt-0.5">-</div>
             </div>
             <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
-              <div class="text-[10px] text-gray-400">节奏卡点一致性</div>
-              <div class="font-bold text-emerald-400 mt-0.5">契合度 94%</div>
-              <div class="text-[9px] text-gray-500 mt-0.5">急弯镜头平滑切换</div>
+              <div class="text-[10px] text-gray-400">节奏与分段曲线</div>
+              <div id="bgmAuditPacing" class="font-semibold text-blue-300 mt-0.5">-</div>
             </div>
             <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
               <div class="text-[10px] text-gray-400">听觉疲劳度控制</div>
-              <div class="font-bold text-emerald-400 mt-0.5">优异 (舒缓释放)</div>
-              <div class="text-[9px] text-gray-500 mt-0.5">高潮后适度回落</div>
+              <div id="bgmAuditFatigue" class="font-semibold text-amber-300 mt-0.5">-</div>
             </div>
           </div>
+          <ul id="bgmAuditWarnings" class="hidden space-y-1 text-[11px] text-amber-300 bg-amber-950/30 border border-amber-500/30 rounded-lg p-2.5 list-disc list-inside"></ul>
         </div>
       </div>
 
-      <div class="flex items-center justify-between pt-3 border-t border-gray-800">
-        <span class="text-[11px] text-gray-400">💡 确认后将自动挂载至 Remotion <code class="text-amber-300">audio_track.bgm</code> 音轨</span>
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-800">
+        <span id="bgmFooterHint" class="text-[11px] text-gray-400">💡 保存后将自动编译至 Remotion <code class="text-amber-300">audio_track.bgm</code> 音轨</span>
         <div class="flex items-center gap-2">
-          <button onclick="toggleBgmModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300">
+          <button type="button" onclick="toggleBgmModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
             关闭
           </button>
-          <button onclick="applyBgmToProject()" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:brightness-110 text-gray-950 transition shadow-lg">
-            💾 确认并应用本套自适应 BGM
+          <button type="button" id="btnSaveBgm" onclick="applyBgmToProject()" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:brightness-110 text-gray-950 transition shadow-lg cursor-pointer">
+            💾 保存并同步至 Remotion
           </button>
         </div>
       </div>
@@ -7525,6 +9383,89 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             取消
           </button>
           <button type="button" id="btnSaveWriterPrompts" onclick="saveWriterPromptsFromModal()" class="px-4 py-1.5 text-xs font-black rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:brightness-110 text-gray-950 shadow-lg cursor-pointer">
+            💾 保存并应用到当前工程
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 视觉分镜台提示词模板与视觉风格预设弹窗 (与文案创作台保持一致 · 仅对当前工程生效 · 全量可编辑) -->
+  <div id="producerPromptsModal" onclick="if(event.target===this) closeProducerPromptsModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 hidden">
+    <div class="card w-full max-w-5xl max-h-[92vh] p-5 rounded-2xl border border-teal-500/50 shadow-2xl flex flex-col gap-3.5 overflow-hidden bg-gray-950">
+      <!-- Header -->
+      <div class="flex items-center justify-between pb-3 border-b border-gray-800 shrink-0">
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <span class="text-base font-black text-white flex items-center gap-1.5">
+            <span>⚙️</span><span>视觉分镜台提示词模板与风格预设</span>
+          </span>
+          <span id="producerModalPromptBadge" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700">
+            出厂默认基线
+          </span>
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            仅对当前工程生效 · <code id="producerPromptsTargetProjId" class="font-mono"></code>
+          </span>
+        </div>
+        <button type="button" onclick="closeProducerPromptsModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer text-lg">✕</button>
+      </div>
+
+      <!-- Stage Selector Tabs -->
+      <div id="producerPromptStageTabs" class="flex items-center gap-1.5 overflow-x-auto pb-2 border-b border-gray-800/80 shrink-0">
+      </div>
+
+      <!-- Main Editor + Variables & Style Presets Drawer -->
+      <div class="studio-modal-content grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1 min-h-0 overflow-hidden">
+        <div class="lg:col-span-8 flex flex-col gap-2 min-h-[340px]">
+          <div class="flex items-center justify-between text-xs shrink-0">
+            <span id="producerPromptEditorTitle" class="font-bold text-teal-300">当前编辑：1. 搜索关键词</span>
+            <span class="text-[11px] text-gray-400">支持全量编辑 System Prompt 及 {{ 变量 }} 占位符</span>
+          </div>
+          <div id="producerPromptStageDesc" class="text-[11px] text-gray-400 shrink-0"></div>
+          <textarea id="producerPromptTextarea" spellcheck="false" oninput="onProducerPromptTextareaInput()" class="flex-1 min-h-[300px] w-full bg-[#030712] text-gray-100 font-mono text-xs leading-relaxed border border-gray-700 focus:border-teal-400 focus:outline-none rounded-xl p-3.5 resize-none"></textarea>
+          <div id="producerPromptEditorStatus" class="text-[11px] text-gray-400 shrink-0">
+            提示：当前工程修改只保存在本工程目录，新建或切换其他工程默认沿用出厂基线。
+          </div>
+        </div>
+
+        <div class="lg:col-span-4 bg-gray-900/70 border border-gray-800 rounded-xl p-3.5 overflow-y-auto flex flex-col gap-3.5 text-[11px]">
+          <div>
+            <div class="font-bold text-gray-200 mb-1">📌 点击插入允许的变量</div>
+            <div class="text-gray-400 mb-2">点击下方标签可直接插入光标处：</div>
+            <div id="producerPromptVarsList" class="flex flex-wrap gap-1.5">
+            </div>
+          </div>
+
+          <div class="border-t border-gray-800 pt-3">
+            <div class="font-bold text-gray-200 mb-1">🎨 视觉风格预设（点击追加到末尾）</div>
+            <div class="text-gray-400 mb-2">快速注入不同纪录片视觉与检索风格：</div>
+            <div id="producerStylePresetsList" class="flex flex-col gap-1.5">
+            </div>
+          </div>
+
+          <div class="border-t border-gray-800 pt-3 text-gray-400 space-y-1 leading-relaxed">
+            <div class="font-bold text-gray-200">🛡️ 生效与保护规则</div>
+            <div>• <b>单工程隔离</b>：保存至 <code class="text-teal-300">data/producer-prompts.json</code>，不影响其他工程。</div>
+            <div>• <b>JSON 契约提醒</b>：「1. 搜索关键词」与「5. 口语剪辑编译」需解析 JSON，编辑时请保留 JSON 输出说明。</div>
+            <div>• <b>变量白名单</b>：严禁引入当前阶段未登记的 <code class="text-amber-300">{{未知变量}}</code>。</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-800 shrink-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" onclick="resetProducerPromptsFromModal(true)" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-500/40 transition cursor-pointer">
+            ↺ 重置本阶段为出厂默认
+          </button>
+          <button type="button" onclick="resetProducerPromptsFromModal(false)" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-500/40 transition cursor-pointer">
+            ↺ 全部恢复出厂基线
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="closeProducerPromptsModal()" class="px-4 py-1.5 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+            取消
+          </button>
+          <button type="button" id="btnSaveProducerPrompts" onclick="saveProducerPromptsFromModal()" class="px-4 py-1.5 text-xs font-black rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:brightness-110 text-gray-950 shadow-lg cursor-pointer">
             💾 保存并应用到当前工程
           </button>
         </div>
@@ -8711,44 +10652,82 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       showToast(\`💾 第 \${targetNum} 章已保存（并同步至定稿全文与概览）！\`);
     }
 
-    async function aiFinalizeFullScript() {
-      const outline = writerData?.outline;
-      const chapters = writerData?.chapters || [];
-      const model = document.getElementById('wInputModel').value;
-      const btn = document.getElementById('btnAiFinalize');
+    let pendingFinalizedScript = null;
 
+    function getFinalizedScriptText(script) {
+      const seg = script?.script_segments;
+      if (seg) return [seg.opening, ...(seg.chapters || []).map((c) => c.narration_text), seg.ending].filter(Boolean).map((v) => String(v).trim()).filter(Boolean).join('\\n\\n');
+      return String(script?.full_narration_text || script?.content || (script?.approved_narration_sentences || []).join('\\n')).trim();
+    }
+
+    async function aiFinalizeFullScript() {
+      if (pendingFinalizedScript && !window.confirm('已有待审阅的统稿结果，重新生成会丢弃该结果。是否继续？')) return;
+      const projectId = activeProjectId;
+      const before = document.getElementById('wFinalScriptFullText').value;
+      const btn = document.getElementById('btnAiFinalize');
       btn.disabled = true;
       btn.innerHTML = '<span>⏳ 正在全文去重去伪结尾与统稿...</span>';
       try {
-        const res = await fetch('/api/writer/ai/finalize-script?project=' + activeProjectId, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            outline,
-            chapters,
-            evidenceCards: writerData?.evidenceCards || [],
-            model,
-            apiKey: visualConfig.apiKey,
-            baseUrl: visualConfig.baseUrl,
-          }),
+        const res = await fetch('/api/writer/ai/finalize-script?project=' + encodeURIComponent(projectId), {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outline: writerData?.outline, chapters: writerData?.chapters || [], evidenceCards: writerData?.evidenceCards || [], model: document.getElementById('wInputModel').value, apiKey: visualConfig.apiKey, baseUrl: visualConfig.baseUrl }),
         });
         const data = await res.json();
-        if (data.ok && data.finalScript) {
-          writerData.finalScript = data.finalScript;
-          renderFinalScriptView();
-          setWriterPersistenceStatus('saved');
-          showToast(data.usedFallback
-            ? '已合并完整章节稿，请重新执行 AI 统稿完成证据复核。'
-            : '🎉 全文统稿去伪结尾完成，文案已定稿！');
-        } else {
-          alert('全文统稿失败: ' + (data.error || '异常'));
-        }
-      } catch (err) {
-        alert('请求失败: ' + err.message);
-      } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<span>🤖 AI 全文统稿去重去伪结尾</span>';
+        if (!res.ok || !data.ok || !data.finalScript) throw new Error(data.error || '异常');
+        if (activeProjectId !== projectId) { showToast('工程已切换，本次统稿结果未保存。'); return; }
+        pendingFinalizedScript = { projectId, before, result: data.finalScript, fallback: data.usedFallback };
+        const note = document.getElementById('wFinalizeReviewNote');
+        note.textContent = data.usedFallback
+          ? '模型未返回完整结果，右侧是合并后的章节稿，尚需 AI 统稿复核。确认前不会覆盖定稿。'
+          : '左侧为生成前定稿，右侧为 AI 统稿结果；红色为原文删改，绿色为新增或改写。确认前不会覆盖已保存的定稿。';
+        document.getElementById('wFinalizeReview').classList.remove('hidden');
+        renderFinalizeDiffView();
+        document.getElementById('wFinalizeReview').scrollIntoView({ behavior: 'smooth', block: 'start' });
+        showToast('统稿结果已生成，请先审阅并确认。');
+      } catch (err) { alert('全文统稿失败: ' + err.message); }
+      finally { btn.disabled = false; btn.innerHTML = '<span>🤖 AI 全文统稿去重去伪结尾</span>'; }
+    }
+
+    function renderFinalizeDiffView() {
+      if (!pendingFinalizedScript) return;
+      renderScriptDiff({ bodyId: 'wFinalizeDiffBody', addedId: 'wFinalizeAddedCount', removedId: 'wFinalizeRemovedCount', changesId: 'wFinalizeChangesOnly', before: pendingFinalizedScript.before, after: getFinalizedScriptText(pendingFinalizedScript.result), mode: 'split', leftLabel: '生成前定稿', rightLabel: 'AI 统稿结果' });
+    }
+
+    function discardFinalizedScript() {
+      pendingFinalizedScript = null;
+      document.getElementById('wFinalizeReview').classList.add('hidden');
+      showToast('已放弃统稿结果，原定稿保持不变。');
+    }
+
+    async function acceptFinalizedScript() {
+      const pending = pendingFinalizedScript;
+      if (!pending || pending.projectId !== activeProjectId) return;
+      if (document.getElementById('wFinalScriptFullText').value !== pending.before) {
+        alert('生成期间定稿内容发生了变化。为避免覆盖新修改，请放弃此结果并重新生成。'); return;
       }
+      const btn = document.getElementById('btnAcceptFinalize');
+      const discardBtn = document.getElementById('btnDiscardFinalize');
+      const textarea = document.getElementById('wFinalScriptFullText');
+      btn.disabled = true;
+      discardBtn.disabled = true;
+      textarea.disabled = true;
+      btn.textContent = '⏳ 正在保存...';
+      try {
+        const res = await fetch('/api/writer/save?project=' + encodeURIComponent(pending.projectId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ part: 'finalScript', data: pending.result }) });
+        const data = await res.json();
+        if (!res.ok || !data.ok) throw new Error(data.error || '保存失败');
+        if (activeProjectId === pending.projectId && pendingFinalizedScript === pending) {
+          writerData.finalScript = data.finalScript || pending.result;
+          writerData.hasExistingContent = true;
+          renderFinalScriptView();
+          applyWriterInspectorMode(writerData);
+          setWriterPersistenceStatus('saved');
+          pendingFinalizedScript = null;
+          document.getElementById('wFinalizeReview').classList.add('hidden');
+          showToast(pending.fallback ? '章节合并稿已保存，仍需 AI 统稿复核。' : '✅ 已确认并保存 AI 统稿结果。');
+        }
+      } catch (err) { alert('保存失败，审阅结果仍保留：' + err.message); }
+      finally { btn.disabled = false; discardBtn.disabled = false; textarea.disabled = false; btn.textContent = '✅ 确认替换并保存'; }
     }
 
     function setWriterPersistenceStatus(mode, customText) {
@@ -9028,30 +11007,34 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     }
 
     function renderHumanizeDiffView() {
-      const bodyEl = document.getElementById('wHumanizeDiffBody');
+      renderScriptDiff({ bodyId: 'wHumanizeDiffBody', addedId: 'wDiffAddedCount', removedId: 'wDiffRemovedCount', changesId: 'wDiffChangesOnlyCheckbox', before: rawScriptBackupBeforeHumanize, after: latestHumanizedText || document.getElementById('wFinalScriptFullText')?.value || '', mode: humanizeDiffMode, leftLabel: '修复前原稿', rightLabel: '修复后新版' });
+    }
+
+    function renderScriptDiff({ bodyId, addedId, removedId, changesId, before, after, mode, leftLabel, rightLabel }) {
+      const bodyEl = document.getElementById(bodyId);
       if (!bodyEl) return;
-      const beforeTokens = tokenizeScriptForDiff(rawScriptBackupBeforeHumanize);
-      const afterTokens = tokenizeScriptForDiff(latestHumanizedText || document.getElementById('wFinalScriptFullText')?.value || '');
+      const beforeTokens = tokenizeScriptForDiff(before);
+      const afterTokens = tokenizeScriptForDiff(after);
       const diffOps = computeLineDiff(beforeTokens, afterTokens);
 
       const addedCount = diffOps.filter((o) => o.type === 'add').length;
       const removedCount = diffOps.filter((o) => o.type === 'del').length;
-      const addEl = document.getElementById('wDiffAddedCount');
-      const remEl = document.getElementById('wDiffRemovedCount');
+      const addEl = document.getElementById(addedId);
+      const remEl = document.getElementById(removedId);
       if (addEl) addEl.textContent = addedCount;
       if (remEl) remEl.textContent = removedCount;
 
-      const changesOnly = Boolean(document.getElementById('wDiffChangesOnlyCheckbox')?.checked);
+      const changesOnly = Boolean(document.getElementById(changesId)?.checked);
       const visibleOps = changesOnly ? diffOps.filter((o) => o.type !== 'same') : diffOps;
 
       const escHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
       if (visibleOps.length === 0) {
-        bodyEl.innerHTML = '<div class="p-4 text-center text-gray-500">本次修复前后语句完全一致，未产生文字差异。</div>';
+        bodyEl.innerHTML = '<div class="p-4 text-center text-gray-500">前后语句完全一致，未产生文字差异。</div>';
         return;
       }
 
-      if (humanizeDiffMode === 'unified') {
+      if (mode === 'unified') {
         bodyEl.innerHTML = visibleOps
           .map((op) => {
             if (op.type === 'del') {
@@ -9087,7 +11070,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           }
         }
         bodyEl.innerHTML =
-          '<div class="grid grid-cols-2 bg-gray-900/90 text-[10px] font-bold text-gray-400 px-3 py-1.5 sticky top-0 border-b border-gray-800"><div>📄 修复前原稿</div><div class="pl-3 border-l border-gray-800">✨ 修复后新版</div></div>' +
+          \`<div class="grid grid-cols-2 bg-gray-900/90 text-[10px] font-bold text-gray-400 px-3 py-1.5 sticky top-0 border-b border-gray-800"><div>📄 \${leftLabel}</div><div class="pl-3 border-l border-gray-800">✨ \${rightLabel}</div></div>\` +
           rows
             .map((r) => {
               const leftHtml = r.left
@@ -9776,10 +11759,331 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
+    function restoreElevenlabsParams() {
+      const modelEl = document.getElementById('elevenlabsModelSelect');
+      const langEl = document.getElementById('elevenlabsLanguageSelect');
+      const stabEl = document.getElementById('elevenlabsStabilitySlider');
+      const simEl = document.getElementById('elevenlabsSimilaritySlider');
+
+      if (modelEl) {
+        const savedModel = localStorage.getItem('whyvideo_elevenlabs_model_id');
+        if (savedModel && Array.from(modelEl.options).some((o) => o.value === savedModel)) {
+          modelEl.value = savedModel;
+        }
+      }
+      if (langEl) {
+        const savedLang = localStorage.getItem('whyvideo_elevenlabs_language');
+        if (savedLang !== null && Array.from(langEl.options).some((o) => o.value === savedLang)) {
+          langEl.value = savedLang;
+        }
+      }
+      if (stabEl) {
+        const savedStab = localStorage.getItem('whyvideo_elevenlabs_stability');
+        if (savedStab !== null && !Number.isNaN(Number(savedStab))) {
+          stabEl.value = String(Math.max(0, Math.min(1, Number(savedStab))));
+        }
+      }
+      if (simEl) {
+        const savedSim = localStorage.getItem('whyvideo_elevenlabs_similarity');
+        if (savedSim !== null && !Number.isNaN(Number(savedSim))) {
+          simEl.value = String(Math.max(0, Math.min(1, Number(savedSim))));
+        }
+      }
+      syncElevenlabsStabilityStep(false);
+    }
+
+    function syncElevenlabsStabilityStep(persist = true) {
+      const modelEl = document.getElementById('elevenlabsModelSelect');
+      const stabEl = document.getElementById('elevenlabsStabilitySlider');
+      if (modelEl && stabEl) {
+        if (modelEl.value === 'eleven_v3') {
+          stabEl.step = '0.5';
+          const v = Number(stabEl.value);
+          stabEl.value = v < 0.25 ? '0' : (v < 0.75 ? '0.5' : '1');
+        } else {
+          stabEl.step = '0.05';
+        }
+      }
+      if (persist) {
+        onElevenlabsParamChange();
+      } else {
+        updateElevenlabsParamLabels();
+      }
+    }
+
+    function updateElevenlabsParamLabels() {
+      const modelEl = document.getElementById('elevenlabsModelSelect');
+      const stabEl = document.getElementById('elevenlabsStabilitySlider');
+      const simEl = document.getElementById('elevenlabsSimilaritySlider');
+      const stabLabel = document.getElementById('elevenlabsStabilityLabel');
+      const simLabel = document.getElementById('elevenlabsSimilarityLabel');
+      if (stabEl && stabLabel) {
+        const v = Number(stabEl.value);
+        const pct = Math.round(v * 100) + '%';
+        if (modelEl && modelEl.value === 'eleven_v3') {
+          const tier = v < 0.25 ? '创意' : (v < 0.75 ? '自然' : '稳健');
+          stabLabel.textContent = tier + ' (' + pct + ')';
+        } else {
+          stabLabel.textContent = pct;
+        }
+      }
+      if (simEl && simLabel) {
+        simLabel.textContent = Math.round(Number(simEl.value) * 100) + '%';
+      }
+    }
+
+    function onElevenlabsParamChange() {
+      const modelEl = document.getElementById('elevenlabsModelSelect');
+      const langEl = document.getElementById('elevenlabsLanguageSelect');
+      const stabEl = document.getElementById('elevenlabsStabilitySlider');
+      const simEl = document.getElementById('elevenlabsSimilaritySlider');
+
+      if (modelEl) localStorage.setItem('whyvideo_elevenlabs_model_id', modelEl.value);
+      if (langEl) localStorage.setItem('whyvideo_elevenlabs_language', langEl.value);
+      if (stabEl) localStorage.setItem('whyvideo_elevenlabs_stability', stabEl.value);
+      if (simEl) localStorage.setItem('whyvideo_elevenlabs_similarity', simEl.value);
+      updateElevenlabsParamLabels();
+    }
+
+    function restoreElevenlabsInputs() {
+      const keyInput = document.getElementById('elevenlabsKeyInput');
+      if (keyInput) {
+        if (!keyInput.value) {
+          const savedKey = localStorage.getItem('whyvideo_elevenlabs_api_key') || '';
+          if (savedKey) keyInput.value = savedKey;
+        }
+        if (window._elevenlabsKeyConfigured) {
+          keyInput.placeholder = '环境变量 .env 已配置 ELEVENLABS_API_KEY（可留空直接拉取，或在此输入新 Key）';
+        }
+      }
+      restoreElevenlabsParams();
+    }
+
+    function onElevenlabsKeyInputChange() {
+      const keyInput = document.getElementById('elevenlabsKeyInput');
+      if (!keyInput) return;
+      const val = keyInput.value.trim();
+      if (val) {
+        localStorage.setItem('whyvideo_elevenlabs_api_key', val);
+      } else {
+        localStorage.removeItem('whyvideo_elevenlabs_api_key');
+      }
+    }
+
+    function onElevenlabsVoiceSelectChange() {
+      const select = document.getElementById('voiceIdSelect');
+      if (!select) return;
+      if (select.value) {
+        localStorage.setItem('whyvideo_elevenlabs_voice_id', select.value);
+      }
+      updateElevenlabsPreviewButton();
+    }
+
+    function updateElevenlabsPreviewButton() {
+      const previewBtn = document.getElementById('btnPreviewElevenlabsVoice');
+      const select = document.getElementById('voiceIdSelect');
+      if (!previewBtn || !select) return;
+      const list = Array.isArray(window._elevenlabsVoices) ? window._elevenlabsVoices : [];
+      const cur = list.find((v) => v.voice_id === select.value);
+      previewBtn.disabled = !(cur && cur.preview_url);
+    }
+
+    function previewSelectedElevenlabsVoice() {
+      const select = document.getElementById('voiceIdSelect');
+      const list = Array.isArray(window._elevenlabsVoices) ? window._elevenlabsVoices : [];
+      const cur = list.find((v) => v.voice_id === (select ? select.value : ''));
+      if (!cur || !cur.preview_url) {
+        showToast('⚠️ 当前音色暂未提供试听预览音频');
+        return;
+      }
+      const playerCont = document.getElementById('audioPlayerContainer');
+      const player = document.getElementById('audioPreviewPlayer');
+      if (player && playerCont) {
+        player.src = cur.preview_url;
+        playerCont.classList.remove('hidden');
+        player.play().catch(() => {});
+        showToast('▶ 正在试听音色：' + cur.name);
+      }
+    }
+
+    async function loadElevenlabsVoices(showNotice = false) {
+      const keyInput = document.getElementById('elevenlabsKeyInput');
+      const select = document.getElementById('voiceIdSelect');
+      const btn = document.getElementById('btnFetchElevenlabsVoices');
+      const statusEl = document.getElementById('elevenlabsVoiceStatus');
+      if (!select) return;
+
+      const apiKey = (keyInput ? keyInput.value : '').trim();
+      if (apiKey) {
+        localStorage.setItem('whyvideo_elevenlabs_api_key', apiKey);
+      }
+
+      if (!apiKey && !window._elevenlabsKeyConfigured) {
+        if (statusEl) {
+          statusEl.textContent = '请先输入 API Key';
+          statusEl.className = 'text-[11px] text-amber-400';
+        }
+        if (showNotice) showToast('⚠️ 请先输入 ElevenLabs API Key');
+        return;
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 拉取中...';
+      }
+      if (statusEl) {
+        statusEl.textContent = '正在拉取音色列表...';
+        statusEl.className = 'text-[11px] text-gray-400';
+      }
+
+      try {
+        const res = await fetch('/api/elevenlabs/voices', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ apiKey }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error(data.error || '拉取音色失败');
+        }
+
+        const voices = Array.isArray(data.voices) ? data.voices : [];
+        window._elevenlabsVoices = voices;
+        window._elevenlabsVoicesLoadedKey = apiKey || '__env__';
+
+        select.replaceChildren();
+        if (!voices.length) {
+          const emptyOpt = document.createElement('option');
+          emptyOpt.value = '';
+          emptyOpt.textContent = '该账号下暂无可用音色';
+          select.appendChild(emptyOpt);
+          if (statusEl) {
+            statusEl.textContent = '0 个音色';
+            statusEl.className = 'text-[11px] text-amber-400';
+          }
+          updateElevenlabsPreviewButton();
+          return;
+        }
+
+        const categoryLabels = {
+          cloned: '自制克隆',
+          professional: '专业克隆',
+          generated: 'AI生成',
+          premade: '官方预设',
+        };
+        const formatVoiceOptionText = (v) => {
+          const catTag = categoryLabels[v.category] || '我的收藏';
+          const parts = [];
+          if (v.labels && v.labels.language) parts.push(v.labels.language);
+          if (v.labels && v.labels.accent) parts.push(v.labels.accent);
+          if (v.labels && v.labels.gender) parts.push(v.labels.gender);
+          const extra = parts.length ? ' · ' + parts.join('/') : '';
+          return '[' + catTag + '] ' + v.name + extra;
+        };
+
+        const customVoices = voices.filter((v) => v.category !== 'premade');
+        const premadeVoices = voices.filter((v) => v.category === 'premade');
+
+        if (customVoices.length) {
+          const grpCustom = document.createElement('optgroup');
+          grpCustom.label = '⭐ 我的自定义 / 已添加音色 (' + customVoices.length + ')';
+          for (const v of customVoices) {
+            const opt = document.createElement('option');
+            opt.value = v.voice_id;
+            opt.textContent = formatVoiceOptionText(v);
+            grpCustom.appendChild(opt);
+          }
+          select.appendChild(grpCustom);
+        }
+
+        if (premadeVoices.length) {
+          const grpPremade = document.createElement('optgroup');
+          grpPremade.label = '🎙️ ElevenLabs 官方音色 (' + premadeVoices.length + ')';
+          for (const v of premadeVoices) {
+            const opt = document.createElement('option');
+            opt.value = v.voice_id;
+            opt.textContent = formatVoiceOptionText(v);
+            grpPremade.appendChild(opt);
+          }
+          select.appendChild(grpPremade);
+        }
+
+        const savedVoiceId = localStorage.getItem('whyvideo_elevenlabs_voice_id') || '';
+        const hasSaved = savedVoiceId && voices.some((v) => v.voice_id === savedVoiceId);
+        if (hasSaved) {
+          select.value = savedVoiceId;
+        } else if (customVoices.length) {
+          select.value = customVoices[0].voice_id;
+        } else {
+          select.value = voices[0].voice_id;
+        }
+        onElevenlabsVoiceSelectChange();
+
+        if (statusEl) {
+          statusEl.textContent = '共 ' + voices.length + ' 个（我的 ' + customVoices.length + ' 个）';
+          statusEl.className = 'text-[11px] text-emerald-300';
+        }
+        if (showNotice) {
+          showToast('✅ 已拉取 ' + voices.length + ' 个 ElevenLabs 音色（含你的 ' + customVoices.length + ' 个自定义音色）');
+        }
+      } catch (err) {
+        if (statusEl) {
+          statusEl.textContent = err.message;
+          statusEl.className = 'text-[11px] text-rose-400';
+        }
+        if (showNotice) {
+          alert('拉取 ElevenLabs 音色失败: ' + err.message);
+        }
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '🔄 拉取我的音色';
+        }
+      }
+    }
+
+    function updateAudioFullScriptSummary() {
+      const box = document.getElementById('fullScriptSummaryBox');
+      if (!box) return;
+      const scenes = manifestData?.scenes || [];
+      const fullText = scenes.map((s) => String(s.narration_text || '')).join('').trim();
+      if (!scenes.length || !fullText) {
+        box.textContent = '⚠️ 当前工程暂无分镜旁白，请先导入文案或创建分镜后再生成全片旁白';
+        box.className = 'px-3 py-2 rounded-xl bg-amber-950/35 border border-amber-500/30 text-xs text-amber-200';
+      } else {
+        box.textContent = '📄 当前工程全片旁白：共 ' + scenes.length + ' 镜 · 约 ' + fullText.length + ' 字（点右下角「✅ 确认保存设置」后，在主界面点击「🎙️ 一键生成全片旁白」即可生成整条成片音频并对齐时间轴）';
+        box.className = 'px-3 py-2 rounded-xl bg-emerald-950/35 border border-emerald-500/30 text-xs text-emerald-200';
+      }
+    }
+
+    function updateAudioProviderHeaderBadge() {
+      const badge = document.getElementById('audioProviderHeaderBadge');
+      if (!badge) return;
+      const savedProvider = localStorage.getItem('whyvideo_audio_provider') || 'voicebox';
+      badge.textContent = savedProvider === 'elevenlabs' ? 'ElevenLabs云端' : 'Voicebox本地';
+    }
+
+    function restoreSavedAudioConfig() {
+      const savedProvider = localStorage.getItem('whyvideo_audio_provider') || 'voicebox';
+      const radio = document.querySelector('input[name="audioProvider"][value="' + savedProvider + '"]');
+      if (radio) radio.checked = true;
+      restoreElevenlabsInputs();
+      updateAudioProviderHeaderBadge();
+    }
+
+    function onVoiceboxProfileSelectChange() {
+      const select = document.getElementById('voiceboxProfileSelect');
+      if (select && select.value) {
+        localStorage.setItem('whyvideo_voicebox_profile_id', select.value);
+      }
+    }
+
     function toggleAudioModal() {
       const modal = document.getElementById('audioModal');
       modal.classList.toggle('hidden');
       if (!modal.classList.contains('hidden')) {
+        restoreSavedAudioConfig();
+        updateAudioFullScriptSummary();
         updateAudioProviderUI();
         loadVoiceboxProfiles();
         updateVoiceboxStatus();
@@ -9788,10 +12092,34 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     function updateAudioProviderUI() {
       const provider = document.querySelector('input[name="audioProvider"]:checked')?.value || 'voicebox';
+      const lblEl = document.getElementById('labelAudioProviderElevenlabs');
+      const lblVb = document.getElementById('labelAudioProviderVoicebox');
+      if (lblEl && lblVb) {
+        const activeClasses = ['border-rose-500', 'bg-rose-500/10', 'text-rose-200'];
+        const inactiveClasses = ['border-gray-700', 'bg-gray-900', 'text-gray-400'];
+        if (provider === 'elevenlabs') {
+          lblEl.classList.add(...activeClasses);
+          lblEl.classList.remove(...inactiveClasses);
+          lblVb.classList.add(...inactiveClasses);
+          lblVb.classList.remove(...activeClasses);
+        } else {
+          lblVb.classList.add(...activeClasses);
+          lblVb.classList.remove(...inactiveClasses);
+          lblEl.classList.add(...inactiveClasses);
+          lblEl.classList.remove(...activeClasses);
+        }
+      }
       document.getElementById('elevenlabsFields').classList.toggle('hidden', provider !== 'elevenlabs');
       document.getElementById('voiceboxFields').classList.toggle('hidden', provider !== 'voicebox');
-      document.getElementById('voiceboxJobStatus').classList.toggle('hidden', provider !== 'voicebox');
+      document.getElementById('voiceboxJobStatus').classList.remove('hidden');
       document.getElementById('useAsNarrationLabel').classList.toggle('hidden', provider !== 'voicebox');
+      if (provider === 'elevenlabs') {
+        restoreElevenlabsInputs();
+        const curKey = (document.getElementById('elevenlabsKeyInput')?.value || '').trim() || (window._elevenlabsKeyConfigured ? '__env__' : '');
+        if (curKey && window._elevenlabsVoicesLoadedKey !== curKey) {
+          loadElevenlabsVoices(false);
+        }
+      }
     }
 
     async function loadVoiceboxProfiles() {
@@ -9807,6 +12135,12 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           option.textContent = profile.name + ' (' + (profile.language || '未知语言') + ')';
           select.appendChild(option);
         }
+        const savedProfileId = localStorage.getItem('whyvideo_voicebox_profile_id') || '';
+        if (savedProfileId && data.profiles.some((p) => p.id === savedProfileId)) {
+          select.value = savedProfileId;
+        } else if (select.value) {
+          localStorage.setItem('whyvideo_voicebox_profile_id', select.value);
+        }
       } catch (error) {
         select.replaceChildren();
         const option = document.createElement('option');
@@ -9820,36 +12154,92 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const projectId = activeProjectId;
       const statusEl = document.getElementById('voiceboxJobStatus');
       const button = document.getElementById('btnSynth');
+      const fullBtn = document.getElementById('btnSynthFull');
+      const cancelBtn = document.getElementById('btnCancelVoicebox');
+      const cancelMainBtn = document.getElementById('btnCancelVoiceboxMain');
       if (!statusEl) return;
       try {
         const response = await fetch('/api/voicebox/status?project=' + encodeURIComponent(projectId));
         const data = await response.json();
         if (projectId !== activeProjectId) return;
         const job = data.job || {};
-        const labels = { idle: '当前工程暂无配音任务', queued: '已提交至本地 Voicebox', generating: 'Voicebox 正在生成音频…', completed: '配音已完成', failed: '配音失败' };
-        statusEl.textContent = (labels[job.status] || '') + (job.error ? '：' + job.error : '');
-        button.disabled = ['queued', 'generating'].includes(job.status);
-        button.classList.toggle('opacity-50', button.disabled);
+        window._voiceboxPrevStatus = window._voiceboxPrevStatus || {};
+        const prevStatus = window._voiceboxPrevStatus[projectId];
+        const labels = {
+          idle: '当前工程暂无运行中的配音任务',
+          queued: job.progressText || '配音任务已加入队列…',
+          generating: job.progressText || (job.voiceboxStatus === 'loading_model'
+            ? 'Voicebox 正在加载模型 (loading_model)…'
+            : job.voiceboxStatus === 'aligning_timing'
+              ? '正在对齐配音逐字时间轴 (Whisper)…'
+              : (job.voiceboxStatus ? 'Voicebox 正在生成音频 (' + job.voiceboxStatus + ')…' : '正在生成配音音频…')),
+          completed: job.progressText || (job.useAsNarration ? '全片旁白与逐字时间轴已完成' : '配音已完成'),
+          failed: '配音失败',
+          cancelled: '已取消配音任务',
+        };
+        const isRunning = ['queued', 'generating'].includes(job.status);
+        let msg = (labels[job.status] || '') + (job.error && job.status !== 'cancelled' ? '：' + job.error : '');
+        if (job.timingWarning && job.status === 'completed') {
+          msg += '（时间轴提示：' + job.timingWarning + '）';
+        }
+        statusEl.textContent = msg;
+        if (button) {
+          button.disabled = isRunning;
+          button.classList.toggle('opacity-50', isRunning);
+        }
+        if (fullBtn) {
+          fullBtn.disabled = isRunning;
+          fullBtn.classList.toggle('opacity-50', isRunning);
+          if (isRunning) {
+            const pLabel = job.provider === 'elevenlabs' ? 'ElevenLabs' : 'Voicebox';
+            fullBtn.textContent = job.voiceboxStatus === 'aligning_timing'
+              ? '⏳ 正在对齐旁白时间轴...'
+              : ('⏳ 正在生成全片旁白 (' + pLabel + ')...');
+          } else {
+            fullBtn.textContent = '🎙️ 一键生成全片旁白';
+          }
+        }
+        if (cancelBtn) cancelBtn.classList.toggle('hidden', !isRunning);
+        if (cancelMainBtn) cancelMainBtn.classList.toggle('hidden', !isRunning);
         if (job.status === 'completed' && job.audioUrl) {
           const player = document.getElementById('audioPreviewPlayer');
           if (player.src !== new URL(job.audioUrl, location.href).href) player.src = job.audioUrl;
           document.getElementById('audioPlayerContainer').classList.remove('hidden');
         }
+        window._voiceboxPrevStatus[projectId] = job.status;
+        if (['queued', 'generating'].includes(prevStatus) && job.status === 'completed' && job.useAsNarration) {
+          showToast('🎙️ 全片旁白已生成，逐字时间轴已自动对齐！');
+          loadWorkflow();
+        }
       } catch (error) {
-        statusEl.textContent = '无法读取 Voicebox 状态：' + error.message;
+        statusEl.textContent = '无法读取配音任务状态：' + error.message;
       }
     }
 
-    // 🪗 模型配置 1~5 核心模型手风琴折叠控制 (单项展开，其余折叠，免滑动)
-    function toggleModelAccordion(idx) {
-      for (let i = 1; i <= 5; i++) {
+    async function cancelVoiceboxJob() {
+      try {
+        await fetch('/api/voicebox/cancel?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: activeProjectId }),
+        });
+        await updateVoiceboxStatus();
+        showToast('🛑 已取消当前配音任务');
+      } catch (error) {
+        alert('取消失败: ' + error.message);
+      }
+    }
+
+    // 🪗 模型配置 1~6 核心模型手风琴折叠控制 (单项展开，其余折叠)
+    function toggleModelAccordion(idx, forceOpen = false) {
+      for (let i = 1; i <= 6; i++) {
         const bodyEl = document.getElementById('accordionBodyModel' + i);
         const arrowEl = document.getElementById('accordionArrowModel' + i);
         const headerEl = document.getElementById('accordionHeaderModel' + i);
         if (!bodyEl) continue;
         if (i === idx) {
           const isCurrentlyOpen = !bodyEl.classList.contains('hidden');
-          if (isCurrentlyOpen) {
+          if (isCurrentlyOpen && !forceOpen) {
             bodyEl.classList.add('hidden');
             if (arrowEl) arrowEl.textContent = '▶';
             if (headerEl) headerEl.classList.remove('bg-gray-800/80', 'border-purple-500/60');
@@ -9873,18 +12263,21 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const tEl = document.getElementById('currentTextModelInput');
       const iEl = document.getElementById('currentImageModelInput');
       const bgmEl = document.getElementById('currentBgmModelInput');
+      const kwEl = document.getElementById('currentKeywordModelInput');
 
       const bW = document.getElementById('modelHeaderBadgeWriter');
       const bV = document.getElementById('modelHeaderBadgeVideo');
       const bT = document.getElementById('modelHeaderBadgeText');
       const bI = document.getElementById('modelHeaderBadgeImage');
       const bB = document.getElementById('modelHeaderBadgeBgm');
+      const bK = document.getElementById('modelHeaderBadgeKeyword');
 
       if (bW && wEl) bW.textContent = (wEl.value || '').split('/').pop() || '未指定';
       if (bV && vEl) bV.textContent = (vEl.value || '').split('/').pop() || '未指定';
       if (bT && tEl) bT.textContent = (tEl.value || '').split('/').pop() || '未指定';
       if (bI && iEl) bI.textContent = (iEl.value || '').split('/').pop() || '未指定';
       if (bB && bgmEl) bB.textContent = (bgmEl.value || '').split('/').pop() || '未指定';
+      if (bK && kwEl) bK.textContent = (kwEl.value || '').split('/').pop() || '未指定';
     }
 
     function toggleVisualModelModal(focusSection) {
@@ -9898,9 +12291,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         else if (focusSection === 'text' || focusSection === 'prompt') targetIdx = 3;
         else if (focusSection === 'image') targetIdx = 4;
         else if (focusSection === 'bgm') targetIdx = 5;
+        else if (focusSection === 'keyword') targetIdx = 6;
         else targetIdx = 1;
 
-        toggleModelAccordion(targetIdx);
+        toggleModelAccordion(targetIdx, true);
         setTimeout(() => {
           let inputId = '';
           if (targetIdx === 1) inputId = 'currentWriterModelInput';
@@ -9908,6 +12302,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           else if (targetIdx === 3) inputId = 'currentTextModelInput';
           else if (targetIdx === 4) inputId = 'currentImageModelInput';
           else if (targetIdx === 5) inputId = 'currentBgmModelInput';
+          else if (targetIdx === 6) inputId = 'currentKeywordModelInput';
           if (inputId) {
             const inputEl = document.getElementById(inputId);
             if (inputEl) inputEl.focus();
@@ -9932,6 +12327,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         const bModal = document.getElementById('bgmModal');
         if (bModal && !bModal.classList.contains('hidden')) {
           bModal.classList.add('hidden');
+          stopBgmPreviewAudio();
         }
       }
     });
@@ -9974,54 +12370,565 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       updateModelHeaderBadges();
     }
 
+    let bgmWorkbenchState = {
+      config: null,
+      modelInfo: null,
+      totalDurationMs: 0,
+      scenesCount: 0,
+    };
+
+    function formatBgmTime(ms) {
+      const totalSec = Math.max(0, Math.round((Number(ms) || 0) / 1000));
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
+    }
+
+    function formatFileSize(bytes) {
+      const b = Number(bytes) || 0;
+      if (b < 1024) return b + ' B';
+      if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+      return (b / (1024 * 1024)).toFixed(2) + ' MB';
+    }
+
+    function updateBgmHeaderBadge(summary) {
+      const badge = document.getElementById('bgmHeaderBadge');
+      const btn = document.getElementById('btnOpenBgmModal');
+      if (!badge) return;
+      if (summary && summary.enabled && summary.trackTitle) {
+        badge.textContent = '已挂载';
+        badge.className = 'px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40';
+        if (btn) btn.title = '已挂载 BGM：' + summary.trackTitle;
+      } else if (summary && summary.tracksCount > 0) {
+        badge.textContent = '待启用';
+        badge.className = 'px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-black/25 text-gray-950';
+        if (btn) btn.title = '本地已有 ' + summary.tracksCount + ' 首 BGM，点击配置启用';
+      } else {
+        badge.textContent = '未启用';
+        badge.className = 'px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-black/20 text-gray-950';
+        if (btn) btn.title = '配置 AI 自适应 BGM 与自动人声避让 (Ducking)';
+      }
+    }
+
+    function stopBgmPreviewAudio() {
+      const audio = document.getElementById('bgmPreviewAudio');
+      if (audio) {
+        try { audio.pause(); } catch (e) {}
+      }
+    }
+
     function toggleBgmModal() {
       const modal = document.getElementById('bgmModal');
-      modal.classList.toggle('hidden');
+      if (!modal) return;
+      const willOpen = modal.classList.contains('hidden');
+      if (willOpen) {
+        modal.classList.remove('hidden');
+        updateBgmModelDisplay();
+        loadBgmState();
+      } else {
+        modal.classList.add('hidden');
+        stopBgmPreviewAudio();
+      }
+    }
+
+    function updateBgmModelDisplay() {
       const d = document.getElementById('bgmModelActiveDisplay');
-      if (d) {
-        d.textContent = 'OpenRouter / ' + (visualConfig.bgmModel || 'deepseek/deepseek-chat');
+      if (!d) return;
+      const baseUrl = (visualConfig.baseUrl || bgmWorkbenchState.modelInfo?.baseUrl || '').toLowerCase();
+      let gw = bgmWorkbenchState.modelInfo?.providerLabel || 'OpenRouter';
+      if (baseUrl.includes('googleapis.com')) gw = 'Gemini Official';
+      else if (baseUrl.includes('openrouter.ai')) gw = 'OpenRouter';
+      else if (baseUrl) {
+        try { gw = new URL(baseUrl).hostname; } catch (e) {}
       }
+      const modelSlug = visualConfig.bgmModel || bgmWorkbenchState.modelInfo?.bgmModel || 'deepseek/deepseek-chat';
+      d.textContent = gw + ' / ' + modelSlug;
     }
 
-    let bgmAudioCtx = null;
-    function playBgmSample(type) {
+    async function loadBgmState() {
       try {
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        if (!bgmAudioCtx) bgmAudioCtx = new AudioCtx();
-        if (bgmAudioCtx.state === 'suspended') bgmAudioCtx.resume();
-
-        const osc = bgmAudioCtx.createOscillator();
-        const gain = bgmAudioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(bgmAudioCtx.destination);
-
-        const now = bgmAudioCtx.currentTime;
-        if (type === 'epic') {
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(220, now);
-          osc.frequency.exponentialRampToValueAtTime(440, now + 1.2);
-          gain.gain.setValueAtTime(0.2, now);
-          gain.gain.exponentialRampToValueAtTime(0.01, now + 1.8);
-          osc.start(now);
-          osc.stop(now + 1.8);
-        } else {
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(330, now);
-          osc.frequency.setValueAtTime(495, now + 0.4);
-          gain.gain.setValueAtTime(0.18, now);
-          gain.gain.exponentialRampToValueAtTime(0.01, now + 1.2);
-          osc.start(now);
-          osc.stop(now + 1.2);
+        const res = await fetch('/api/bgm/state?project=' + encodeURIComponent(activeProjectId));
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          showToast('❌ 读取 BGM 配置失败: ' + (data.error || res.status));
+          return;
         }
-        showToast('🎵 正在模拟试听 ' + (type === 'epic' ? 'Track A (交响史诗)' : 'Track B (公路律动)') + '...');
-      } catch (e) {
-        showToast('🎵 试听已触发');
+        bgmWorkbenchState = {
+          config: data.config,
+          modelInfo: data.modelInfo,
+          totalDurationMs: data.totalDurationMs || 0,
+          scenesCount: data.scenesCount || 0,
+        };
+        renderBgmModal();
+      } catch (err) {
+        showToast('❌ 读取 BGM 配置异常: ' + err.message);
       }
     }
 
-    function applyBgmToProject() {
-      toggleBgmModal();
-      showToast('✅ 自适应 BGM 与人声避让设置已应用至当前工程！');
+    function renderBgmModal() {
+      const cfg = bgmWorkbenchState.config;
+      if (!cfg) return;
+      updateBgmModelDisplay();
+
+      const enabledEl = document.getElementById('bgmEnabledToggle');
+      if (enabledEl) enabledEl.checked = Boolean(cfg.enabled);
+
+      const statusEl = document.getElementById('bgmAnalyzeStatus');
+      if (statusEl) {
+        const durSec = (bgmWorkbenchState.totalDurationMs / 1000).toFixed(1);
+        const segCount = (cfg.segments || []).length;
+        statusEl.textContent = bgmWorkbenchState.scenesCount > 0
+          ? ('当前工程共 ' + bgmWorkbenchState.scenesCount + ' 个镜头（总时长 ' + durSec + 's），' + (segCount > 0 ? ('已规划 ' + segCount + ' 个情绪分段') : '尚未运行 AI 情绪分段'))
+          : '当前工程尚无镜头清单，请先完成切分镜头后再分析情绪弧度。';
+      }
+
+      renderBgmSegments();
+      renderBgmTracks();
+      renderBgmRecommendations();
+      syncBgmSettingsInputs();
+      renderBgmAuditPanel();
+
+      const selected = (cfg.tracks || []).find((t) => t.track_id === cfg.selected_track_id);
+      updateBgmHeaderBadge({
+        enabled: cfg.enabled,
+        trackTitle: selected ? selected.title : null,
+        tracksCount: (cfg.tracks || []).length,
+      });
+
+      const hintEl = document.getElementById('bgmFooterHint');
+      if (hintEl) {
+        if (cfg.enabled && selected) {
+          hintEl.innerHTML = '💡 已选 <strong class="text-amber-300">' + escapeHtml(selected.title) + '</strong>，保存后将写入 <code class="text-amber-300">audio_track.bgm</code>';
+        } else if (selected) {
+          hintEl.innerHTML = '💡 当前已选音轨但未开启总开关；勾选上方「启用 BGM 音轨」并保存即可挂载';
+        } else {
+          hintEl.innerHTML = '💡 请先上传或选择一首本地 BGM，再点击「保存并同步至 Remotion」';
+        }
+      }
+    }
+
+    function renderBgmSegments() {
+      const box = document.getElementById('bgmSegmentsList');
+      if (!box) return;
+      const segs = bgmWorkbenchState.config?.segments || [];
+      if (segs.length === 0) {
+        box.innerHTML = '<div class="col-span-full p-3.5 rounded-xl bg-gray-900/70 border border-dashed border-gray-700 text-gray-400 text-center">暂无情绪曲线。点击右上角「🤖 AI 分析全片情绪弧度」将读取当前工程真实台词生成分段电平方案。</div>';
+        return;
+      }
+
+      box.innerHTML = segs.map((seg, idx) => {
+        const energyColor = seg.energy === 'high'
+          ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+          : (seg.energy === 'low'
+            ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10'
+            : 'text-blue-300 border-blue-500/30 bg-blue-500/10');
+        const energyBadge = seg.energy === 'high' ? '高潮/张力' : (seg.energy === 'low' ? '沉静/铺垫' : '稳健推进');
+        return '<div class="p-3 rounded-xl bg-gray-900/90 border border-gray-800 space-y-1.5">' +
+          '<div class="flex items-center justify-between gap-2">' +
+            '<span class="font-bold text-white truncate">' + escapeHtml(seg.label || ('段落 ' + (idx + 1))) + '</span>' +
+            '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ' + energyColor + ' shrink-0">' + escapeHtml(energyBadge) + '</span>' +
+          '</div>' +
+          '<div class="text-[11px] text-gray-400 font-mono">' + formatBgmTime(seg.start_ms) + ' ~ ' + formatBgmTime(seg.end_ms) + ' · <span class="text-amber-300 font-sans font-semibold">' + escapeHtml(seg.mood || '') + '</span></div>' +
+          (seg.music_style_hint ? '<div class="text-[10px] text-purple-300/90">🎼 ' + escapeHtml(seg.music_style_hint) + '</div>' : '') +
+          (seg.reason ? '<div class="text-[10px] text-gray-400 line-clamp-2">' + escapeHtml(seg.reason) + '</div>' : '') +
+          '<div class="flex items-center justify-between gap-2 pt-1 border-t border-gray-800/80">' +
+            '<span class="text-[10px] text-gray-400">目标电平</span>' +
+            '<div class="flex items-center gap-2 flex-1 max-w-[180px]">' +
+              '<input type="range" min="-28" max="-6" step="1" value="' + Number(seg.target_db ?? -16) + '" oninput="onBgmSegmentDbChange(' + idx + ', this.value)" class="flex-1 accent-amber-400 cursor-pointer" />' +
+              '<span id="bgmSegDbVal_' + idx + '" class="font-mono text-[11px] font-bold text-amber-300 w-12 text-right">' + Number(seg.target_db ?? -16) + ' dB</span>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    function renderBgmTracks() {
+      const box = document.getElementById('bgmTracksList');
+      if (!box) return;
+      const tracks = bgmWorkbenchState.config?.tracks || [];
+      const selectedId = bgmWorkbenchState.config?.selected_track_id;
+      if (tracks.length === 0) {
+        box.innerHTML = '<div class="p-4 rounded-xl bg-gray-900/50 border border-dashed border-gray-700 text-xs text-gray-400 text-center">当前工程暂无 BGM 音轨。请点击右上角「📤 上传本地 BGM」导入授权音乐。</div>';
+        return;
+      }
+
+      box.innerHTML = tracks.map((tr) => {
+        const isSelected = tr.track_id === selectedId;
+        const cardCls = isSelected
+          ? 'bg-amber-500/10 border-amber-400 shadow'
+          : 'bg-gray-900/60 border-gray-800 hover:border-gray-700';
+        const durLabel = tr.duration_ms ? formatBgmTime(tr.duration_ms) : '未知时长';
+        const safeId = escapeHtml(tr.track_id);
+        return '<div data-track-id="' + safeId + '" onclick="selectBgmTrack(this.dataset.trackId)" class="flex items-center justify-between gap-3 p-3 rounded-xl border transition cursor-pointer ' + cardCls + '">' +
+          '<div class="flex items-center gap-2.5 min-w-0">' +
+            '<input type="radio" name="bgmTrackRadio" data-track-id="' + safeId + '" ' + (isSelected ? 'checked' : '') + ' onclick="event.stopPropagation(); selectBgmTrack(this.dataset.trackId)" class="accent-amber-400 w-4 h-4 shrink-0 cursor-pointer" />' +
+            '<div class="min-w-0">' +
+              '<div class="text-xs font-bold text-white truncate flex items-center gap-2">' +
+                '<span>' + escapeHtml(tr.title || tr.file_name) + '</span>' +
+                (isSelected ? '<span class="px-1.5 py-0.2 rounded text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">当前选中</span>' : '') +
+              '</div>' +
+              '<div class="text-[10px] text-gray-400 font-mono mt-0.5 truncate">' + escapeHtml(tr.file_name) + ' · ' + durLabel + ' · ' + formatFileSize(tr.size_bytes) + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="flex items-center gap-1.5 shrink-0">' +
+            '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); previewBgmTrack(this.dataset.trackId)" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-gray-800 hover:bg-gray-700 text-amber-300 border border-gray-700 transition cursor-pointer">▶ 试听</button>' +
+            '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); deleteBgmTrack(this.dataset.trackId)" class="px-2 py-1 text-xs font-semibold rounded-lg bg-gray-800 hover:bg-rose-900/60 text-rose-300 border border-gray-700 hover:border-rose-500/50 transition cursor-pointer" title="从当前工程删除该 BGM">🗑</button>' +
+          '</div>' +
+        '</div>';
+      }).join('');
+    }
+
+    function renderBgmRecommendations() {
+      const wrap = document.getElementById('bgmRecommendationsBox');
+      const list = document.getElementById('bgmRecommendationsList');
+      if (!wrap || !list) return;
+      const recs = bgmWorkbenchState.config?.style_recommendations || [];
+      if (recs.length === 0) {
+        wrap.classList.add('hidden');
+        list.innerHTML = '';
+        return;
+      }
+      wrap.classList.remove('hidden');
+      list.innerHTML = recs.map((r) =>
+        '<div class="p-2.5 rounded-xl bg-gray-900/70 border border-purple-500/25 space-y-0.5">' +
+          '<div class="text-[11px] font-bold text-purple-200">' + escapeHtml(r.title) + ' <span class="text-[10px] font-mono text-amber-300">(' + escapeHtml(r.bpm_range || '') + ')</span></div>' +
+          (r.instrumentation ? '<div class="text-[10px] text-gray-300">乐器：' + escapeHtml(r.instrumentation) + '</div>' : '') +
+          (r.fit_reason ? '<div class="text-[10px] text-gray-400">' + escapeHtml(r.fit_reason) + '</div>' : '') +
+        '</div>'
+      ).join('');
+    }
+
+    function syncBgmSettingsInputs() {
+      const s = bgmWorkbenchState.config?.settings;
+      if (!s) return;
+      const setVal = (id, v) => { const el = document.getElementById(id); if (el) el.value = String(v); };
+      const setChk = (id, v) => { const el = document.getElementById(id); if (el) el.checked = Boolean(v); };
+      setVal('bgmBaseVolSlider', s.base_volume_db ?? -16);
+      setChk('bgmDuckingToggle', s.ducking_enabled !== false);
+      setVal('bgmDuckingDbSlider', s.ducking_db ?? -8);
+      setVal('bgmFadeInSlider', s.fade_in_ms ?? 1200);
+      setVal('bgmFadeOutSlider', s.fade_out_ms ?? 2000);
+      setChk('bgmLoopToggle', s.loop !== false);
+      setVal('bgmAttackMsInput', s.attack_ms ?? 180);
+      setVal('bgmReleaseMsInput', s.release_ms ?? 420);
+      updateBgmSettingLabels();
+    }
+
+    function updateBgmSettingLabels() {
+      const s = bgmWorkbenchState.config?.settings;
+      if (!s) return;
+      const bEl = document.getElementById('bgmBaseVolVal');
+      const dEl = document.getElementById('bgmDuckingDbVal');
+      const fiEl = document.getElementById('bgmFadeInVal');
+      const foEl = document.getElementById('bgmFadeOutVal');
+      if (bEl) bEl.textContent = s.base_volume_db + ' dB';
+      if (dEl) dEl.textContent = s.ducking_enabled ? (s.ducking_db + ' dB') : '已关闭';
+      if (fiEl) fiEl.textContent = (s.fade_in_ms / 1000).toFixed(1) + 's';
+      if (foEl) foEl.textContent = (s.fade_out_ms / 1000).toFixed(1) + 's';
+    }
+
+    function computeLocalBgmAuditPreview() {
+      const cfg = bgmWorkbenchState.config;
+      if (!cfg) return null;
+      const s = cfg.settings || {};
+      const tracks = cfg.tracks || [];
+      const selected = tracks.find((t) => t.track_id === cfg.selected_track_id) || null;
+      const segs = cfg.segments || [];
+      const totalMs = bgmWorkbenchState.totalDurationMs || 0;
+      const warnings = [];
+      let score = 100;
+
+      if (!cfg.enabled) { warnings.push('当前尚未启用 BGM 音轨（Remotion 仅输出纯旁白）。'); score -= 25; }
+      if (!selected) { warnings.push('尚未选择或上传本地授权 BGM 音频文件。'); score -= 35; }
+      else if (totalMs > 0 && selected.duration_ms && selected.duration_ms < totalMs && !s.loop) {
+        warnings.push('所选 BGM 短于成片时长且未开启循环播放，后半段将静音。'); score -= 20;
+      }
+      if (s.base_volume_db > -12) { warnings.push('基准电平 ' + s.base_volume_db + ' dB 偏高，建议控制在 -24 ~ -12 dB。'); score -= 15; }
+      else if (s.base_volume_db < -26) { warnings.push('基准电平 ' + s.base_volume_db + ' dB 偏低，背景音乐存在感较弱。'); score -= 8; }
+      if (!s.ducking_enabled) { warnings.push('已关闭自动人声避让 (Ducking)，旁白密集段落可能与配乐冲突。'); score -= 20; }
+      else if (s.ducking_db > -4) { warnings.push('人声避让衰减幅度（' + s.ducking_db + ' dB）较浅，建议设为 -6 ~ -12 dB。'); score -= 10; }
+      if (s.fade_in_ms === 0 || s.fade_out_ms === 0) { warnings.push('建议保留片头淡入与片尾淡出（>0 ms）。'); score -= 5; }
+      if (segs.length === 0) { warnings.push('尚未生成情绪起伏分段，全片将使用固定基准电平。'); score -= 10; }
+
+      score = Math.max(0, Math.min(100, score));
+      const grade = (!selected || !cfg.enabled) ? '待配置' : (score >= 92 ? 'A+' : score >= 82 ? 'A' : score >= 70 ? 'B' : 'C');
+      return {
+        grade,
+        summary: !selected
+          ? '请先上传或选择本地合法 BGM 音频。'
+          : (!cfg.enabled
+            ? ('已选中《' + selected.title + '》，勾选「启用 BGM 音轨」并保存后挂载。')
+            : (warnings.length === 0 ? ('《' + selected.title + '》配置通过混音审查，可同步至 Remotion。') : ('《' + selected.title + '》已就绪，共有 ' + warnings.length + ' 条建议优化项。'))),
+        ducking_note: s.ducking_enabled ? ('开启（旁白时自动下潜 ' + s.ducking_db + ' dB，起音 ' + s.attack_ms + 'ms / 释放 ' + s.release_ms + 'ms）') : '已关闭（建议开启以保护人声）',
+        pacing_note: segs.length > 0 ? ('已规划 ' + segs.length + ' 段情绪曲线并平滑过渡') : '全局固定基准电平（可点击 AI 分析）',
+        fatigue_note: (s.base_volume_db <= -14 && s.fade_in_ms >= 500 && s.fade_out_ms >= 800)
+          ? ('优良（基准 ' + s.base_volume_db + ' dB，淡入 ' + (s.fade_in_ms / 1000).toFixed(1) + 's / 淡出 ' + (s.fade_out_ms / 1000).toFixed(1) + 's）')
+          : ('需微调（基准 ' + s.base_volume_db + ' dB，淡入 ' + s.fade_in_ms + 'ms / 淡出 ' + s.fade_out_ms + 'ms）'),
+        warnings,
+      };
+    }
+
+    function renderBgmAuditPanel() {
+      const audit = computeLocalBgmAuditPreview() || bgmWorkbenchState.config?.audit;
+      if (!audit) return;
+      const badge = document.getElementById('bgmAuditGradeBadge');
+      if (badge) {
+        badge.textContent = '混音审查评级: ' + audit.grade;
+        badge.className = audit.grade === 'A+' || audit.grade === 'A'
+          ? 'px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+          : (audit.grade === '待配置'
+            ? 'px-2 py-0.5 rounded text-[10px] font-black bg-gray-800 text-gray-300 border border-gray-700'
+            : 'px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40');
+      }
+      const sumEl = document.getElementById('bgmAuditSummary');
+      const dEl = document.getElementById('bgmAuditDucking');
+      const pEl = document.getElementById('bgmAuditPacing');
+      const fEl = document.getElementById('bgmAuditFatigue');
+      const wEl = document.getElementById('bgmAuditWarnings');
+      if (sumEl) sumEl.textContent = audit.summary || '';
+      if (dEl) dEl.textContent = audit.ducking_note || '-';
+      if (pEl) pEl.textContent = audit.pacing_note || '-';
+      if (fEl) fEl.textContent = audit.fatigue_note || '-';
+      if (wEl) {
+        if (audit.warnings && audit.warnings.length > 0) {
+          wEl.classList.remove('hidden');
+          wEl.innerHTML = audit.warnings.map((w) => '<li>' + escapeHtml(w) + '</li>').join('');
+        } else {
+          wEl.classList.add('hidden');
+          wEl.innerHTML = '';
+        }
+      }
+    }
+
+    function selectBgmTrack(trackId) {
+      if (!bgmWorkbenchState.config) return;
+      bgmWorkbenchState.config.selected_track_id = trackId;
+      if (!bgmWorkbenchState.config.enabled) {
+        bgmWorkbenchState.config.enabled = true;
+      }
+      renderBgmModal();
+    }
+
+    function previewBgmTrack(trackId) {
+      const tracks = bgmWorkbenchState.config?.tracks || [];
+      const tr = tracks.find((t) => t.track_id === trackId);
+      if (!tr || !tr.url) {
+        showToast('⚠️ 找不到该音轨的可试听路径');
+        return;
+      }
+      const wrap = document.getElementById('bgmAudioPlayerWrap');
+      const label = document.getElementById('bgmNowPlayingLabel');
+      const audio = document.getElementById('bgmPreviewAudio');
+      if (!audio || !wrap) return;
+      wrap.classList.remove('hidden');
+      if (label) label.textContent = '🎵 正在试听：' + (tr.title || tr.file_name);
+      const targetUrl = new URL(tr.url, window.location.href).href;
+      if (audio.src !== targetUrl) {
+        audio.src = tr.url;
+      }
+      audio.currentTime = 0;
+      audio.play().catch((e) => showToast('⚠️ 浏览器阻止自动播放，请点击播放器播放键: ' + e.message));
+    }
+
+    function onBgmSegmentDbChange(idx, val) {
+      const segs = bgmWorkbenchState.config?.segments;
+      if (!segs || !segs[idx]) return;
+      const num = Number(val);
+      segs[idx].target_db = num;
+      const lbl = document.getElementById('bgmSegDbVal_' + idx);
+      if (lbl) lbl.textContent = num + ' dB';
+      renderBgmAuditPanel();
+    }
+
+    function onBgmSettingsInput() {
+      const cfg = bgmWorkbenchState.config;
+      if (!cfg) return;
+      cfg.enabled = Boolean(document.getElementById('bgmEnabledToggle')?.checked);
+      cfg.settings = {
+        base_volume_db: Number(document.getElementById('bgmBaseVolSlider')?.value ?? -16),
+        ducking_enabled: Boolean(document.getElementById('bgmDuckingToggle')?.checked),
+        ducking_db: Number(document.getElementById('bgmDuckingDbSlider')?.value ?? -8),
+        fade_in_ms: Number(document.getElementById('bgmFadeInSlider')?.value ?? 1200),
+        fade_out_ms: Number(document.getElementById('bgmFadeOutSlider')?.value ?? 2000),
+        loop: Boolean(document.getElementById('bgmLoopToggle')?.checked),
+        attack_ms: Number(document.getElementById('bgmAttackMsInput')?.value ?? 180),
+        release_ms: Number(document.getElementById('bgmReleaseMsInput')?.value ?? 420),
+      };
+      updateBgmSettingLabels();
+      renderBgmAuditPanel();
+    }
+
+    async function handleBgmFileUpload(input) {
+      const file = input?.files?.[0];
+      if (!file) return;
+      const btn = document.getElementById('btnUploadBgm');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 上传解析中...';
+      }
+      try {
+        const dataUrl = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new Error('读取本地文件失败'));
+          reader.readAsDataURL(file);
+        });
+        const res = await fetch('/api/bgm/upload?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            fileName: file.name,
+            dataUrl,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          showToast('❌ 上传失败: ' + (data.error || res.status));
+          return;
+        }
+        bgmWorkbenchState = {
+          config: data.config,
+          modelInfo: data.modelInfo,
+          totalDurationMs: data.totalDurationMs || 0,
+          scenesCount: data.scenesCount || 0,
+        };
+        renderBgmModal();
+        showToast('✅ 已上传并选中 BGM：' + file.name);
+      } catch (err) {
+        showToast('❌ 上传异常: ' + err.message);
+      } finally {
+        input.value = '';
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '📤 上传本地 BGM';
+        }
+      }
+    }
+
+    async function deleteBgmTrack(trackId) {
+      if (!window.confirm('确定从当前工程删除这首 BGM 音频文件吗？')) return;
+      try {
+        stopBgmPreviewAudio();
+        const res = await fetch('/api/bgm/delete-track?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: activeProjectId, trackId }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          showToast('❌ 删除失败: ' + (data.error || res.status));
+          return;
+        }
+        bgmWorkbenchState = {
+          config: data.config,
+          modelInfo: data.modelInfo,
+          totalDurationMs: data.totalDurationMs || 0,
+          scenesCount: data.scenesCount || 0,
+        };
+        renderBgmModal();
+        showToast('🗑 已删除 BGM 音轨');
+      } catch (err) {
+        showToast('❌ 删除异常: ' + err.message);
+      }
+    }
+
+    async function analyzeBgmWithAi() {
+      const btn = document.getElementById('btnAnalyzeBgm');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 正在分析台词情绪...';
+      }
+      try {
+        const res = await fetch('/api/bgm/analyze?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            bgmModel: visualConfig.bgmModel,
+            baseUrl: visualConfig.baseUrl,
+            apiKey: visualConfig.apiKey,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          showToast('❌ 情绪分析失败: ' + (data.error || res.status));
+          return;
+        }
+        bgmWorkbenchState = {
+          config: data.config,
+          modelInfo: data.modelInfo,
+          totalDurationMs: data.totalDurationMs || 0,
+          scenesCount: data.scenesCount || 0,
+        };
+        renderBgmModal();
+        if (data.usedFallback) {
+          showToast('⚠️ 未连上外部 LLM，已使用本地章节节奏生成情绪分段');
+        } else {
+          showToast('✅ 已调用 ' + (data.modelInfo?.bgmModel || 'AI') + ' 生成全片情绪曲线！');
+        }
+      } catch (err) {
+        showToast('❌ 情绪分析异常: ' + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '🤖 AI 分析全片情绪弧度';
+        }
+      }
+    }
+
+    async function applyBgmToProject() {
+      const cfg = bgmWorkbenchState.config;
+      if (!cfg) return;
+      if (cfg.enabled && !cfg.selected_track_id) {
+        showToast('⚠️ 请先上传或选择一首本地 BGM 音轨');
+        return;
+      }
+      const btn = document.getElementById('btnSaveBgm');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 正在同步 Remotion...';
+      }
+      try {
+        const res = await fetch('/api/bgm/save?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            enabled: cfg.enabled,
+            selected_track_id: cfg.selected_track_id,
+            settings: cfg.settings,
+            segments: cfg.segments,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          showToast('❌ 保存失败: ' + (data.error || res.status));
+          return;
+        }
+        bgmWorkbenchState = {
+          config: data.config,
+          modelInfo: data.modelInfo,
+          totalDurationMs: data.totalDurationMs || 0,
+          scenesCount: data.scenesCount || 0,
+        };
+        renderBgmModal();
+        toggleBgmModal();
+        if (data.config.enabled) {
+          showToast(data.compiledToRenderProps
+            ? '✅ 自适应 BGM 已保存并同步写入 render-props.json！'
+            : '✅ BGM 配置已保存（当前工程尚缺完整渲染物料，暂未生成 render-props.json）');
+        } else {
+          showToast('✅ 已关闭并保存 BGM 配置');
+        }
+      } catch (err) {
+        showToast('❌ 保存异常: ' + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '💾 保存并同步至 Remotion';
+        }
+      }
     }
 
     function selectVideoModelSlug(slug) {
@@ -10041,6 +12948,11 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     function selectBgmModelSlug(slug) {
       document.getElementById('currentBgmModelInput').value = slug;
+      updateModelHeaderBadges();
+    }
+
+    function selectKeywordModelSlug(slug) {
+      document.getElementById('currentKeywordModelInput').value = slug;
       updateModelHeaderBadges();
     }
 
@@ -10159,6 +13071,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       ['textModel', 'currentTextModelInput'],
       ['imageModel', 'currentImageModelInput'],
       ['bgmModel', 'currentBgmModelInput'],
+      ['keywordModel', 'currentKeywordModelInput'],
     ];
 
     function saveModelPrefsToLocal() {
@@ -10169,7 +13082,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           const el = document.getElementById(id);
           if (!el) continue;
           const val = String(el.value || '').trim();
-          if (val) next[key] = val;
+          if (val && !/^•+$/.test(val)) next[key] = val;
         }
         localStorage.setItem(MODEL_PREFS_STORAGE_KEY, JSON.stringify(next));
       } catch (e) {}
@@ -10182,7 +13095,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         for (const [key, id] of MODEL_PREF_FIELD_MAP) {
           const el = document.getElementById(id);
           const val = String(prefs[key] || '').trim();
-          if (el && val) {
+          if (el && val && !/^•+$/.test(val)) {
             el.value = val;
           }
         }
@@ -10193,6 +13106,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         if (prefs.textModel) visualConfig.textModel = prefs.textModel;
         if (prefs.imageModel) visualConfig.imageModel = prefs.imageModel;
         if (prefs.bgmModel) visualConfig.bgmModel = prefs.bgmModel;
+        if (prefs.keywordModel) visualConfig.keywordModel = prefs.keywordModel;
 
         const syncSelect = (selId, val) => {
           const sel = document.getElementById(selId);
@@ -10203,6 +13117,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         syncSelect('textModelSelect', visualConfig.textModel);
         syncSelect('imageModelSelect', visualConfig.imageModel);
         syncSelect('bgmModelSelect', visualConfig.bgmModel);
+        syncSelect('keywordModelSelect', visualConfig.keywordModel);
         updateModelBadge();
         updateModelHeaderBadges();
       } catch (e) {}
@@ -10217,7 +13132,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           el.addEventListener('change', saveModelPrefsToLocal);
         }
       }
-      for (const selId of ['writerModelSelect', 'videoModelSelect', 'textModelSelect', 'imageModelSelect', 'bgmModelSelect']) {
+      for (const selId of ['writerModelSelect', 'videoModelSelect', 'textModelSelect', 'imageModelSelect', 'bgmModelSelect', 'keywordModelSelect']) {
         const sel = document.getElementById(selId);
         if (sel && !sel.dataset.prefBound) {
           sel.dataset.prefBound = '1';
@@ -10236,6 +13151,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const textModel = document.getElementById('currentTextModelInput').value.trim();
       const imageModel = document.getElementById('currentImageModelInput').value.trim();
       const bgmModel = (document.getElementById('currentBgmModelInput')?.value || '').trim() || 'deepseek/deepseek-chat';
+      const keywordModel = (document.getElementById('currentKeywordModelInput')?.value || '').trim() || textModel || 'deepseek/deepseek-chat';
 
       visualConfig.apiKey = apiKey;
       visualConfig.baseUrl = baseUrl;
@@ -10244,6 +13160,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       visualConfig.textModel = textModel;
       visualConfig.imageModel = imageModel;
       visualConfig.bgmModel = bgmModel;
+      visualConfig.keywordModel = keywordModel;
 
       try {
         const res = await fetch('/api/save-visual-config?project=' + activeProjectId, {
@@ -10259,11 +13176,17 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             videoModel,
             textModel,
             imageModel,
-            bgmModel
+            bgmModel,
+            keywordModel
           })
         });
         const data = await res.json();
         if (data.config) {
+          const tavilyEl = document.getElementById('currentTavilyKeyInput');
+          if (tavilyEl) {
+            tavilyEl.value = data.config.tavilyKeyConfigured ? '••••••••••••••••••••' : '';
+            tavilyEl.placeholder = data.config.tavilyKeyConfigured ? 'Tavily Key 已配置；留空或保留掩码即不修改' : '填写 Tavily Key；留空则使用环境变量';
+          }
           const meowEl = document.getElementById('currentMeowloadKeyInput');
           if (meowEl) {
             meowEl.value = '';
@@ -10286,11 +13209,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const vBadge = document.getElementById('currentVideoModelBadge');
       const tBadge = document.getElementById('currentTextModelBadge');
       const iBadge = document.getElementById('currentImageModelBadge');
+      const kwBadge = document.getElementById('currentKeywordModelBadge');
 
       const wModel = (visualConfig.writerModel || 'deepseek-chat').split('/').pop();
       const vModel = (visualConfig.videoModel || 'minimax/hailuo-3-max').split('/').pop();
       const tModel = (visualConfig.textModel || 'deepseek-chat').split('/').pop();
       const iModel = (visualConfig.imageModel || 'flux-3-image').split('/').pop();
+      const kwModel = (visualConfig.keywordModel || visualConfig.textModel || 'deepseek-chat').split('/').pop();
 
       if (wBadge) {
         wBadge.textContent = '📝 文案: ' + wModel;
@@ -10303,6 +13228,9 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
       if (iBadge) {
         iBadge.textContent = '🖼️ 生图: ' + iModel;
+      }
+      if (kwBadge) {
+        kwBadge.textContent = '🔎 关键词: ' + kwModel;
       }
     }
 
@@ -10325,7 +13253,6 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
         const cur = projectsList.find(p => p.id === activeProjectId);
         if (cur) {
-          document.getElementById('projectStageBadge').textContent = cur.stage;
           document.getElementById('projectHeaderTitle').textContent =
             cur.title + (currentWorkspaceTab === 'writer' ? ' · 知识长视频文案策划工坊' : ' · 视觉镜头工作台');
         }
@@ -10374,6 +13301,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
     }
 
     function onProjectChange(newId) {
+      pendingFinalizedScript = null;
+      document.getElementById('wFinalizeReview')?.classList.add('hidden');
       activeProjectId = newId;
       pendingSelectedProjectId = newId;
       localStorage.setItem('whyvideo_active_project', newId);
@@ -10382,12 +13311,56 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       window.history.pushState({}, '', url);
       loadProjects();
       loadWorkflow();
+      refreshProducerPromptsStatus();
       updateRenderStatus();
       updateVoiceboxStatus();
       if (currentWorkspaceTab === 'writer') {
         loadWriterProjectData(newId);
       }
       showToast('🔀 已切换至工程：' + newId);
+    }
+
+    window._producerHasVideo = false;
+    window._producerRenderJobStatus = 'idle';
+    window._producerRenderOutputUrl = '';
+
+    function toggleGlobalPromptDrawer() {
+      const drawer = document.getElementById('globalPromptDrawer');
+      const chevron = document.getElementById('globalPromptChevron');
+      if (!drawer) return;
+      const isHidden = drawer.classList.toggle('hidden');
+      if (chevron) chevron.textContent = isHidden ? '▸' : '▾';
+    }
+
+    function toggleVideoPreviewDrawer() {
+      const c = document.getElementById('videoContainer');
+      const btn = document.getElementById('toggleVideoPreviewBtn');
+      if (!c) return;
+      const isHidden = c.classList.toggle('hidden');
+      if (btn) btn.textContent = isHidden ? '▶ 预览成片' : '▾ 收起预览';
+    }
+
+    function syncRenderBannerVisibility() {
+      const banner = document.getElementById('renderStatusBanner');
+      const statusEl = document.getElementById('renderJobStatus');
+      const previewBtn = document.getElementById('toggleVideoPreviewBtn');
+      const videoEl = document.getElementById('videoContainer');
+      if (!banner) return;
+
+      const activeJob = ['preparing', 'rendering', 'completed', 'failed'].includes(window._producerRenderJobStatus);
+      const shouldShow = activeJob || Boolean(window._producerRenderOutputUrl) || Boolean(window._producerHasVideo);
+      banner.classList.toggle('hidden', !shouldShow);
+
+      if (previewBtn) {
+        previewBtn.classList.toggle('hidden', !window._producerHasVideo);
+        if (!window._producerHasVideo && videoEl) {
+          videoEl.classList.add('hidden');
+          previewBtn.textContent = '▶ 预览成片';
+        }
+      }
+      if (statusEl && !activeJob && window._producerHasVideo) {
+        statusEl.textContent = '✅ 1080p 成片已就绪';
+      }
     }
 
     async function updateRenderStatus() {
@@ -10402,18 +13375,62 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         const data = await response.json();
         if (activeProjectId !== projectId) return;
         const job = data.job || {};
-        const labels = { idle: '当前工程尚未开始渲染', preparing: '正在准备工程素材…', rendering: '正在后台渲染，切换工程或刷新页面不会中断', completed: '渲染完成', failed: '渲染失败' };
-        statusEl.textContent = labels[job.status] || '渲染状态未知';
-        buttonEl.disabled = ['preparing', 'rendering'].includes(job.status);
-        buttonEl.classList.toggle('opacity-50', buttonEl.disabled);
+        const status = job.status || 'idle';
+        window._producerRenderJobStatus = status;
+        window._producerRenderOutputUrl = job.outputUrl || '';
+
+        const labels = {
+          idle: window._producerHasVideo ? '✅ 1080p 成片已就绪' : '',
+          preparing: '⏳ 正在准备工程素材…',
+          rendering: '🎬 正在后台渲染（切换工程或刷新不会中断）',
+          completed: '✅ 最终渲染完成',
+          failed: '❌ 渲染失败',
+        };
+        statusEl.textContent = labels[status] ?? '渲染状态未知';
+        const isBusy = ['preparing', 'rendering'].includes(status);
+        if (buttonEl) {
+          buttonEl.disabled = isBusy;
+          buttonEl.classList.toggle('opacity-60', isBusy);
+          buttonEl.textContent = status === 'preparing' ? '⏳ 准备中…' : (status === 'rendering' ? '⏳ 渲染中…' : '🎬 最终渲染');
+        }
         outputEl.classList.toggle('hidden', !job.outputUrl);
         if (job.outputUrl) outputEl.href = job.outputUrl;
-        errorEl.classList.toggle('hidden', job.status !== 'failed');
-        errorEl.textContent = job.status === 'failed' ? ((job.error || '') + '\\n' + (job.log || '')).slice(-2000) : '';
+        errorEl.classList.toggle('hidden', status !== 'failed');
+        errorEl.textContent = status === 'failed' ? ((job.error || '') + '\\n' + (job.log || '')).slice(-2000) : '';
+        syncRenderBannerVisibility();
       } catch (error) {
+        window._producerRenderJobStatus = 'failed';
         statusEl.textContent = '无法读取渲染状态：' + error.message;
+        syncRenderBannerVisibility();
       }
     }
+
+    function openFinalRenderConfirmModal() {
+      const modal = document.getElementById('finalRenderConfirmModal');
+      if (!modal) return startFinalRender();
+      const projEl = document.getElementById('finalRenderProjectName');
+      const sumEl = document.getElementById('finalRenderSceneSummary');
+      const scenes = manifestData?.scenes || [];
+      const totalSec = manifestData?.total_duration_sec || 0;
+      const totalMin = totalSec > 0 ? (totalSec / 60).toFixed(1) : '0.0';
+      if (projEl) projEl.textContent = activeProjectId || '-';
+      if (sumEl) sumEl.textContent = \`\${scenes.length} 镜 · 全片约 \${totalMin} 分钟\`;
+      modal.classList.remove('hidden');
+    }
+
+    function closeFinalRenderConfirmModal() {
+      const modal = document.getElementById('finalRenderConfirmModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    async function confirmStartFinalRender() {
+      closeFinalRenderConfirmModal();
+      await startFinalRender();
+    }
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeFinalRenderConfirmModal();
+    });
 
     async function startFinalRender() {
       const projectId = activeProjectId;
@@ -10435,11 +13452,26 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
-    function populateModelSelect(selectId, inputId, models, placeholderLabel) {
+    const modelCatalogCache = { text: [], video: [], image: [] };
+    const modelCatalogMeta = { text: null, video: null, image: null };
+    const MODEL_SELECT_CONFIGS = {
+      writer:  { catalog: 'text',  selectId: 'writerModelSelect',  inputId: 'currentWriterModelInput',  searchId: 'writerModelSearch',  placeholder: '🔽 选择文案大模型' },
+      video:   { catalog: 'video', selectId: 'videoModelSelect',   inputId: 'currentVideoModelInput',   searchId: 'videoModelSearch',   placeholder: '🔽 选择视频生成模型' },
+      text:    { catalog: 'text',  selectId: 'textModelSelect',    inputId: 'currentTextModelInput',    searchId: 'textModelSearch',    placeholder: '🔽 选择分镜提炼模型' },
+      image:   { catalog: 'image', selectId: 'imageModelSelect',   inputId: 'currentImageModelInput',   searchId: 'imageModelSearch',   placeholder: '🔽 选择超清生图模型' },
+      bgm:     { catalog: 'text',  selectId: 'bgmModelSelect',     inputId: 'currentBgmModelInput',     searchId: 'bgmModelSearch',     placeholder: '🔽 选择 BGM 分析模型' },
+      keyword: { catalog: 'text',  selectId: 'keywordModelSelect', inputId: 'currentKeywordModelInput', searchId: 'keywordModelSearch', placeholder: '🔽 选择关键词提炼模型' },
+    };
+
+    function populateModelSelect(selectId, inputId, models, placeholderLabel, totalCount) {
       const sel = document.getElementById(selectId);
       if (!sel) return;
       const curVal = (document.getElementById(inputId)?.value || '').trim();
-      const opts = ['<option value="">' + placeholderLabel + '（共 ' + models.length + ' 个）</option>'];
+      const total = typeof totalCount === 'number' ? totalCount : models.length;
+      const countText = (total > models.length)
+        ? ('命中 ' + models.length + ' / 共 ' + total + ' 个')
+        : ('共 ' + models.length + ' 个');
+      const opts = ['<option value="">' + placeholderLabel + '（' + countText + '）</option>'];
       let hasCur = false;
       for (const m of models) {
         const id = String(m.id || '').trim();
@@ -10455,57 +13487,151 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       sel.innerHTML = opts.join('');
     }
 
+    function populateWriterQuickSelect(models) {
+      const wSelect = document.getElementById('wInputModel');
+      if (!wSelect || !Array.isArray(models) || models.length === 0) return;
+      const curVal = (document.getElementById('currentWriterModelInput')?.value || visualConfig.writerModel || wSelect.value || 'deepseek/deepseek-chat').trim();
+      const opts = [];
+      let hasCur = false;
+      for (const m of models) {
+        const id = String(m.id || '').trim();
+        if (!id) continue;
+        const selected = id === curVal ? ' selected' : '';
+        if (selected) hasCur = true;
+        const label = (m.name && m.name !== id) ? (m.name + ' (' + id + ')') : id;
+        opts.push('<option value="' + escapeHtml(id) + '"' + selected + '>' + escapeHtml(label) + '</option>');
+      }
+      if (curVal && !hasCur) {
+        opts.unshift('<option value="' + escapeHtml(curVal) + '" selected>' + escapeHtml(curVal) + ' (当前配置)</option>');
+      }
+      wSelect.innerHTML = opts.join('');
+    }
+
+    function filterModelSelect(key) {
+      const cfg = MODEL_SELECT_CONFIGS[key];
+      if (!cfg) return;
+      const allModels = modelCatalogCache[cfg.catalog] || [];
+      const q = (document.getElementById(cfg.searchId)?.value || '').trim().toLowerCase();
+      const tokens = q ? q.split(/\s+/).filter(Boolean) : [];
+      const filtered = tokens.length === 0
+        ? allModels
+        : allModels.filter((m) => {
+            const hay = (String(m.id || '') + ' ' + String(m.name || '') + ' ' + String(m.description || '')).toLowerCase();
+            return tokens.every((t) => hay.includes(t));
+          });
+      populateModelSelect(cfg.selectId, cfg.inputId, filtered, cfg.placeholder, allModels.length);
+    }
+
+    function syncAllModelSelectsFromCache() {
+      for (const key of Object.keys(MODEL_SELECT_CONFIGS)) {
+        filterModelSelect(key);
+      }
+      if (modelCatalogCache.text.length > 0) {
+        populateWriterQuickSelect(modelCatalogCache.text);
+      }
+    }
+
+    function updateModelCatalogStatusBadge() {
+      const el = document.getElementById('modelCatalogStatusBadge');
+      if (!el) return;
+      const t = modelCatalogMeta.text;
+      const v = modelCatalogMeta.video;
+      const i = modelCatalogMeta.image;
+      if (!t && !v && !i) {
+        el.textContent = '⏳ 正在拉取实时模型列表...';
+        el.className = 'text-[10px] font-mono font-normal text-gray-400';
+        return;
+      }
+      const anyFallback = (t && t.source !== 'live') || (v && v.source !== 'live') || (i && i.source !== 'live');
+      const summary = '文本 ' + (t ? t.count : '?') + ' · 视频 ' + (v ? v.count : '?') + ' · 生图 ' + (i ? i.count : '?');
+      if (anyFallback) {
+        el.textContent = '⚠️ 部分使用本地兜底（' + summary + '）';
+        el.className = 'text-[10px] font-mono font-bold text-amber-300';
+      } else {
+        const gwLabel = t?.gateway === 'gemini' ? 'Gemini网关' : (t?.gateway === 'custom' ? '自定义网关' : 'OpenRouter');
+        el.textContent = '✅ 已在线拉取 (' + gwLabel + '): ' + summary;
+        el.className = 'text-[10px] font-mono font-bold text-emerald-300';
+      }
+    }
+
     async function loadOpenRouterModels() {
       try {
         const apiKey = (document.getElementById('currentApiKeyInput')?.value || '').trim();
+        const baseUrl = (document.getElementById('currentBaseUrlInput')?.value || '').trim();
         const qs = new URLSearchParams();
         if (activeProjectId) qs.set('project', activeProjectId);
         if (apiKey) qs.set('apiKey', apiKey);
+        if (baseUrl) qs.set('baseUrl', baseUrl);
         const res = await fetch('/api/openrouter-models?' + qs.toString());
         const data = await res.json();
         if (data.ok && Array.isArray(data.models)) {
+          modelCatalogCache.text = data.models;
+          modelCatalogMeta.text = { source: data.source || 'live', gateway: data.gateway || 'openrouter', count: data.models.length, error: data.error || '' };
           const dl = document.getElementById('openrouterModelsList');
           if (dl) {
             dl.innerHTML = data.models.map(m => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.name || m.id) + '</option>').join('');
           }
-          populateModelSelect('writerModelSelect', 'currentWriterModelInput', data.models, '🔽 从 OpenRouter 选择文案大模型');
-          populateModelSelect('textModelSelect', 'currentTextModelInput', data.models, '🔽 从 OpenRouter 选择分镜模型');
-          populateModelSelect('bgmModelSelect', 'currentBgmModelInput', data.models, '🔽 从 OpenRouter 选择 BGM 模型');
+          filterModelSelect('writer');
+          filterModelSelect('text');
+          filterModelSelect('bgm');
+          filterModelSelect('keyword');
+          populateWriterQuickSelect(data.models);
+          updateModelCatalogStatusBadge();
         }
       } catch (e) {
-        console.warn('加载 OpenRouter 列表跳过:', e);
+        modelCatalogMeta.text = { source: 'fallback', count: modelCatalogCache.text.length, error: e.message };
+        updateModelCatalogStatusBadge();
+        console.warn('加载在线模型列表跳过:', e);
       }
     }
 
     async function loadOpenRouterVideoModels() {
       try {
-        const res = await fetch('/api/openrouter-video-models');
+        const apiKey = (document.getElementById('currentApiKeyInput')?.value || '').trim();
+        const qs = new URLSearchParams();
+        if (activeProjectId) qs.set('project', activeProjectId);
+        if (apiKey) qs.set('apiKey', apiKey);
+        const res = await fetch('/api/openrouter-video-models?' + qs.toString());
         const data = await res.json();
         if (data.ok && Array.isArray(data.models)) {
+          modelCatalogCache.video = data.models;
+          modelCatalogMeta.video = { source: data.source || 'live', count: data.models.length, error: data.error || '' };
           const dl = document.getElementById('openrouterVideoModelsList');
           if (dl) {
             dl.innerHTML = data.models.map(m => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.name || m.id) + '</option>').join('');
           }
-          populateModelSelect('videoModelSelect', 'currentVideoModelInput', data.models, '🔽 从 OpenRouter 选择视频模型');
+          filterModelSelect('video');
+          updateModelCatalogStatusBadge();
         }
       } catch (e) {
-        console.warn('加载 OpenRouter 视频模型列表跳过:', e);
+        modelCatalogMeta.video = { source: 'fallback', count: modelCatalogCache.video.length, error: e.message };
+        updateModelCatalogStatusBadge();
+        console.warn('加载视频模型列表跳过:', e);
       }
     }
 
     async function loadOpenRouterImageModels() {
       try {
-        const res = await fetch('/api/openrouter-image-models');
+        const apiKey = (document.getElementById('currentApiKeyInput')?.value || '').trim();
+        const qs = new URLSearchParams();
+        if (activeProjectId) qs.set('project', activeProjectId);
+        if (apiKey) qs.set('apiKey', apiKey);
+        const res = await fetch('/api/openrouter-image-models?' + qs.toString());
         const data = await res.json();
         if (data.ok && Array.isArray(data.models)) {
+          modelCatalogCache.image = data.models;
+          modelCatalogMeta.image = { source: data.source || 'live', count: data.models.length, error: data.error || '' };
           const dl = document.getElementById('openrouterImageModelsList');
           if (dl) {
             dl.innerHTML = data.models.map(m => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.name || m.id) + '</option>').join('');
           }
-          populateModelSelect('imageModelSelect', 'currentImageModelInput', data.models, '🔽 从 OpenRouter 选择生图模型');
+          filterModelSelect('image');
+          updateModelCatalogStatusBadge();
         }
       } catch (e) {
-        console.warn('加载 OpenRouter 生图模型列表跳过:', e);
+        modelCatalogMeta.image = { source: 'fallback', count: modelCatalogCache.image.length, error: e.message };
+        updateModelCatalogStatusBadge();
+        console.warn('加载生图模型列表跳过:', e);
       }
     }
 
@@ -10518,7 +13644,16 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           loadOpenRouterVideoModels(),
           loadOpenRouterImageModels()
         ]);
-        if (showNotice) showToast('✅ 已从 OpenRouter 同步最新模型下拉列表！');
+        if (showNotice) {
+          const t = modelCatalogMeta.text;
+          const v = modelCatalogMeta.video;
+          const i = modelCatalogMeta.image;
+          const anyFallback = (t && t.source !== 'live') || (v && v.source !== 'live') || (i && i.source !== 'live');
+          const counts = '文本 ' + (t ? t.count : 0) + ' / 视频 ' + (v ? v.count : 0) + ' / 生图 ' + (i ? i.count : 0);
+          showToast(anyFallback
+            ? ('⚠️ 部分列表使用了本地兜底（' + counts + '）')
+            : ('✅ 已同步实时模型列表：' + counts));
+        }
       } finally {
         if (btn) btn.disabled = false;
       }
@@ -10560,7 +13695,8 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             videoModel: rawVideoModel,
             textModel: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
             imageModel: rawImageModel,
-            bgmModel: cfg.bgmModel || 'deepseek/deepseek-chat'
+            bgmModel: cfg.bgmModel || 'deepseek/deepseek-chat',
+            keywordModel: cfg.keywordModel || cfg.textModel || cfg.model || 'deepseek/deepseek-chat'
           };
 
           const kEl = document.getElementById('currentApiKeyInput');
@@ -10572,9 +13708,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           const tEl = document.getElementById('currentTextModelInput');
           const iEl = document.getElementById('currentImageModelInput');
           const bgmEl = document.getElementById('currentBgmModelInput');
+          const kwEl = document.getElementById('currentKeywordModelInput');
 
           if (kEl && visualConfig.apiKey) kEl.value = visualConfig.apiKey;
-          if (tavilyEl) tavilyEl.placeholder = cfg.tavilyKeyConfigured ? 'Tavily Key 已配置；留空则保留' : '填写 Tavily Key；留空则使用环境变量';
+          if (tavilyEl) {
+            tavilyEl.value = cfg.tavilyKeyConfigured ? '••••••••••••••••••••' : '';
+            tavilyEl.placeholder = cfg.tavilyKeyConfigured ? 'Tavily Key 已配置；留空或保留掩码即不修改' : '填写 Tavily Key；留空则使用环境变量';
+          }
           if (meowloadEl) meowloadEl.placeholder = cfg.meowloadKeyConfigured ? '哼哼猫 Key 已配置；留空则保留' : '填写哼哼猫 API Key；留空则保留已存 Key';
           if (bEl && visualConfig.baseUrl) bEl.value = visualConfig.baseUrl;
           if (wEl && visualConfig.writerModel) wEl.value = visualConfig.writerModel;
@@ -10582,6 +13722,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           if (tEl && visualConfig.textModel) tEl.value = visualConfig.textModel;
           if (iEl && visualConfig.imageModel) iEl.value = visualConfig.imageModel;
           if (bgmEl && visualConfig.bgmModel) bgmEl.value = visualConfig.bgmModel;
+          if (kwEl && visualConfig.keywordModel) kwEl.value = visualConfig.keywordModel;
 
           if (visualConfig.writerModel) {
             selectWriterModelSlug(visualConfig.writerModel);
@@ -10589,8 +13730,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
           restoreModelPrefsFromLocal();
           updateModelBadge();
+          syncAllModelSelectsFromCache();
         }
 
+        window._elevenlabsKeyConfigured = Boolean(data.elevenlabsKeyConfigured);
+        window.timingSummaryData = data.timingSummary || null;
+        renderTimingSummaryBadge(window.timingSummaryData);
+        updateBgmHeaderBadge(data.bgmSummary || null);
         renderVideoContainer(data);
         renderTable();
       } catch (err) {
@@ -10600,45 +13746,42 @@ function renderMainHtml(curProjectId = defaultProjectId) {
 
     function renderVideoContainer(data) {
       const c = document.getElementById('videoContainer');
-      const count = manifestData?.scenes?.length || 0;
-      const totalSec = manifestData?.total_duration_sec || 0;
+      const outputEl = document.getElementById('renderJobOutput');
       if (data.hasVideo && data.videoUrl) {
-        c.innerHTML = \`
-          <div class="flex-1 space-y-1">
-            <div class="flex items-center gap-2">
-              <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-300">1080p 纯净正片已就绪</span>
-              <span class="text-xs text-gray-400">已对齐 \${count} 个视觉镜头 (平均 \${(totalSec/count).toFixed(1)}s/镜)</span>
+        window._producerHasVideo = true;
+        if (c) {
+          c.innerHTML = \`
+            <div class="w-full max-w-xl rounded-xl overflow-hidden border border-gray-700 bg-black aspect-video flex items-center justify-center">
+              <video src="\${data.videoUrl}" controls playsinline class="w-full h-full object-contain"></video>
             </div>
-            <p class="text-xs text-gray-300 font-medium">当前工程已完成 Remotion 渲染，支持边查阅表格边拖拽播放进度检验音画节拍。</p>
-          </div>
-          <div class="w-full md:w-96 rounded-xl overflow-hidden border border-gray-700 bg-black aspect-video flex items-center justify-center">
-            <video src="\${data.videoUrl}" controls playsinline class="w-full h-full object-contain"></video>
-          </div>
-        \`;
+          \`;
+        }
+        if (outputEl && !window._producerRenderOutputUrl) {
+          outputEl.href = data.videoUrl;
+          outputEl.classList.remove('hidden');
+        }
       } else {
-        c.innerHTML = \`
-          <div class="flex-1 space-y-1">
-            <div class="flex items-center gap-2">
-              <span class="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-300">视觉镜头轨已就绪 · \${count} 个镜头</span>
-              <span class="text-xs text-gray-400">全片约 \${(totalSec/60).toFixed(1)} 分钟 · 平均 \${(totalSec/count).toFixed(1)} 秒/镜头</span>
-            </div>
-            <p class="text-xs text-gray-300 font-normal">可在各镜头中生成 16:9 画面预览，或上传视频与图片检验素材。</p>
-          </div>
-        \`;
+        window._producerHasVideo = false;
+        if (c) {
+          c.innerHTML = '';
+          c.classList.add('hidden');
+        }
       }
+      syncRenderBannerVisibility();
     }
 
     function updateCounters() {
       const scenes = manifestData?.scenes || [];
       const totalCount = scenes.length;
       const totalSec = manifestData?.total_duration_sec || 0;
-      const avgSec = totalCount > 0 ? (totalSec / totalCount).toFixed(1) : 0;
+      const avgSec = totalCount > 0 ? (totalSec / totalCount).toFixed(1) : '0.0';
+      const totalMin = totalSec > 0 ? (totalSec / 60).toFixed(1) : '0.0';
 
       const goldCount = scenes.filter((s) => s.duration_ms <= 8500).length;
       const overCount = scenes.filter((s) => s.duration_ms > 10000).length;
 
       document.getElementById('statTotal').textContent = totalCount + ' 镜';
-      document.getElementById('statAvgDur').textContent = \`平均 \${avgSec}s / 镜\`;
+      document.getElementById('statAvgDur').textContent = \`约 \${totalMin}m · 均 \${avgSec}s/镜\`;
       document.getElementById('statGold').textContent = goldCount + ' 镜';
       document.getElementById('statOver').textContent = overCount + ' 镜';
     }
@@ -10663,9 +13806,14 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           }
         });
       }
+      const listEl = document.getElementById('producerSceneList');
+      const savedScrollTop = listEl ? listEl.scrollTop : 0;
+      const savedScrollLeft = listEl ? listEl.scrollLeft : 0;
+      const savedWinX = window.scrollX;
+      const savedWinY = window.scrollY;
       const tbody = document.getElementById('tableBody');
-      tbody.innerHTML = '';
-      const fieldLabels = ['', '旁白', '核心关键词', '画面方式', 'AI 生成画面', '素材上传与 AI 剪辑', '节拍调整'];
+      const frag = document.createDocumentFragment();
+      const fieldLabels = ['', '旁白', '画面方式', '画面内容（AI 生成 / 素材上传）', '节拍调整'];
 
       (manifestData?.scenes || []).forEach((scene, idx) => {
         const isAi = scene.source_mode !== 'manual_upload';
@@ -10677,10 +13825,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         let badgeLabel = \`🟢 \${durSec}s · 黄金节奏\`;
         if (scene.duration_ms > 10000) {
           badgeClass = 'badge-danger';
-          badgeLabel = \`🔴 \${durSec}s · 建议切分 ✂️\`;
+          badgeLabel = \`🔴 \${durSec}s · 建议加切点 ✂️\`;
         } else if (scene.duration_ms > 8500) {
           badgeClass = 'badge-warn';
           badgeLabel = \`🟡 \${durSec}s · 偏长\`;
+        } else if (scene.duration_ms < 1500) {
+          badgeClass = 'badge-warn';
+          badgeLabel = \`🟡 \${durSec}s · 偏短\`;
         }
 
         const isSharedWithPrev = Boolean(scene.shared_asset_with_prev);
@@ -10701,36 +13852,35 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           <span class="text-[10px] text-gray-500 block font-mono">
             \${(scene.start_ms / 1000).toFixed(1)}s - \${(scene.end_ms / 1000).toFixed(1)}s
           </span>
+          \${scene.timing_source && scene.timing_source.startsWith('aligned')
+            ? '<span class="inline-block mt-0.5 px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[9px] font-semibold">🎙️ 已对齐</span>'
+            : ''}
           <span class="text-[10px] text-gray-400 block mt-0.5">\${scene.chapter_ref || ''}</span>
         \`;
 
-        // 2. 旁白片段
+        // 2. 旁白片段（支持点字切画面 / 挪切点）
         const td2 = document.createElement('td');
         td2.className = 'p-3';
+        const isPickerOpen = Boolean(window._openCutPickers && window._openCutPickers[idx]);
+        const vKws = Array.isArray(scene.visual_keywords) ? scene.visual_keywords : [];
         td2.innerHTML = \`
-          <textarea rows="3" aria-label="旁白" class="w-full p-2.5 rounded-lg bg-gray-950 border border-gray-700 text-gray-100 text-xs leading-relaxed focus:border-blue-500 focus:outline-none"
-            onchange="onNarrationEdit(\${idx}, this.value)">\${scene.narration_text}</textarea>
+          <textarea rows="4" aria-label="旁白" class="w-full p-2.5 rounded-lg bg-gray-950 border border-gray-700 text-gray-100 text-xs leading-relaxed focus:border-blue-500 focus:outline-none"
+            onchange="onNarrationEdit(\${idx}, this.value)">\${escapeHtml(scene.narration_text || '')}</textarea>
+          <div class="mt-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[10px]">
+            <button type="button" onclick="toggleCharCutPicker(\${idx})"
+              class="px-2 py-0.5 rounded bg-indigo-500/15 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 font-semibold transition cursor-pointer">
+              \${isPickerOpen ? '▲ 收起切点面板' : '👆 点字切画面 / 挪切点'}
+            </button>
+            \${vKws.length ? ('<span class="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-200 border border-purple-500/30 font-mono truncate max-w-[180px]" title="画面触发关键词">🎯 ' + escapeHtml(vKws.join(' / ')) + '</span>') : ''}
+          </div>
+          <div id="charCutPicker_\${idx}" class="\${isPickerOpen ? '' : 'hidden '}mt-2 p-2.5 rounded-xl bg-gray-900/95 border border-indigo-500/40 space-y-2"></div>
         \`;
+        if (isPickerOpen) {
+          const pickerEl = td2.querySelector('#charCutPicker_' + idx);
+          if (pickerEl) pickerEl.innerHTML = buildCharCutPickerInner(idx);
+        }
 
-        // 3. 核心标志关键词
-        const td3 = document.createElement('td');
-        td3.className = 'p-3';
-        const chips = kws
-          .map(
-            (k) =>
-              \`<span class="px-2 py-0.5 rounded-full bg-purple-500/15 border border-purple-500/30 text-purple-300 text-[11px] font-semibold"># \${k}</span>\`
-          )
-          .join('');
-        td3.innerHTML = \`
-          <div class="flex flex-wrap gap-1 mb-1.5">\${chips}</div>
-          <input type="text" aria-label="核心关键词" value="\${kws.join(', ')}"
-            placeholder="核心标志词，用逗号分隔..."
-            class="w-full px-2.5 py-1.5 rounded-lg bg-gray-950 border border-gray-700 text-gray-100 text-xs focus:border-purple-400 focus:outline-none font-semibold"
-            onchange="onKeywordsEdit(\${idx}, this.value)" />
-          <p class="text-[10px] text-gray-500 mt-1">在 16:9 画幅中央醒目展示</p>
-        \`;
-
-        // 4. 画面生成方式
+        // 3. 画面生成方式
         const td4 = document.createElement('td');
         td4.className = 'p-3';
         td4.innerHTML = \`
@@ -10799,7 +13949,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
             <!-- 实体视频行内真实播放器或预览占位 -->
             \${hasGeneratedVideo ? \`
               <div class="rounded-xl border border-emerald-500/60 bg-black aspect-[16/9] relative overflow-hidden group shadow-lg">
-                <video src="\${generatedVideoSrc}" controls playsinline class="w-full h-full object-cover"></video>
+                <video src="\${generatedVideoSrc}" controls playsinline preload="metadata" class="w-full h-full object-cover"></video>
                 <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-emerald-400 border border-emerald-500/40 flex items-center gap-1 pointer-events-none">
                   <span>✅ 实体 MP4 视频就绪 (时长: \${durSec}s)</span>
                 </div>
@@ -11028,20 +14178,30 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           \`;
         }
 
+        // Step 0: AI 唯一最佳纯中文搜索词（位于 Step 1 顶部，极简单行：最佳词 + GitHub 复制按钮 + 换一个）
+        const kwCandidates = Array.isArray(scene.search_keyword_candidates) ? scene.search_keyword_candidates : [];
+        const bestKw = scene.selected_search_keyword || kwCandidates[0] || '';
+        const step0RowHtml = buildStep0BestKeywordHtml(idx, bestKw);
+        const step0KeywordsHtml = \`
+          <div id="step0KwWrap_\${idx}" class="pb-1.5 border-b border-gray-800/70">
+            \${step0RowHtml}
+          </div>
+        \`;
+
         // 口令框（置于最上方：既能把秒数口令编译为下载片段跳转指令，也能对已下载本地短视频做加字幕/动效二次剪辑）
         const aiInputHtml = \`
-          <div class="space-y-1.5">
-            <div class="flex items-center justify-between text-[9px] text-sky-300 font-bold">
-              <span>🎙️ Step 1 · 口语指令 (指定下载几分几秒 / 字幕与动效)</span>
-              <span class="text-gray-500 font-mono">回车或点编译 ↵</span>
+          <div class="space-y-1.5 min-w-0">
+            <div class="flex items-center justify-between gap-2 text-[9px] text-sky-300 font-bold min-w-0">
+              <span class="truncate">🎙️ Step 1 · 口语指令 (下载秒数 / 字幕动效)</span>
+              <span class="text-gray-500 font-mono shrink-0">回车或点编译 ↵</span>
             </div>
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-1 min-w-0">
               <input type="text" id="aiIntentInput_\${idx}"
                      placeholder="\${inputPlaceholder}"
                      value="\${currentPromptVal}"
                      onkeydown="if(event.key==='Enter') applyAiIntentForRow(\${idx})"
-                     class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-sky-500/60 text-white text-[10px] placeholder:text-gray-500 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 focus:outline-none" />
-              <button type="button" onclick="applyAiIntentForRow(\${idx})" class="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] whitespace-nowrap shadow cursor-pointer transition" title="解析口语中的起止秒数生成下载跳转命令，或编译字幕与Remotion动效">
+                     class="min-w-0 flex-1 px-2 py-1.5 rounded-lg bg-gray-950 border border-sky-500/60 text-white text-[10px] placeholder:text-gray-500 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 focus:outline-none" />
+              <button type="button" onclick="applyAiIntentForRow(\${idx})" class="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition" title="解析口语中的起止秒数生成下载跳转命令，或编译字幕与Remotion动效">
                 ✨ 编译
               </button>
             </div>
@@ -11071,21 +14231,21 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           : '';
 
         const urlDownloadBarHtml = \`
-          <div class="space-y-1 pt-1 border-t border-gray-800/70">
-            <div class="flex items-center justify-between text-[9px] text-teal-300/90 font-bold">
-              <span>🔗 Step 2 · 填入视频 URL 下载 (\${seqDisplay})</span>
-              <span class="text-gray-500 font-mono truncate max-w-[140px]" title="projects/\${activeProjectId}/public/assets/video/">📂 projects/\${activeProjectId}/public/assets/</span>
+          <div class="space-y-1 pt-1 border-t border-gray-800/70 min-w-0">
+            <div class="flex items-center justify-between gap-2 text-[9px] text-teal-300/90 font-bold min-w-0">
+              <span class="truncate">🔗 Step 2 · 填入视频 URL 下载 (\${seqDisplay})</span>
+              <span class="text-gray-500 font-mono truncate max-w-[120px] shrink-0" title="projects/\${activeProjectId}/public/assets/video/">📂 assets/</span>
             </div>
             \${downloadRangeBadgeHtml}
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-1 min-w-0">
               <input type="url" id="urlDownloadInput_\${idx}"
                      value="\${pendingUrlVal}"
                      oninput="window._pendingDownloadUrls = window._pendingDownloadUrls || {}; window._pendingDownloadUrls[\${idx}] = this.value"
                      placeholder="🔗 粘贴视频链接 (YouTube/B站/抖音等)..."
                      onkeydown="if(event.key==='Enter') downloadUrlForRow(\${idx})"
-                     class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-teal-500/50 text-white text-[10px] placeholder:text-gray-500 focus:border-teal-400 focus:ring-1 focus:ring-teal-400 focus:outline-none" />
+                     class="min-w-0 flex-1 px-2 py-1.5 rounded-lg bg-gray-950 border border-teal-500/50 text-white text-[10px] placeholder:text-gray-500 focus:border-teal-400 focus:ring-1 focus:ring-teal-400 focus:outline-none" />
               <button type="button" id="urlDownloadBtn_\${idx}" onclick="downloadUrlForRow(\${idx})"
-                      class="px-2 py-1.5 rounded-lg \${hasCompiledDlRange ? 'bg-gradient-to-r from-teal-500 to-emerald-500 ring-1 ring-teal-300' : 'bg-teal-600 hover:bg-teal-500'} text-white font-bold text-[10px] whitespace-nowrap shadow cursor-pointer transition">
+                      class="px-2 py-1.5 rounded-lg \${hasCompiledDlRange ? 'bg-gradient-to-r from-teal-500 to-emerald-500 ring-1 ring-teal-300' : 'bg-teal-600 hover:bg-teal-500'} text-white font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition">
                 \${dlBtnText}
               </button>
             </div>
@@ -11101,59 +14261,17 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           </div>
         \`;
 
-        // 检测本工程已下载/上传的本地素材列表（位于 projects/<projectId>/public/assets/video 或 images）
-        const projectLocalAssets = (assetIndexData?.assets || []).filter(
-          (a) => a && a.exists_on_disk !== false && a.path && !String(a.path).toLowerCase().startsWith('assets/generated/')
-        );
-        let projectAssetListHtml = '';
-        if (projectLocalAssets.length > 0) {
-          const itemsHtml = projectLocalAssets
-            .slice()
-            .reverse()
-            .map((a) => {
-              const isCurrent = asset && asset.asset_id === a.asset_id && scene.source_mode === 'manual_upload';
-              const label = (a.file_name || a.asset_id || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-              const durBadge = a.duration_seconds ? \`\${a.duration_seconds}s\` : (a.type === 'image' ? '图片' : '');
-              return \`
-                <div class="flex items-center justify-between gap-1 px-2 py-1 rounded bg-gray-900/90 hover:bg-gray-800 border \${isCurrent ? 'border-emerald-500/60 text-emerald-300' : 'border-gray-800 text-gray-300'} text-[10px]">
-                  <span class="truncate max-w-[165px]" title="\${label} (\${a.file_path || a.path})">
-                    \${isCurrent ? '✅ ' : '🎬 '}\${label}
-                  </span>
-                  <div class="flex items-center gap-1 shrink-0">
-                    \${durBadge ? \`<span class="text-[9px] text-gray-400 font-mono">\${durBadge}</span>\` : ''}
-                    \${
-                      isCurrent
-                        ? \`<span class="text-[9px] text-emerald-400 font-bold">当前绑定</span>\`
-                        : \`<button type="button" onclick="bindProjectAssetForRow(\${idx}, '\${a.asset_id}')" class="px-1.5 py-0.5 rounded bg-sky-600/80 hover:bg-sky-500 text-white font-bold text-[9px] cursor-pointer">选用</button>\`
-                    }
-                  </div>
-                </div>
-              \`;
-            })
-            .join('');
-
-          projectAssetListHtml = \`
-            <div class="rounded-xl border border-gray-800 bg-gray-950/90 p-2 space-y-1 text-left">
-              <div class="flex items-center justify-between text-[9px] text-amber-300/90 font-bold">
-                <span>📂 本工程已下载素材库 (\${projectLocalAssets.length})</span>
-                <span class="text-gray-500 font-mono">projects/\${activeProjectId}/public/assets</span>
-              </div>
-              <div class="max-h-24 overflow-y-auto space-y-1 pr-0.5">
-                \${itemsHtml}
-              </div>
-            </div>
-          \`;
-        }
-
         if (asset && scene.source_mode === 'manual_upload') {
           const videoSrc = \`/public/\${activeProjectId}/\${asset.path}\`;
 
           td6.innerHTML = \`
             <div class="space-y-2">
               \${linkHtml}
+              \${step0KeywordsHtml}
               \${aiInputHtml}
               \${urlDownloadBarHtml}
-              <div class="border border-sky-500/40 bg-sky-950/30 rounded-xl p-2.5 text-left space-y-1.5"
+              <div id="dropzone_\${idx}"
+                   class="border border-sky-500/40 bg-sky-950/30 rounded-xl p-2.5 text-left space-y-1.5 transition"
                    ondragover="onFileDragOver(event, \${idx})"
                    ondragleave="onFileDragLeave(event, \${idx})"
                    ondrop="onFileDrop(event, \${idx})">
@@ -11170,7 +14288,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                   isVideo
                     ? \`
                     <div class="rounded-lg overflow-hidden bg-black border border-gray-800 aspect-video flex items-center justify-center">
-                      <video src="\${videoSrc}" controls playsinline class="w-full h-full object-contain"></video>
+                      <video src="\${videoSrc}" controls playsinline preload="metadata" class="w-full h-full object-contain"></video>
                     </div>
                   \`
                     : \`
@@ -11184,6 +14302,36 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                   📍 工程路径: projects/\${activeProjectId}/public/\${asset.path}
                 </div>
 
+                \${isVideo ? (() => {
+                  const hasAudioTrack = asset.has_audio !== false;
+                  const keepAudio = Boolean(scene.media_modifiers && scene.media_modifiers.keep_original_audio);
+                  const audioVolPct = Math.round(((scene.media_modifiers && scene.media_modifiers.original_audio_volume !== undefined) ? scene.media_modifiers.original_audio_volume : 0.3) * 100);
+                  if (!hasAudioTrack) {
+                    return \`
+                      <div class="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-gray-900/70 border border-gray-800 text-[10px] text-gray-500">
+                        <span>🔇 该素材无音轨</span>
+                      </div>
+                    \`;
+                  }
+                  return \`
+                    <div class="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-gray-900/90 border border-sky-500/30 text-[10px]">
+                      <label class="flex items-center gap-1.5 text-sky-200 font-semibold cursor-pointer select-none shrink-0">
+                        <input type="checkbox" id="keepAudioCheck_\${idx}" \${keepAudio ? 'checked' : ''}
+                               onchange="updateSceneAudioOption(\${idx})"
+                               class="rounded border-gray-600 bg-gray-950 text-sky-500 focus:ring-0 cursor-pointer" />
+                        <span>🔊 保留原声</span>
+                      </label>
+                      <div class="flex items-center gap-1.5 min-w-0 \${keepAudio ? '' : 'opacity-40 pointer-events-none'}">
+                        <input type="range" id="keepAudioVol_\${idx}" min="0" max="100" step="5" value="\${audioVolPct}"
+                               oninput="document.getElementById('keepAudioVolText_\${idx}').textContent = this.value + '%'"
+                               onchange="updateSceneAudioOption(\${idx})"
+                               class="w-16 accent-sky-400 cursor-pointer" />
+                        <span id="keepAudioVolText_\${idx}" class="font-mono text-sky-300 w-8 text-right shrink-0">\${audioVolPct}%</span>
+                      </div>
+                    </div>
+                  \`;
+                })() : ''}
+
                 <div class="scene-asset-actions flex items-center justify-between pt-1 border-t border-gray-800/80 text-[10px]">
                   <button onclick="document.getElementById('fileInput_\${idx}').click()" class="text-sky-400 hover:underline cursor-pointer">
                     选择替换本地文件
@@ -11193,13 +14341,13 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                   </button>
                 </div>
               </div>
-              \${projectAssetListHtml}
             </div>
           \`;
         } else {
           td6.innerHTML = \`
             <div class="space-y-2">
               \${linkHtml}
+              \${step0KeywordsHtml}
               \${aiInputHtml}
               \${urlDownloadBarHtml}
               <button type="button" id="dropzone_\${idx}"
@@ -11212,7 +14360,6 @@ function renderMainHtml(curProjectId = defaultProjectId) {
                 <span class="block text-[11px] font-bold text-sky-200">选择或拖入视频 / 图片</span>
                 <span class="block text-[9px] text-gray-400 mt-0.5">或先在上方口令框指定秒数 ➔ 编译 ➔ 填 URL 下载</span>
               </button>
-              \${projectAssetListHtml}
             </div>
           \`;
         }
@@ -11225,25 +14372,38 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         hiddenFile.onchange = (e) => uploadFileForRow(idx, e.target.files[0]);
         td6.appendChild(hiddenFile);
 
-        // 7. 镜头节拍操作列 (切分 & 合并)
+        // 7. 镜头节拍操作列 (加切点 / 挪切点 / 删切点)
         const td7 = document.createElement('td');
         td7.className = 'p-3 text-center';
         td7.innerHTML = \`
           <div class="flex flex-col gap-1.5">
-            <button onclick="splitShotPrompt(\${idx})" class="w-full px-2 py-1.5 rounded-lg bg-purple-600/25 hover:bg-purple-600 border border-purple-500/40 text-purple-200 hover:text-white text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm">
-              <span>✂️ 切分</span>
+            <button type="button" onclick="openCutPickerForSplit(\${idx})" class="w-full px-2 py-1.5 rounded-lg bg-purple-600/25 hover:bg-purple-600 border border-purple-500/40 text-purple-200 hover:text-white text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm cursor-pointer" title="展开点字切画面面板，点任意字前新增换画面点">
+              <span>✂️ 加切点</span>
             </button>
             \${
+              idx > 0
+                ? \`<div class="grid grid-cols-2 gap-1">
+                    <button type="button" onclick="nudgeCutPoint(\${idx}, 'earlier')" class="px-1 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/40 text-indigo-200 hover:text-white text-[10px] font-bold transition cursor-pointer" title="把本画面切入点往前挪（上一句话没说完就切入本画面）">
+                      ⏪提前换
+                    </button>
+                    <button type="button" onclick="nudgeCutPoint(\${idx}, 'later')" class="px-1 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/40 text-indigo-200 hover:text-white text-[10px] font-bold transition cursor-pointer" title="把本画面切入点往后挪">
+                      ⏩推迟换
+                    </button>
+                  </div>\`
+                : ''
+            }
+            \${
               idx < (manifestData.scenes.length - 1)
-                ? \`<button onclick="mergeShotWithNext(\${idx})" class="w-full px-2 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm">
-                    <span>🔗 合并</span>
+                ? \`<button type="button" onclick="mergeShotWithNext(\${idx})" class="w-full px-2 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm cursor-pointer" title="删掉与下一镜头之间的切点，合并成一个画面">
+                    <span>🔗 删切点</span>
                   </button>\`
                 : ''
             }
           </div>
         \`;
 
-        [td1, td2, td3, td4, td5, td6, td7].forEach((cell, column) => {
+        const tdVisual = isAi ? td5 : td6;
+        [td1, td2, td4, tdVisual, td7].forEach((cell, column) => {
           cell.setAttribute('role', 'cell');
           if (fieldLabels[column]) {
             const label = document.createElement('span');
@@ -11254,8 +14414,16 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           }
           tr.appendChild(cell);
         });
-        tbody.appendChild(tr);
+        frag.appendChild(tr);
       });
+      tbody.replaceChildren(frag);
+      if (listEl) {
+        listEl.scrollTop = savedScrollTop;
+        listEl.scrollLeft = savedScrollLeft;
+      }
+      if (window.scrollX !== savedWinX || window.scrollY !== savedWinY) {
+        window.scrollTo(savedWinX, savedWinY);
+      }
     }
 
     function onFileDragOver(e, idx) {
@@ -11283,6 +14451,184 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         manifestData.scenes[idx].source_mode = 'manual_upload';
         uploadFileForRow(idx, file);
       }
+    }
+
+    const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M0 6.75C0 5.784.784 5 1.75 5h1.5a.75.75 0 0 1 0 1.5h-1.5a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-1.5a.75.75 0 0 1 1.5 0v1.5A1.75 1.75 0 0 1 9.25 16h-7.5A1.75 1.75 0 0 1 0 14.25Z"></path><path d="M5 1.75C5 .784 5.784 0 6.75 0h7.5C15.216 0 16 .784 16 1.75v7.5A1.75 1.75 0 0 1 14.25 11h-7.5A1.75 1.75 0 0 1 5 9.25Zm1.75-.25a.25.25 0 0 0-.25.25v7.5c0 .138.112.25.25.25h7.5a.25.25 0 0 0 .25-.25v-7.5a.25.25 0 0 0-.25-.25Z"></path></svg>';
+    const GITHUB_CHECK_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M13.78 4.22a.75.75 0 0 1 0 1.06l-7.25 7.25a.75.75 0 0 1-1.06 0L2.22 9.28a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018L6 10.94l6.72-6.72a.75.75 0 0 1 1.06 0Z"></path></svg>';
+
+    function buildStep0BestKeywordHtml(idx, bestKw) {
+      const kw = String(bestKw || '').trim();
+      if (!kw) {
+        return \`
+          <div class="flex items-center justify-between gap-1 text-[9px] text-cyan-300 font-bold">
+            <span>🔎 Step 0 · 最佳搜索词</span>
+            <button type="button" id="kwGenBtn_\${idx}" onclick="extractSearchKeywordsForRow(\${idx})"
+              class="px-2 py-0.5 rounded bg-cyan-900/70 hover:bg-cyan-700 text-cyan-100 border border-cyan-500/40 font-bold text-[9px] cursor-pointer transition shrink-0">
+              ✨ AI 提炼
+            </button>
+          </div>
+        \`;
+      }
+      const safeKw = escapeHtml(kw);
+      const encodedKw = encodeURIComponent(kw);
+      return \`
+        <div class="flex items-center gap-1 text-[10px]">
+          <span class="text-[9px] text-cyan-300 font-bold shrink-0" title="Step 0 · AI 唯一最佳搜索词">🔎</span>
+          <div class="flex-1 min-w-0 flex items-center justify-between rounded-md border border-cyan-500/50 bg-cyan-950/40 overflow-hidden">
+            <span class="px-2 py-0.5 text-cyan-100 font-bold truncate" title="\${safeKw}">\${safeKw}</span>
+            <button type="button" onclick="copySearchKeyword(event, decodeURIComponent('\${encodedKw}'), this)" title="复制最佳搜索词「\${safeKw}」"
+              class="px-1.5 py-1 border-l border-cyan-500/40 text-cyan-200 hover:text-white hover:bg-cyan-500/30 cursor-pointer flex items-center justify-center shrink-0 transition">
+              \${GITHUB_COPY_SVG}
+            </button>
+          </div>
+          <button type="button" id="kwGenBtn_\${idx}" onclick="extractSearchKeywordsForRow(\${idx}, { forceChange: true })" title="换一个不同的画面搜索词"
+            class="px-1.5 py-0.5 rounded bg-gray-900 hover:bg-cyan-900/60 text-gray-300 hover:text-cyan-200 border border-gray-700 hover:border-cyan-500/40 font-bold text-[9px] cursor-pointer transition shrink-0">
+            🔄 换一个
+          </button>
+        </div>
+      \`;
+    }
+
+    async function copySearchKeyword(e, kw, btnEl) {
+      if (e) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      const text = String(kw || '').trim();
+      if (!text) return;
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          await navigator.clipboard.writeText(text);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+        }
+        if (btnEl) {
+          btnEl.innerHTML = GITHUB_CHECK_SVG;
+          btnEl.classList.add('text-emerald-400');
+          setTimeout(() => {
+            btnEl.innerHTML = GITHUB_COPY_SVG;
+            btnEl.classList.remove('text-emerald-400');
+          }, 1500);
+        }
+        showToast('📋 已复制搜索词：' + text);
+      } catch (err) {
+        showToast('⚠️ 复制失败，请手动选中复制');
+      }
+    }
+
+    async function extractSearchKeywordsForRow(idx, { silent = false, forceChange = false } = {}) {
+      const scene = manifestData?.scenes?.[idx];
+      if (!scene) return false;
+      const btn = document.getElementById('kwGenBtn_' + idx);
+      const prevKw = scene.selected_search_keyword || (scene.search_keyword_candidates && scene.search_keyword_candidates[0]) || '';
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳...';
+      }
+      try {
+        const keywordModel = (document.getElementById('currentKeywordModelInput')?.value || visualConfig.keywordModel || visualConfig.textModel || '').trim();
+        const res = await fetch('/api/extract-search-keywords?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            sceneId: scene.scene_id,
+            narrationText: scene.narration_text || '',
+            chapterRef: scene.chapter_ref || '',
+            keywordModel,
+            excludeKeyword: forceChange ? prevKw : '',
+            persist: true,
+          }),
+        });
+        const data = await res.json();
+        if (!data.ok) {
+          if (!silent) showToast('❌ 搜索词提炼失败：' + (data.error || '未知错误'));
+          if (btn) {
+            btn.disabled = false;
+            btn.textContent = prevKw ? '🔄 换一个' : '✨ AI 提炼';
+          }
+          return false;
+        }
+        const bestKw = data.keyword || (data.keywords && data.keywords[0]) || '';
+        scene.selected_search_keyword = bestKw;
+        scene.search_keyword_candidates = bestKw ? [bestKw] : [];
+        const wrap = document.getElementById('step0KwWrap_' + idx);
+        if (wrap) {
+          wrap.innerHTML = buildStep0BestKeywordHtml(idx, bestKw);
+        }
+        if (!silent) showToast('✅ 最佳搜索词：' + bestKw);
+        return true;
+      } catch (err) {
+        if (!silent) showToast('❌ 搜索词提炼请求出错：' + err.message);
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = prevKw ? '🔄 换一个' : '✨ AI 提炼';
+        }
+        return false;
+      }
+    }
+
+    let _batchKeywordRunning = false;
+    let _batchKeywordAbort = false;
+
+    async function batchExtractAllSearchKeywords() {
+      const btn = document.getElementById('btnBatchExtractKeywords');
+      if (_batchKeywordRunning) {
+        _batchKeywordAbort = true;
+        if (btn) btn.textContent = '⏳ 正在停止...';
+        return;
+      }
+      const scenes = manifestData?.scenes || [];
+      if (scenes.length === 0) {
+        showToast('当前工程没有镜头');
+        return;
+      }
+      let targetIndices = scenes
+        .map((s, i) => ({ s, i }))
+        .filter(({ s }) => !Array.isArray(s.search_keyword_candidates) || s.search_keyword_candidates.length === 0)
+        .map(({ i }) => i);
+
+      if (targetIndices.length === 0) {
+        if (!confirm('全部 ' + scenes.length + ' 个镜头已有关键词，是否全部重新提炼？')) return;
+        targetIndices = scenes.map((_, i) => i);
+      }
+
+      _batchKeywordRunning = true;
+      _batchKeywordAbort = false;
+      let done = 0;
+      let okCount = 0;
+      const total = targetIndices.length;
+      const updateBtn = () => {
+        if (btn) btn.textContent = '⏹️ 停止提炼 (' + done + '/' + total + ')';
+      };
+      updateBtn();
+
+      const concurrency = 3;
+      let cursor = 0;
+      const worker = async () => {
+        while (cursor < targetIndices.length && !_batchKeywordAbort) {
+          const idx = targetIndices[cursor++];
+          const ok = await extractSearchKeywordsForRow(idx, { silent: true });
+          done++;
+          if (ok) okCount++;
+          updateBtn();
+        }
+      };
+
+      await Promise.all(Array.from({ length: Math.min(concurrency, targetIndices.length) }, () => worker()));
+
+      const wasAborted = _batchKeywordAbort;
+      _batchKeywordRunning = false;
+      _batchKeywordAbort = false;
+      if (btn) btn.textContent = '✨ 批量提炼全部镜头关键词';
+      showToast(wasAborted ? ('⏹️ 已停止，完成 ' + okCount + '/' + done + ' 个镜头') : ('🎉 批量提炼完成：成功 ' + okCount + '/' + total + ' 个镜头'));
     }
 
     async function applyAiIntentForRow(idx) {
@@ -11420,26 +14766,218 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
-    async function splitShotPrompt(idx) {
-      const scene = manifestData.scenes[idx];
-      const text = scene.narration_text || '';
-      
-      const defaultSplit = prompt(
-        \`【方案 A 镜头切分】当前镜头时长 \${(scene.duration_ms/1000).toFixed(1)}s：\\n\"\${text}\"\\n\\n请输入第一段要保留的文字（留空将自动在中间逗号处一分为二）：\`,
-        ''
-      );
+    window._openCutPickers = window._openCutPickers || {};
 
-      if (defaultSplit === null) return;
+    function renderTimingSummaryBadge(summary) {
+      const badge = document.getElementById('timingStatusBadge');
+      const rhythmEl = document.getElementById('timingRhythmBadge');
+      if (!badge) return;
+      if (!summary) {
+        badge.className = 'px-2.5 py-0.5 rounded-lg bg-gray-900 border border-gray-700 text-gray-300 font-semibold';
+        badge.textContent = '📐 时间轴：按字数估算';
+        if (rhythmEl) rhythmEl.classList.add('hidden');
+        return;
+      }
+      if (summary.available && !summary.stale) {
+        const mLabel = summary.method === 'whisper' ? 'Whisper 逐字对齐' : '音频停顿对齐';
+        const sec = ((summary.audio_duration_ms || 0) / 1000).toFixed(1);
+        badge.className = 'px-2.5 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-semibold';
+        badge.textContent = '🎙️ 已对齐真实配音（' + mLabel + ' · ' + sec + 's）';
+      } else if (summary.available && summary.stale) {
+        badge.className = 'px-2.5 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 font-semibold';
+        badge.textContent = '⚠️ 文案变动，旧时间轴已过期（请重新生成配音或对齐）';
+      } else if (summary.has_audio_file) {
+        badge.className = 'px-2.5 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 font-semibold';
+        badge.textContent = '🎧 已检测到配音 (' + (summary.audio_file_name || '音频') + ')，点击右侧按钮对齐';
+      } else {
+        badge.className = 'px-2.5 py-0.5 rounded-lg bg-gray-900 border border-gray-700 text-gray-400 font-semibold';
+        badge.textContent = '📐 时间轴：按字数估算（先生成 Voicebox 配音即可按真实时间切画面）';
+      }
 
-      let splitCharIndex = undefined;
-      if (defaultSplit.trim()) {
-        const found = text.indexOf(defaultSplit.trim());
-        if (found !== -1) {
-          splitCharIndex = found + defaultSplit.trim().length;
+      if (rhythmEl) {
+        const r = summary.rhythm;
+        if (r && r.shots > 1) {
+          const sentPct = Math.round((r.sentence_end_cut_ratio || 0) * 100);
+          const midPct = Math.round((r.mid_sentence_cut_ratio || 0) * 100);
+          const warns = Array.isArray(r.warnings) ? r.warnings : [];
+          rhythmEl.classList.remove('hidden');
+          if (warns.length) {
+            rhythmEl.className = 'px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300';
+            rhythmEl.textContent = '⚠️ ' + warns[0] + '（句末切 ' + sentPct + '% · 句中切 ' + midPct + '%）';
+          } else {
+            rhythmEl.className = 'px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-200';
+            rhythmEl.textContent = '🎞️ 节奏自然（句末切 ' + sentPct + '% · 句中切 ' + midPct + '%）';
+          }
+        } else {
+          rhythmEl.classList.add('hidden');
+        }
+      }
+    }
+
+    async function alignProjectTiming() {
+      const btn = document.getElementById('btnAlignTiming');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 正在对齐配音时间轴...';
+      }
+      try {
+        const res = await fetch('/api/align-timing?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: activeProjectId }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          manifestData = data.manifest;
+          if (data.timingSummary) {
+            window.timingSummaryData = data.timingSummary;
+            renderTimingSummaryBadge(data.timingSummary);
+          }
+          renderTable();
+          showToast('🎯 ' + data.message);
+        } else {
+          alert(data.error || '时间轴对齐失败');
+        }
+      } catch (err) {
+        alert('时间轴对齐出错: ' + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '🎯 对齐配音时间轴';
+        }
+      }
+    }
+
+    async function autoPlanProjectCuts() {
+      const btn = document.getElementById('btnAutoPlanCuts');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 正在按关键词/停顿排切点...';
+      }
+      try {
+        const res = await fetch('/api/auto-plan-cuts?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            autoSplitLongShots: true,
+            useAiKeywords: true,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          manifestData = data.manifest;
+          if (data.timingSummary) {
+            window.timingSummaryData = data.timingSummary;
+            renderTimingSummaryBadge(data.timingSummary);
+          }
+          renderTable();
+          showToast('⚡ ' + data.message);
+        } else {
+          alert(data.error || '智能排切失败');
+        }
+      } catch (err) {
+        alert('智能排切出错: ' + err.message);
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '⚡ 按关键词/停顿智能排切点';
+        }
+      }
+    }
+
+    function toggleCharCutPicker(idx, forceOpen = null) {
+      window._openCutPickers = window._openCutPickers || {};
+      const next = forceOpen === null ? !window._openCutPickers[idx] : Boolean(forceOpen);
+      window._openCutPickers[idx] = next;
+      const box = document.getElementById('charCutPicker_' + idx);
+      if (box) {
+        box.classList.toggle('hidden', !next);
+        if (next) box.innerHTML = buildCharCutPickerInner(idx);
+      }
+      // 更新按钮文案
+      const row = box ? box.closest('td') : null;
+      const toggleBtn = row ? row.querySelector('button[onclick*="toggleCharCutPicker"]') : null;
+      if (toggleBtn) toggleBtn.textContent = next ? '▲ 收起切点面板' : '👆 点字切画面 / 挪切点';
+    }
+
+    function openCutPickerForSplit(idx) {
+      toggleCharCutPicker(idx, true);
+      const box = document.getElementById('charCutPicker_' + idx);
+      if (box && box.scrollIntoView) {
+        box.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    function buildCharCutPickerInner(idx) {
+      const scenes = manifestData?.scenes || [];
+      const cur = scenes[idx];
+      if (!cur) return '';
+      const currText = String(cur.narration_text || '');
+      let html = '';
+
+      if (idx > 0 && scenes[idx - 1]) {
+        const prevText = String(scenes[idx - 1].narration_text || '');
+        const tailStart = Math.max(0, prevText.length - 28);
+        let prevCharsHtml = '';
+        if (tailStart > 0) prevCharsHtml += '<span class="text-gray-500 px-0.5">…</span>';
+        for (let i = tailStart; i < prevText.length; i++) {
+          const ch = prevText[i];
+          if (!ch.trim()) continue;
+          if (i === 0) {
+            prevCharsHtml += '<span class="px-0.5 text-gray-500">' + escapeHtml(ch) + '</span>';
+          } else {
+            prevCharsHtml += '<button type="button" onclick="moveCutToPrevChar(' + idx + ', ' + i + ')" title="点击后，从「' + escapeHtml(ch) + '」开始提前切到本画面" class="px-1 py-0.5 rounded hover:bg-indigo-600 hover:text-white text-indigo-200 bg-indigo-950/60 border border-indigo-500/20 text-[11px] leading-tight cursor-pointer transition">' + escapeHtml(ch) + '</button>';
+          }
+        }
+
+        const headEnd = Math.min(currText.length, 28);
+        let currHeadHtml = '';
+        for (let i = 0; i < headEnd; i++) {
+          const ch = currText[i];
+          if (!ch.trim()) continue;
+          if (i === 0) {
+            currHeadHtml += '<span class="px-0.5 text-gray-500">' + escapeHtml(ch) + '</span>';
+          } else {
+            currHeadHtml += '<button type="button" onclick="moveCutToCurrChar(' + idx + ', ' + i + ')" title="点击后，把「' + escapeHtml(ch) + '」之前的字退回上一画面" class="px-1 py-0.5 rounded hover:bg-sky-600 hover:text-white text-sky-200 bg-sky-950/60 border border-sky-500/20 text-[11px] leading-tight cursor-pointer transition">' + escapeHtml(ch) + '</button>';
+          }
+        }
+        if (headEnd < currText.length) currHeadHtml += '<span class="text-gray-500 px-0.5">…</span>';
+
+        html += '<div class="space-y-1 pb-2 border-b border-gray-800">' +
+          '<div class="text-[10px] font-bold text-indigo-300">⬅️ 挪动换画面点（点哪个字，本画面就从这个字开始，不增减镜头）：</div>' +
+          '<div class="flex flex-wrap items-center gap-0.5 leading-relaxed">' +
+            prevCharsHtml +
+            '<span class="px-1.5 py-0.5 mx-1 rounded bg-amber-500/25 text-amber-300 border border-amber-500/40 text-[10px] font-black">｜当前切点</span>' +
+            currHeadHtml +
+          '</div>' +
+        '</div>';
+      }
+
+      let splitCharsHtml = '';
+      for (let i = 0; i < currText.length; i++) {
+        const ch = currText[i];
+        if (!ch.trim()) continue;
+        if (i === 0) {
+          splitCharsHtml += '<span class="px-0.5 text-gray-500 text-[11px]">' + escapeHtml(ch) + '</span>';
+        } else {
+          splitCharsHtml += '<button type="button" onclick="splitShotAtChar(' + idx + ', ' + i + ')" title="点击后，在「' + escapeHtml(ch) + '」前面新增一个换画面点" class="px-1 py-0.5 rounded hover:bg-purple-600 hover:text-white text-gray-200 bg-gray-950 border border-gray-700/80 text-[11px] leading-tight cursor-pointer transition">' + escapeHtml(ch) + '</button>';
         }
       }
 
-      const res = await fetch('/api/split-shot?project=' + activeProjectId, {
+      html += '<div class="space-y-1">' +
+        '<div class="flex flex-wrap items-center justify-between gap-1">' +
+          '<span class="text-[10px] font-bold text-purple-300">✂️ 新增换画面点（点哪个字，就在那个字前切出新镜头）：</span>' +
+          '<button type="button" onclick="quickAutoSplitShot(' + idx + ')" class="px-1.5 py-0.5 rounded bg-purple-600/30 hover:bg-purple-600 text-purple-200 hover:text-white border border-purple-500/40 text-[10px] font-bold cursor-pointer transition">⚡ 在逗号处自动一分为二</button>' +
+        '</div>' +
+        '<div class="flex flex-wrap items-center gap-0.5 leading-relaxed">' + splitCharsHtml + '</div>' +
+      '</div>';
+
+      return html;
+    }
+
+    async function splitShotAtChar(idx, splitCharIndex) {
+      const res = await fetch('/api/split-shot?project=' + encodeURIComponent(activeProjectId), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -11451,6 +14989,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const data = await res.json();
       if (data.ok) {
         manifestData = data.manifest;
+        if (data.timingSummary) {
+          window.timingSummaryData = data.timingSummary;
+          renderTimingSummaryBadge(data.timingSummary);
+        }
         renderTable();
         showToast('✂️ ' + data.message);
       } else {
@@ -11458,10 +15000,93 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
+    async function quickAutoSplitShot(idx) {
+      return splitShotAtChar(idx, undefined);
+    }
+
+    async function moveCutToPrevChar(idx, splitInPrevAtChar) {
+      const res = await fetch('/api/move-cut?project=' + encodeURIComponent(activeProjectId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProjectId,
+          sceneIndex: idx,
+          mode: 'move_between',
+          splitInPrevAtChar,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        manifestData = data.manifest;
+        if (data.timingSummary) {
+          window.timingSummaryData = data.timingSummary;
+          renderTimingSummaryBadge(data.timingSummary);
+        }
+        renderTable();
+        showToast('⬅️ ' + data.message);
+      } else {
+        alert(data.error || '挪动切点失败');
+      }
+    }
+
+    async function moveCutToCurrChar(idx, splitInCurrAtChar) {
+      const res = await fetch('/api/move-cut?project=' + encodeURIComponent(activeProjectId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProjectId,
+          sceneIndex: idx,
+          mode: 'move_between',
+          splitInCurrAtChar,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        manifestData = data.manifest;
+        if (data.timingSummary) {
+          window.timingSummaryData = data.timingSummary;
+          renderTimingSummaryBadge(data.timingSummary);
+        }
+        renderTable();
+        showToast('➡️ ' + data.message);
+      } else {
+        alert(data.error || '挪动切点失败');
+      }
+    }
+
+    async function nudgeCutPoint(idx, step) {
+      const res = await fetch('/api/move-cut?project=' + encodeURIComponent(activeProjectId), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          projectId: activeProjectId,
+          sceneIndex: idx,
+          mode: 'move_between',
+          step,
+        }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        manifestData = data.manifest;
+        if (data.timingSummary) {
+          window.timingSummaryData = data.timingSummary;
+          renderTimingSummaryBadge(data.timingSummary);
+        }
+        renderTable();
+        showToast((step === 'earlier' ? '⏪ ' : '⏩ ') + data.message);
+      } else {
+        alert(data.error || '挪动切点失败');
+      }
+    }
+
+    async function splitShotPrompt(idx) {
+      openCutPickerForSplit(idx);
+    }
+
     async function mergeShotWithNext(idx) {
       const s1 = manifestData.scenes[idx];
       const s2 = manifestData.scenes[idx + 1];
-      if (!confirm(\`确认将 \${s1.scene_id} 与 \${s2.scene_id} 合并为一个视觉镜头吗？\\n合并后总时长约为 \${((s1.duration_ms + s2.duration_ms)/1000).toFixed(1)} 秒。\`)) {
+      if (!confirm(\`确认删掉 \${s1.scene_id} 与 \${s2.scene_id} 之间的换画面点，合并为一个镜头吗？\\n合并后总时长约为 \${((s1.duration_ms + s2.duration_ms)/1000).toFixed(1)} 秒。\`)) {
         return;
       }
 
@@ -11476,6 +15101,10 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const data = await res.json();
       if (data.ok) {
         manifestData = data.manifest;
+        if (data.timingSummary) {
+          window.timingSummaryData = data.timingSummary;
+          renderTimingSummaryBadge(data.timingSummary);
+        }
         renderTable();
         showToast('🔗 ' + data.message);
       } else {
@@ -11843,6 +15472,38 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
+    async function updateSceneAudioOption(idx) {
+      const scene = manifestData.scenes[idx];
+      if (!scene) return;
+      const checkEl = document.getElementById('keepAudioCheck_' + idx);
+      const volEl = document.getElementById('keepAudioVol_' + idx);
+      const keepOriginalAudio = Boolean(checkEl && checkEl.checked);
+      const originalAudioVolume = volEl ? Number(volEl.value) / 100 : 0.3;
+
+      try {
+        const res = await fetch('/api/update-scene-audio?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            sceneId: scene.scene_id,
+            keepOriginalAudio,
+            originalAudioVolume,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          manifestData = data.manifest;
+          renderTable();
+          showToast(keepOriginalAudio ? '🔊 已开启该镜头原声（音量 ' + Math.round(originalAudioVolume * 100) + '%）' : '🔇 已关闭该镜头原声');
+        } else {
+          showToast('❌ 更新原声设置失败: ' + (data.error || '未知错误'));
+        }
+      } catch (err) {
+        showToast('❌ 请求失败: ' + err.message);
+      }
+    }
+
     async function bindProjectAssetForRow(idx, assetId) {
       const scene = manifestData.scenes[idx];
       if (!scene || !assetId) return;
@@ -11949,39 +15610,85 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       const data = await res.json();
       if (data.ok) {
         manifestData = data.manifest;
+        if (data.timingSummary) {
+          window.timingSummaryData = data.timingSummary;
+          renderTimingSummaryBadge(data.timingSummary);
+        }
         renderTable();
         showToast('✅ 已保存镜头表格，并同步至 Remotion 视频引擎！');
       }
     }
 
-    async function synthesizeTestVoice() {
-      const btn = document.getElementById('btnSynth');
+    function collectVoiceParamsFromModal() {
+      const provider = document.querySelector('input[name="audioProvider"]:checked')?.value || localStorage.getItem('whyvideo_audio_provider') || 'voicebox';
+      const apiKey = (document.getElementById('elevenlabsKeyInput')?.value || '').trim() || localStorage.getItem('whyvideo_elevenlabs_api_key') || '';
+      const voiceId = (document.getElementById('voiceIdSelect')?.value || '').trim() || localStorage.getItem('whyvideo_elevenlabs_voice_id') || '';
+      const modelId = document.getElementById('elevenlabsModelSelect')?.value || localStorage.getItem('whyvideo_elevenlabs_model_id') || 'eleven_v4';
+      const languageCode = document.getElementById('elevenlabsLanguageSelect')?.value ?? localStorage.getItem('whyvideo_elevenlabs_language') ?? 'zh';
+      const stability = Number(document.getElementById('elevenlabsStabilitySlider')?.value ?? localStorage.getItem('whyvideo_elevenlabs_stability') ?? 0.35);
+      const similarityBoost = Number(document.getElementById('elevenlabsSimilaritySlider')?.value ?? localStorage.getItem('whyvideo_elevenlabs_similarity') ?? 0.8);
+      const profileId = (document.getElementById('voiceboxProfileSelect')?.value || '').trim() || localStorage.getItem('whyvideo_voicebox_profile_id') || '';
+      const text = document.getElementById('sampleAudioText')?.value || '';
+      const useAsNarration = Boolean(document.getElementById('useAsNarrationCheckbox')?.checked);
+
+      if (provider === 'elevenlabs') {
+        if (apiKey) localStorage.setItem('whyvideo_elevenlabs_api_key', apiKey);
+        if (!voiceId) {
+          alert('当前配音引擎为 ElevenLabs 云端，请先在「🎙️ 配音引擎配置」中点击「🔄 拉取我的音色」并选择音色后保存设置');
+          const modal = document.getElementById('audioModal');
+          if (modal && modal.classList.contains('hidden')) toggleAudioModal();
+          return null;
+        }
+        localStorage.setItem('whyvideo_elevenlabs_voice_id', voiceId);
+        onElevenlabsParamChange();
+      } else {
+        if (profileId) localStorage.setItem('whyvideo_voicebox_profile_id', profileId);
+      }
+      return {
+        projectId: activeProjectId,
+        provider,
+        voiceId,
+        modelId,
+        stability,
+        similarityBoost,
+        languageCode,
+        profileId,
+        apiKey,
+        text,
+        useAsNarration,
+      };
+    }
+
+    function confirmSaveAudioConfig() {
       const provider = document.querySelector('input[name="audioProvider"]:checked')?.value || 'voicebox';
-      const apiKey = document.getElementById('elevenlabsKeyInput').value;
-      const voiceId = document.getElementById('voiceIdSelect').value;
-      const profileId = document.getElementById('voiceboxProfileSelect').value;
-      const text = document.getElementById('sampleAudioText').value;
-      const useAsNarration = document.getElementById('useAsNarrationCheckbox').checked;
+      const payload = collectVoiceParamsFromModal();
+      if (!payload) return;
+      localStorage.setItem('whyvideo_audio_provider', provider);
+      updateAudioProviderHeaderBadge();
+      const modal = document.getElementById('audioModal');
+      if (modal) modal.classList.add('hidden');
+      const label = provider === 'elevenlabs' ? 'ElevenLabs 云端配音' : 'Voicebox 本地配音';
+      showToast('✅ 已确认保存配音设置（当前引擎：' + label + '），点击主界面「🎙️ 一键生成全片旁白」即可生成');
+    }
+
+    async function synthesizeTestVoice() {
+      const payload = collectVoiceParamsFromModal();
+      if (!payload) return;
+      const btn = document.getElementById('btnSynth');
+      const fullBtn = document.getElementById('btnSynthFull');
 
       btn.disabled = true;
+      if (fullBtn) fullBtn.disabled = true;
       btn.textContent = '⏳ 正在合成中...';
 
       try {
-        const res = await fetch('/api/synthesize-voice?project=' + activeProjectId, {
+        const res = await fetch('/api/synthesize-voice?project=' + encodeURIComponent(activeProjectId), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            projectId: activeProjectId,
-            provider,
-            voiceId,
-            profileId,
-            apiKey,
-            text,
-            useAsNarration,
-          }),
+          body: JSON.stringify(payload),
         });
         const data = await res.json();
-        if (provider === 'voicebox' && data.ok && data.job) {
+        if (payload.provider === 'voicebox' && data.ok && data.job) {
           await updateVoiceboxStatus();
           showToast('已提交至本地 Voicebox，当前工程可在后台继续生成');
         } else if (data.ok && data.audioUrl) {
@@ -11990,7 +15697,7 @@ function renderMainHtml(curProjectId = defaultProjectId) {
           player.src = data.audioUrl;
           playerCont.classList.remove('hidden');
           player.play();
-          showToast('🎉 配音合成成功！已自动播放');
+          showToast('🎉 测试配音合成成功！已自动播放');
         } else {
           alert(data.error || '合成配音失败');
         }
@@ -11998,8 +15705,55 @@ function renderMainHtml(curProjectId = defaultProjectId) {
         alert('配音请求失败: ' + err.message);
       } finally {
         btn.disabled = false;
-        btn.textContent = '🔊 立即生成测试配音';
-        if (provider === 'voicebox') updateVoiceboxStatus();
+        if (fullBtn) fullBtn.disabled = false;
+        btn.textContent = '🔊 试听测试配音';
+        updateVoiceboxStatus();
+      }
+    }
+
+    async function synthesizeFullNarration() {
+      const scenes = manifestData?.scenes || [];
+      const fullText = scenes.map((s) => String(s.narration_text || '')).join('').trim();
+      if (!scenes.length || !fullText) {
+        alert('当前工程没有分镜旁白文案，请先导入文案或创建分镜');
+        return;
+      }
+      restoreSavedAudioConfig();
+      const payload = collectVoiceParamsFromModal();
+      if (!payload) return;
+
+      const btn = document.getElementById('btnSynth');
+      const fullBtn = document.getElementById('btnSynthFull');
+      if (fullBtn) fullBtn.disabled = true;
+      if (btn) btn.disabled = true;
+      if (fullBtn) fullBtn.textContent = '⏳ 正在提交全片配音...';
+
+      try {
+        const res = await fetch('/api/synthesize-voice?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...payload,
+            text: fullText,
+            fullScript: true,
+            useAsNarration: true,
+          }),
+        });
+        const data = await res.json();
+        if (data.ok && data.job) {
+          await updateVoiceboxStatus();
+          const pName = payload.provider === 'elevenlabs' ? 'ElevenLabs 云端' : 'Voicebox 本地';
+          showToast('🎙️ 已开始使用【' + pName + '】在后台生成全片旁白（共 ' + scenes.length + ' 镜），完成后会自动对齐时间轴');
+        } else {
+          alert(data.error || '提交全片配音失败');
+        }
+      } catch (err) {
+        alert('提交全片配音失败: ' + err.message);
+      } finally {
+        if (fullBtn) fullBtn.disabled = false;
+        if (btn) btn.disabled = false;
+        if (fullBtn) fullBtn.textContent = '🎙️ 一键生成全片旁白';
+        updateVoiceboxStatus();
       }
     }
 
@@ -12372,17 +16126,299 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       }
     }
 
+    // =========================================================================
+    // ⚙️ 视觉分镜台提示词模板与视觉风格预设管理器
+    // =========================================================================
+    const PRODUCER_PROMPT_STAGES = [
+      { key: 'P1_keywords', shortLabel: '1. 最佳搜索词' },
+      { key: 'P2_video_prompt', shortLabel: '2. 实体视频词' },
+      { key: 'P3_image_prompt', shortLabel: '3. 超清实景图' },
+      { key: 'P4_card_prompt', shortLabel: '4. 动效卡片' },
+      { key: 'P5_clip_compiler', shortLabel: '5. 口语剪辑编译' },
+    ];
+
+    let producerPromptsModalState = {
+      activeKey: 'P1_keywords',
+      builtins: {},
+      stylePresets: [],
+      preset: null,
+      customTemplates: {},
+      hasCustom: false,
+    };
+
+    function updateProducerPromptsBadgeUI(hasCustom, presetObj) {
+      const btnStatus = document.getElementById('producerPromptsBtnStatus');
+      const modalBadge = document.getElementById('producerModalPromptBadge');
+      const revText = presetObj?.revision ? ('v' + presetObj.revision) : '自定义';
+      if (btnStatus) {
+        btnStatus.textContent = hasCustom ? ('已自定义 (' + revText + ')') : '出厂默认';
+        btnStatus.className = hasCustom ? 'text-amber-300 font-extrabold' : 'text-teal-200 font-extrabold';
+      }
+      if (modalBadge) {
+        if (hasCustom) {
+          modalBadge.textContent = '已自定义 (' + revText + ')';
+          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+        } else {
+          modalBadge.textContent = '出厂默认基线';
+          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700';
+        }
+      }
+    }
+
+    async function refreshProducerPromptsStatus() {
+      try {
+        const res = await fetch('/api/producer/prompts?project=' + encodeURIComponent(activeProjectId));
+        const data = await res.json();
+        if (data && data.ok) {
+          updateProducerPromptsBadgeUI(Boolean(data.has_custom_preset), data.preset || null);
+        }
+      } catch (e) {}
+    }
+
+    async function openProducerPromptsModal() {
+      try {
+        const res = await fetch('/api/producer/prompts?project=' + encodeURIComponent(activeProjectId));
+        const data = await res.json();
+        if (!data || !data.ok) {
+          alert('读取视觉分镜台提示词设置失败');
+          return;
+        }
+        producerPromptsModalState.builtins = data.builtins || {};
+        producerPromptsModalState.stylePresets = data.style_presets || [];
+        producerPromptsModalState.preset = data.preset || null;
+        producerPromptsModalState.hasCustom = Boolean(data.has_custom_preset);
+        producerPromptsModalState.customTemplates = {};
+        for (const st of PRODUCER_PROMPT_STAGES) {
+          const k = st.key;
+          if (producerPromptsModalState.preset?.templates?.[k]?.raw_template) {
+            producerPromptsModalState.customTemplates[k] = producerPromptsModalState.preset.templates[k].raw_template;
+          } else if (producerPromptsModalState.builtins[k]) {
+            producerPromptsModalState.customTemplates[k] = producerPromptsModalState.builtins[k].raw_template;
+          }
+        }
+
+        const projEl = document.getElementById('producerPromptsTargetProjId');
+        if (projEl) projEl.textContent = activeProjectId;
+        updateProducerPromptsBadgeUI(producerPromptsModalState.hasCustom, producerPromptsModalState.preset);
+        renderProducerPromptTabs();
+        loadProducerPromptIntoEditor(producerPromptsModalState.activeKey);
+
+        const presetsWrap = document.getElementById('producerStylePresetsList');
+        if (presetsWrap) {
+          presetsWrap.innerHTML = producerPromptsModalState.stylePresets
+            .map((sp) => \`
+              <button type="button" onclick="appendProducerStylePreset('\${sp.id}')" class="w-full text-left px-2.5 py-2 rounded-lg bg-gray-950 hover:bg-teal-950/60 border border-gray-800 hover:border-teal-500/50 text-gray-200 transition cursor-pointer">
+                <div class="font-bold text-teal-300">\${escapeHtml(sp.label)}</div>
+                <div class="text-[10px] text-gray-400 mt-0.5 line-clamp-2">\${escapeHtml(sp.snippet)}</div>
+              </button>
+            \`)
+            .join('');
+        }
+
+        const modal = document.getElementById('producerPromptsModal');
+        if (modal) modal.classList.remove('hidden');
+      } catch (err) {
+        alert('打开视觉分镜台提示词设置异常: ' + err.message);
+      }
+    }
+
+    function closeProducerPromptsModal() {
+      const modal = document.getElementById('producerPromptsModal');
+      if (modal) modal.classList.add('hidden');
+    }
+
+    function isProducerStageModified(stageKey) {
+      const cur = (producerPromptsModalState.customTemplates[stageKey] || '').trim();
+      const base = (producerPromptsModalState.builtins[stageKey]?.raw_template || '').trim();
+      return Boolean(cur && base && cur !== base);
+    }
+
+    function renderProducerPromptTabs() {
+      const wrap = document.getElementById('producerPromptStageTabs');
+      if (!wrap) return;
+      wrap.innerHTML = PRODUCER_PROMPT_STAGES.map((st) => {
+        const isActive = st.key === producerPromptsModalState.activeKey;
+        const modified = isProducerStageModified(st.key);
+        return \`
+          <button type="button" onclick="switchProducerPromptStage('\${st.key}')"
+            class="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 \${isActive ? 'bg-teal-600 text-white shadow' : 'bg-gray-900 text-gray-300 hover:bg-gray-800 border border-gray-800'}">
+            <span>\${st.shortLabel}</span>
+            \${modified ? '<span class="w-1.5 h-1.5 rounded-full bg-amber-300" title="已自定义"></span>' : ''}
+          </button>
+        \`;
+      }).join('');
+    }
+
+    function switchProducerPromptStage(newKey) {
+      const textarea = document.getElementById('producerPromptTextarea');
+      if (textarea && producerPromptsModalState.activeKey) {
+        producerPromptsModalState.customTemplates[producerPromptsModalState.activeKey] = textarea.value;
+      }
+      producerPromptsModalState.activeKey = newKey;
+      renderProducerPromptTabs();
+      loadProducerPromptIntoEditor(newKey);
+    }
+
+    function onProducerPromptTextareaInput() {
+      const textarea = document.getElementById('producerPromptTextarea');
+      if (textarea && producerPromptsModalState.activeKey) {
+        producerPromptsModalState.customTemplates[producerPromptsModalState.activeKey] = textarea.value;
+        renderProducerPromptTabs();
+      }
+    }
+
+    function loadProducerPromptIntoEditor(stageKey) {
+      const spec = producerPromptsModalState.builtins[stageKey];
+      const titleEl = document.getElementById('producerPromptEditorTitle');
+      const descEl = document.getElementById('producerPromptStageDesc');
+      const textarea = document.getElementById('producerPromptTextarea');
+      const varsWrap = document.getElementById('producerPromptVarsList');
+      if (!spec) return;
+
+      if (titleEl) titleEl.textContent = '当前编辑：' + (spec.full_label || spec.label);
+      if (descEl) descEl.textContent = spec.description || '';
+      if (textarea) textarea.value = producerPromptsModalState.customTemplates[stageKey] ?? spec.raw_template ?? '';
+      if (varsWrap) {
+        const vars = Array.isArray(spec.allowed_inputs) ? spec.allowed_inputs : [];
+        if (vars.length === 0) {
+          varsWrap.innerHTML = '<span class="text-gray-500">本阶段无额外占位变量，直接编辑规则即可。</span>';
+        } else {
+          varsWrap.innerHTML = vars
+            .map((v) => \`
+              <button type="button" onclick="insertProducerPromptVar('\${v}')"
+                class="px-2 py-0.5 rounded bg-gray-950 hover:bg-teal-900/60 text-teal-300 border border-teal-500/40 font-mono text-[11px] cursor-pointer transition">
+                {{\${v}}}
+              </button>
+            \`)
+            .join('');
+        }
+      }
+    }
+
+    function insertProducerPromptVar(varName) {
+      const textarea = document.getElementById('producerPromptTextarea');
+      if (!textarea) return;
+      const token = '{{' + varName + '}}';
+      const start = textarea.selectionStart ?? textarea.value.length;
+      const end = textarea.selectionEnd ?? textarea.value.length;
+      textarea.value = textarea.value.slice(0, start) + token + textarea.value.slice(end);
+      textarea.focus();
+      textarea.selectionStart = textarea.selectionEnd = start + token.length;
+      onProducerPromptTextareaInput();
+    }
+
+    function appendProducerStylePreset(presetId) {
+      const sp = producerPromptsModalState.stylePresets.find((x) => x.id === presetId);
+      const textarea = document.getElementById('producerPromptTextarea');
+      if (!sp || !textarea) return;
+      const cur = textarea.value.trimEnd();
+      textarea.value = cur + '\\n\\n' + sp.snippet;
+      textarea.focus();
+      onProducerPromptTextareaInput();
+      showToast('🎨 已追加风格预设：' + sp.label);
+    }
+
+    async function saveProducerPromptsFromModal() {
+      const textarea = document.getElementById('producerPromptTextarea');
+      if (textarea && producerPromptsModalState.activeKey) {
+        producerPromptsModalState.customTemplates[producerPromptsModalState.activeKey] = textarea.value;
+      }
+      const btn = document.getElementById('btnSaveProducerPrompts');
+      const statusEl = document.getElementById('producerPromptEditorStatus');
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ 正在保存...';
+      }
+      try {
+        const templatesPayload = {};
+        for (const st of PRODUCER_PROMPT_STAGES) {
+          const k = st.key;
+          templatesPayload[k] = {
+            template_id: k,
+            template_version: producerPromptsModalState.builtins[k]?.template_version || '1.0.0',
+            raw_template: producerPromptsModalState.customTemplates[k] ?? producerPromptsModalState.builtins[k]?.raw_template ?? '',
+          };
+        }
+        const res = await fetch('/api/producer/prompts/save?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ templates: templatesPayload }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 保存失败：' + escapeHtml(data?.error || '未知错误') + '</span>';
+          return;
+        }
+        producerPromptsModalState.preset = data.preset || null;
+        producerPromptsModalState.hasCustom = Boolean(data.has_custom_preset);
+        updateProducerPromptsBadgeUI(producerPromptsModalState.hasCustom, producerPromptsModalState.preset);
+        closeProducerPromptsModal();
+        showToast('💾 视觉分镜台提示词已保存（仅对当前工程生效）');
+      } catch (err) {
+        if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 保存异常：' + escapeHtml(err.message) + '</span>';
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = '💾 保存并应用到当前工程';
+        }
+      }
+    }
+
+    async function resetProducerPromptsFromModal(onlyCurrent) {
+      const curKey = producerPromptsModalState.activeKey;
+      const curLabel = producerPromptsModalState.builtins[curKey]?.label || curKey;
+      const msg = onlyCurrent
+        ? ('确定将【' + curLabel + '】重置为出厂默认模板吗？')
+        : '确定将当前工程全部视觉分镜台提示词恢复为出厂默认基线吗？';
+      if (!confirm(msg)) return;
+
+      try {
+        const payload = onlyCurrent ? { template_id: curKey } : {};
+        const res = await fetch('/api/producer/prompts/reset?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          alert('重置失败: ' + (data?.error || '未知错误'));
+          return;
+        }
+        if (onlyCurrent) {
+          producerPromptsModalState.customTemplates[curKey] = producerPromptsModalState.builtins[curKey]?.raw_template || '';
+          producerPromptsModalState.preset = data.preset || null;
+          producerPromptsModalState.hasCustom = Boolean(data.has_custom_preset);
+          updateProducerPromptsBadgeUI(producerPromptsModalState.hasCustom, producerPromptsModalState.preset);
+          renderProducerPromptTabs();
+          loadProducerPromptIntoEditor(curKey);
+          showToast('↺ 已将【' + curLabel + '】恢复为出厂默认模板');
+        } else {
+          updateProducerPromptsBadgeUI(false, null);
+          closeProducerPromptsModal();
+          showToast('↺ 已将当前工程全部视觉分镜台提示词恢复为出厂默认基线');
+        }
+      } catch (err) {
+        alert('重置异常: ' + err.message);
+      }
+    }
+
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         const wpModal = document.getElementById('writerPromptsModal');
         if (wpModal && !wpModal.classList.contains('hidden')) {
           closeWriterPromptsModal();
         }
+        const ppModal = document.getElementById('producerPromptsModal');
+        if (ppModal && !ppModal.classList.contains('hidden')) {
+          closeProducerPromptsModal();
+        }
       }
     });
 
     loadProjects().then(() => {
+      restoreSavedAudioConfig();
       loadWorkflow();
+      refreshProducerPromptsStatus();
       updateRenderStatus();
       updateVoiceboxStatus();
       if (currentWorkspaceTab === 'writer') {

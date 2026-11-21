@@ -58,7 +58,9 @@ export async function synthesizeWithVoicebox({
   instruct,
   outputPath,
   maxWaitMs = 180000,
+  loadingTimeoutMs = 180000,
   pollIntervalMs = 1000,
+  signal,
   onProgress,
 }) {
   const normalizedUrl = baseUrl.replace(/\/+$/, '');
@@ -130,16 +132,26 @@ export async function synthesizeWithVoicebox({
 
   // 3. 轮询 GET /history/{generationId}
   const startTime = Date.now();
+  let loadingStartedAt = null;
   let finalStatus = null;
   let finalResult = null;
 
   while (Date.now() - startTime < maxWaitMs) {
+    if (signal?.aborted) {
+      throw new Error('Voicebox 配音任务已取消');
+    }
     await new Promise((r) => setTimeout(r, pollIntervalMs));
+    if (signal?.aborted) {
+      throw new Error('Voicebox 配音任务已取消');
+    }
 
     let statusRes;
     try {
-      statusRes = await fetch(`${normalizedUrl}/history/${generationId}`);
+      statusRes = await fetch(`${normalizedUrl}/history/${generationId}`, { signal });
     } catch (e) {
+      if (signal?.aborted || e.name === 'AbortError') {
+        throw new Error('Voicebox 配音任务已取消');
+      }
       console.warn(`轮询请求微断: ${e.message}，稍后重试...`);
       continue;
     }
@@ -158,6 +170,14 @@ export async function synthesizeWithVoicebox({
     } else if (finalStatus === 'failed') {
       throw new Error(`Voicebox 推理生成失败: ${histData.error || '未知错误'}`);
     } else {
+      if (finalStatus === 'loading_model') {
+        if (!loadingStartedAt) loadingStartedAt = Date.now();
+        if (loadingTimeoutMs > 0 && Date.now() - loadingStartedAt >= loadingTimeoutMs) {
+          throw new Error(`Voicebox 模型加载超时（超过 ${Math.round(loadingTimeoutMs / 1000)} 秒仍停留在 loading_model），请检查或重启 Voicebox 客户端后重试`);
+        }
+      } else {
+        loadingStartedAt = null;
+      }
       if (onProgress) onProgress(finalStatus, generationId);
     }
   }

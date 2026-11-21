@@ -59,6 +59,8 @@ export interface TimelineTrackProp {
   media_modifiers?: {
     trim_start_sec?: number;
     trim_end_sec?: number;
+    keep_original_audio?: boolean;
+    original_audio_volume?: number;
     filters?: {
       brightness?: number; // 默认 1.0, 如 1.25
       contrast?: number;   // 默认 1.0, 如 1.1
@@ -105,6 +107,33 @@ export interface CaptionItemProp {
   char_count: number;
 }
 
+export interface BgmSegmentProp {
+  start_frame: number;
+  end_frame: number;
+  target_db: number;
+  mood: string;
+}
+
+export interface BgmSpeechWindowProp {
+  start_frame: number;
+  end_frame: number;
+}
+
+export interface BgmTrackProp {
+  src: string;
+  enabled: boolean;
+  loop?: boolean;
+  base_volume_db: number;
+  ducking_enabled: boolean;
+  ducking_db: number;
+  attack_ms: number;
+  release_ms: number;
+  fade_in_ms: number;
+  fade_out_ms: number;
+  segments?: BgmSegmentProp[];
+  speech_windows?: BgmSpeechWindowProp[];
+}
+
 export interface RenderPropsType {
   composition_id: string;
   project_id: string;
@@ -140,6 +169,7 @@ export interface RenderPropsType {
     end_at_frame: number;
     duration_ms: number;
     volume: number;
+    bgm?: BgmTrackProp | null;
   };
   caption_track: {
     srt_src: string;

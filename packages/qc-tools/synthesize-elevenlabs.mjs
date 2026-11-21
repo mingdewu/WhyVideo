@@ -20,10 +20,58 @@ function loadEnv() {
 loadEnv();
 
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-// 默认推荐使用 ElevenLabs 多语言 V2 模型 (中文效果逼真自然)
-const DEFAULT_MODEL = 'eleven_multilingual_v2';
+// 默认推荐使用 ElevenLabs v4 模型 (支持精细稳定度/相似度参数调节)
+const DEFAULT_MODEL = 'eleven_v4';
 // 默认推荐沉稳知性纪录片音色 (可在 ElevenLabs 声音库挑选替换)
 const DEFAULT_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || '21m00Tcm4TlvDq8ikWAM'; // Rachel
+
+/**
+ * 组装 ElevenLabs TTS 请求体（兼容 v3 离散稳定度与 v4 连续参数）
+ */
+export function buildElevenlabsTtsPayload({
+  text,
+  modelId = DEFAULT_MODEL,
+  stability,
+  similarityBoost,
+  languageCode,
+} = {}) {
+  const selectedModel = String(modelId || DEFAULT_MODEL).trim();
+  const payload = {
+    text: text || '',
+    model_id: selectedModel,
+  };
+
+  const lang = String(languageCode || '').trim();
+  if (lang) {
+    payload.language_code = lang;
+  }
+
+  const voiceSettings = {};
+  if (stability !== undefined && stability !== null && stability !== '') {
+    const rawStab = Number(stability);
+    if (Number.isFinite(rawStab)) {
+      const clamped = Math.max(0, Math.min(1, rawStab));
+      if (selectedModel === 'eleven_v3') {
+        voiceSettings.stability = clamped < 0.25 ? 0.0 : clamped < 0.75 ? 0.5 : 1.0;
+      } else {
+        voiceSettings.stability = Math.round(clamped * 100) / 100;
+      }
+    }
+  }
+
+  if (similarityBoost !== undefined && similarityBoost !== null && similarityBoost !== '') {
+    const rawSim = Number(similarityBoost);
+    if (Number.isFinite(rawSim)) {
+      voiceSettings.similarity_boost = Math.round(Math.max(0, Math.min(1, rawSim)) * 100) / 100;
+    }
+  }
+
+  if (Object.keys(voiceSettings).length > 0) {
+    payload.voice_settings = voiceSettings;
+  }
+
+  return payload;
+}
 
 /**
  * 调用 ElevenLabs API 生成高质量旁白配音
@@ -32,6 +80,9 @@ export async function synthesizeWithElevenLabs({
   text,
   voiceId = DEFAULT_VOICE_ID,
   modelId = DEFAULT_MODEL,
+  stability,
+  similarityBoost,
+  languageCode,
   outputPath
 }) {
   if (!ELEVENLABS_API_KEY) {
@@ -40,23 +91,20 @@ export async function synthesizeWithElevenLabs({
 
   console.log(`🎙️ 正在调用 ElevenLabs 语音合成接口 (Voice: ${voiceId}, Model: ${modelId})...`);
 
-  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
     method: 'POST',
     headers: {
       'Accept': 'audio/mpeg',
       'Content-Type': 'application/json',
       'xi-api-key': ELEVENLABS_API_KEY,
     },
-    body: JSON.stringify({
+    body: JSON.stringify(buildElevenlabsTtsPayload({
       text,
-      model_id: modelId,
-      voice_settings: {
-        stability: 0.65,
-        similarity_boost: 0.80,
-        style: 0.15,
-        use_speaker_boost: true
-      }
-    })
+      modelId,
+      stability,
+      similarityBoost,
+      languageCode,
+    }))
   });
 
   if (!response.ok) {

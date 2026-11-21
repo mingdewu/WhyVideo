@@ -108,7 +108,8 @@ export const BrollScene: React.FC<{ track: TimelineTrackProp }> = ({
           transform: `scale(${scale}) translate(${translateX + shakeOffset}px, ${translateY}px)`,
           filter: filterStr,
         }}
-        muted
+        muted={!modifiers?.keep_original_audio}
+        volume={modifiers?.keep_original_audio ? Math.max(0, Math.min(1, modifiers?.original_audio_volume ?? 0.3)) : 0}
       />
 
       {/* 顶层动效艺术字贴层 */}

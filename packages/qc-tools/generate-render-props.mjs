@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { resolveProject } from "./scan-assets.mjs";
+import { compileBgmRenderProp } from "./bgm-manager.mjs";
 
-const { projectId, dataDir, publicDir } = resolveProject();
+const { projectId, projectDir, dataDir, publicDir } = resolveProject();
 
 const projectConfigPath = path.join(dataDir, "project-config.json");
 const projectConfig = fs.existsSync(projectConfigPath)
@@ -182,10 +183,13 @@ const timelineTracks = sceneManifest.scenes.map((scene) => {
     must_not_show: scene.must_not_show || [],
     fallback: scene.fallback,
     approved_asset: resolvedAsset,
-    media_modifiers: scene.media_modifiers || (scene.trim_start_sec !== undefined ? {
-      trim_start_sec: scene.trim_start_sec,
-      trim_end_sec: scene.trim_end_sec,
-    } : undefined),
+    media_modifiers: (scene.media_modifiers || scene.trim_start_sec !== undefined) ? {
+      ...(scene.trim_start_sec !== undefined ? {
+        trim_start_sec: scene.trim_start_sec,
+        trim_end_sec: scene.trim_end_sec,
+      } : {}),
+      ...(scene.media_modifiers || {}),
+    } : undefined,
     procedural_props: proceduralProps,
     transition: scene.transition || {
       in: "cut",
@@ -197,6 +201,13 @@ const timelineTracks = sceneManifest.scenes.map((scene) => {
 
 const totalDurationFrames = Math.round(
   (sceneManifest.total_duration_ms / 1000) * FPS
+);
+const bgmTrack = compileBgmRenderProp(
+  projectDir,
+  publicDir,
+  sceneManifest,
+  captions,
+  FPS
 );
 
 const renderProps = {
@@ -238,6 +249,7 @@ const renderProps = {
     duration_ms: sceneManifest.total_duration_ms,
     volume: 1.0,
     unauthorized_bgm_present: false,
+    ...(bgmTrack ? { bgm: bgmTrack } : {}),
   },
   caption_track: {
     srt_src: sceneManifest.captions_file,
