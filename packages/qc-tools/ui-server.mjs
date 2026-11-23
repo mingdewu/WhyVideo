@@ -32,8 +32,12 @@ function renderMainHtml(curProjectId = defaultProjectId) {
       return `<option value="${safeId}"${selected}>${safeTitle} (${safeId})</option>`;
     })
     .join('\n');
-  const templateHtml = fs.readFileSync(path.join(studioPublicDir, 'index.html'), 'utf8');
-  return templateHtml.replace('<!--SERVER_PROJECT_OPTIONS-->', () => serverOptions);
+  const templateHtml = fs.readFileSync(path.join(studioPublicDir, 'index.html'), 'utf8')
+    .replace(/  <!--PARTIAL:([a-z-]+)-->\n\n/gm, (_, name) =>
+      fs.readFileSync(path.join(studioPublicDir, 'partials', name + '.html'), 'utf8'));
+  return templateHtml
+    .replace('<!--SERVER_PROJECT_OPTIONS-->', () => serverOptions)
+    .replace('<!--SERVER_DEFAULT_PROJECT-->', () => `<script>window.STUDIO_DEFAULT_PROJECT_ID = ${JSON.stringify(defaultProjectId).replace(/</g, '\\u003c')};</script>`);
 }
 
 function serveStudioAsset(pathname, res) {

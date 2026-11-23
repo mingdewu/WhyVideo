@@ -1,14 +1,14 @@
 import React from "react";
-import { spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { FONT_STACK, TimelineTrackProp } from "../types";
 
-export const TextOverlayLayer: React.FC<{ track: TimelineTrackProp }> = ({
-  track,
+export const TextOverlayLayer: React.FC<{ track: TimelineTrackProp; aiOnly?: boolean }> = ({
+  track, aiOnly = false,
 }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
 
-  const overlays = track.media_modifiers?.text_overlays;
+  const overlays = track.media_modifiers?.text_overlays?.filter(item => !aiOnly || item.source === "ai_art_text");
   if (!overlays || overlays.length === 0) return null;
 
   return (
@@ -32,6 +32,15 @@ export const TextOverlayLayer: React.FC<{ track: TimelineTrackProp }> = ({
         }
 
         const localFrame = frame - startFrame;
+        if (item.design && item.design.keyframes?.length >= 2) {
+          const d = item.design;
+          const progress = Math.min(1, Math.max(0, localFrame / Math.max(1, duration - 1)));
+          const times = d.keyframes.map(k => k.at);
+          const value = (key: "x" | "y" | "scale" | "rotation" | "opacity") =>
+            interpolate(progress, times, d.keyframes.map(k => k[key]), { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+          const alpha = Math.round(Math.max(0, Math.min(1, d.background_opacity)) * 255).toString(16).padStart(2, "0");
+          return <div key={idx} style={{position:"absolute", left:`${d.x}%`, top:`${d.y}%`, maxWidth:"80%", transform:`translate(-50%, -50%) translate(${value("x")}px, ${value("y")}px) rotate(${value("rotation")}deg) scale(${value("scale")})`, opacity:value("opacity"), fontFamily:FONT_STACK, textAlign:"center", lineHeight:1.2, whiteSpace:"pre-wrap", overflowWrap:"anywhere", fontSize:d.font_size, fontWeight:d.font_weight, letterSpacing:d.letter_spacing, color:d.text_color, backgroundColor:`${d.background_color}${alpha}`, border:`${d.border_width}px solid ${d.border_color}`, borderRadius:d.radius, padding:`${d.padding_y}px ${d.padding_x}px`, textShadow:`0 2px 5px #000, 0 0 ${d.glow}px ${d.text_color}`, boxShadow:d.glow ? `0 0 ${d.glow}px ${d.border_color}88` : "none"}}>{item.text}</div>;
+        }
         const entrance = spring({
           frame: localFrame,
           fps,
@@ -55,10 +64,17 @@ export const TextOverlayLayer: React.FC<{ track: TimelineTrackProp }> = ({
           }
           transform = `scale(${scale}) translateX(${shakeX}px)`;
           opacity = entrance;
+        } else if (item.animation === "float_in") {
+          const offsetY = (1 - entrance) * 100;
+          transform = `translateY(${offsetY}px)`;
+          opacity = Math.min(1, Math.max(0, entrance));
         } else {
           // 默认 fade_in
           opacity = Math.min(1, localFrame / 10);
         }
+
+        // 新生成的艺术字在结束时柔和退出；旧效果保持原样。
+        if (item.animation === "float_in") opacity *= Math.min(1, Math.max(0, (duration - localFrame) / Math.max(1, fps * 0.3)));
 
         // 样式风格预设
         let containerStyle: React.CSSProperties = {
@@ -72,7 +88,7 @@ export const TextOverlayLayer: React.FC<{ track: TimelineTrackProp }> = ({
         };
 
         // 位置布局
-        if (item.position === "center_left" || item.animation === "slide_from_left") {
+        if (item.position === "center_left" || (!item.position && item.animation === "slide_from_left")) {
           containerStyle = { ...containerStyle, top: "35%", left: "10%" };
         } else if (item.position === "top_left") {
           containerStyle = { ...containerStyle, top: "12%", left: "8%" };

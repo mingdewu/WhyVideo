@@ -1,0 +1,118 @@
+  <!-- 视图 1：视觉分镜制作台 (Producer Workspace) -->
+    <div id="viewProducerContainer" class="space-y-3">
+
+    <!-- 渲染进度 / 成片反馈条（平时隐藏，仅在渲染中、报错或已有成片时按需出现） -->
+    <div id="renderStatusBanner" class="hidden card px-3.5 py-2 rounded-xl border border-emerald-500/25 space-y-2">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center gap-2.5 min-w-0">
+          <span id="renderJobStatus" class="text-xs font-semibold text-emerald-300"></span>
+          <a id="renderJobOutput" class="hidden text-xs font-bold text-emerald-300 hover:text-emerald-200 underline" target="_blank" rel="noopener">↗ 新窗口打开成片</a>
+        </div>
+        <button type="button" id="toggleVideoPreviewBtn" onclick="toggleVideoPreviewDrawer()" class="hidden px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold transition cursor-pointer">
+          ▶ 预览成片
+        </button>
+      </div>
+      <div id="videoContainer" class="hidden pt-1"></div>
+      <pre id="renderJobError" class="hidden w-full whitespace-pre-wrap text-xs text-rose-300 bg-rose-950/30 border border-rose-500/30 rounded-lg p-2"></pre>
+    </div>
+
+    <!-- 紧凑单行信息栏：当前指定模型 + 可折叠全局画面规则 + 节拍统计 -->
+    <div class="card px-3.5 py-2 rounded-xl border border-gray-800/90 space-y-2">
+      <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <!-- 左侧：全局画面规则与批量关键词工具 -->
+        <div class="flex flex-wrap items-center gap-1.5 min-w-0">
+          <button type="button" id="toggleGlobalPromptBtn" onclick="toggleGlobalPromptDrawer()" class="px-2 py-0.5 rounded text-[11px] font-semibold text-gray-300 hover:text-white bg-gray-900/90 hover:bg-gray-800 border border-gray-700/80 transition cursor-pointer" title="展开或收起 AI 全局画面生成规则">
+            ✏️ 全局画面规则 <span id="globalPromptChevron">▸</span>
+          </button>
+          <button type="button" id="btnBatchExtractKeywords" onclick="batchExtractAllSearchKeywords()" class="px-2.5 py-0.5 rounded text-[11px] font-bold text-cyan-100 bg-cyan-700/70 hover:bg-cyan-600 border border-cyan-400/50 transition cursor-pointer shadow-sm" title="使用选定的关键词模型，为本工程全部镜头批量提炼纯中文素材搜索关键词">
+            ✨ 批量提炼全部镜头关键词
+          </button>
+        </div>
+
+        <!-- 右侧：紧凑内联节拍统计 -->
+        <div class="flex flex-wrap items-center gap-2 text-[11px] min-w-0 max-w-full lg:shrink-0">
+          <span class="px-2.5 py-0.5 rounded-lg bg-gray-900/90 border border-gray-700/80 text-gray-300">
+            总数 <strong class="text-white font-black" id="statTotal">-</strong>
+            <span class="text-gray-400 ml-1" id="statAvgDur">平均 -s/镜</span>
+          </span>
+          <span class="px-2.5 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300" title="最适眼球留存">
+            🟢 ≤8.5s <strong class="font-black" id="statGold">-</strong>
+          </span>
+          <span class="px-2.5 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300" title="建议点击 ✂️ 加切点">
+            🔴 >10s <strong class="font-black" id="statOver">-</strong>
+          </span>
+        </div>
+      </div>
+
+      <!-- 真实配音时间轴与关键词智能切点控制条 -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-gray-800/70 text-[11px]">
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
+          <span id="timingStatusBadge" class="px-2.5 py-0.5 rounded-lg bg-gray-900 border border-gray-700 text-gray-300 font-semibold">
+            📐 时间轴：等待载入...
+          </span>
+          <span id="timingRhythmBadge" class="hidden px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300"></span>
+          <div id="mainNarrationAudioWrap" class="hidden flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-950/50 border border-emerald-500/40">
+            <span class="text-[10px] font-bold text-emerald-300 shrink-0">🎧 全片旁白试听:</span>
+            <audio id="mainNarrationAudioPlayer" controls preload="metadata" class="h-6 w-52 sm:w-64"></audio>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <button type="button" id="btnSynthFull" onclick="synthesizeFullNarration()" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white border border-emerald-400/40 font-extrabold transition cursor-pointer shadow-sm" title="使用已保存的配音引擎设置，自动合并全部分镜文案生成整部视频配音并对齐时间轴">
+            🎙️ 一键生成全片旁白
+          </button>
+          <button type="button" id="btnCancelVoiceboxMain" onclick="cancelVoiceboxJob()" class="hidden px-2.5 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-700 border border-rose-500/60 text-rose-200 font-bold transition cursor-pointer shadow-sm" title="取消当前正在运行的配音任务">
+            🛑 取消配音
+          </button>
+          <button type="button" id="btnAutoPlanCuts" onclick="autoPlanProjectCuts()" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:brightness-110 text-white border border-purple-400/40 font-bold transition cursor-pointer shadow-sm" title="保留既有素材，自动把换画面点对齐到关键词说出时刻或停顿处，并切分过长镜头">
+            ⚡ 按关键词/停顿智能排切点
+          </button>
+        </div>
+      </div>
+
+      <!-- 关键词/停顿智能排切点进度条 -->
+      <div id="autoPlanCutsProgressWrap" class="hidden pt-1.5 border-t border-gray-800/70 space-y-1">
+        <div class="flex items-center justify-between text-[11px] text-indigo-200">
+          <span id="autoPlanCutsProgressText" class="truncate font-semibold">⏳ 准备按关键词/停顿排切点...</span>
+          <span id="autoPlanCutsProgressPct" class="shrink-0 font-mono font-bold text-purple-300">0%</span>
+        </div>
+        <div class="w-full h-1.5 rounded-full bg-gray-900 border border-gray-800 overflow-hidden">
+          <div id="autoPlanCutsProgressBar" class="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-full transition-all duration-300" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <!-- 默认收起的全局画面规则输入框 -->
+      <div id="globalPromptDrawer" class="hidden pt-1 border-t border-gray-800/80">
+        <textarea id="globalPromptInput" rows="2" class="w-full px-3 py-1.5 text-xs rounded-lg bg-gray-950 border border-gray-700 text-gray-100 focus:outline-none focus:border-purple-500" placeholder="在此输入你的 AI 画面生成规则..."></textarea>
+      </div>
+    </div>
+
+    <!-- 视觉镜头主表格 -->
+    <div class="card rounded-2xl overflow-hidden border border-gray-800">
+      <div id="producerSceneList" class="scene-list max-h-[calc(100vh-210px)] min-h-[520px] overflow-y-auto overflow-x-auto">
+        <table class="w-full lg:table-fixed text-left text-xs db-table border-collapse" role="table" aria-label="分镜列表">
+          <thead role="rowgroup">
+            <tr class="text-gray-300 font-bold uppercase tracking-wider text-[11px]" role="row">
+              <th role="columnheader" scope="col" class="p-3 lg:w-44 text-center">镜头序号 / 时长</th>
+              <th role="columnheader" scope="col" class="p-3">当前镜头覆盖的旁白文本（支持点字切画面）</th>
+              <th role="columnheader" scope="col" class="p-3 lg:w-36">画面方式</th>
+              <th role="columnheader" scope="col" class="p-3 lg:w-[40%]">📥 素材上传与 AI 剪辑 / 🎨 AI 生成画面（随画面方式切换）</th>
+              <th role="columnheader" scope="col" class="p-3 lg:w-32 text-center">节拍调整</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody" class="lg:divide-y lg:divide-gray-800" role="rowgroup">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="scene-save-bar p-3 bg-gray-900/60 border-t border-gray-800 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span class="text-[11px] text-gray-400">💡 点击镜头内的生成按钮，可使用指定的 AI 模型查看 16:9 画面预览。</span>
+        </div>
+        <button onclick="saveAll()" class="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-bold transition">
+          💾 保存修改并同步渲染
+        </button>
+      </div>
+    </div>
+
+  </div>
+  <!-- 视觉分镜制作台 (Producer Workspace) 结束 -->

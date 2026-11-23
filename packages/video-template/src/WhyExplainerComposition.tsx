@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
 import { CaptionLayer } from "./CaptionLayer";
+import { TextOverlayLayer } from "./scenes/TextOverlayLayer";
 import { ReviewHud } from "./ReviewHud";
 import { BrollScene } from "./scenes/BrollScene";
 import { DataCardScene } from "./scenes/DataCardScene";
@@ -160,6 +161,7 @@ const SceneDispatcher: React.FC<{ track: TimelineTrackProp; isFinalRender?: bool
         ) : (
           <DataCardScene track={track} />
         )}
+        <TextOverlayLayer track={track} aiOnly={isMissing || (track.visual_type !== "broll_video" && track.visual_type !== "photo_motion")} />
       </AbsoluteFill>
       {!isFinalRender && <ReviewHud track={track} />}
     </AbsoluteFill>
@@ -180,7 +182,17 @@ export const WhyExplainerComposition: React.FC<RenderPropsType & { isFinalRender
         />
       )}
 
-      {props.audio_track?.bgm?.enabled && props.audio_track.bgm.src && (
+      {props.audio_track?.bgm?.enabled && (props.audio_track.bgm.playlist?.length ?? 0) > 0 && props.audio_track.bgm.playlist!.map((clip, index, clips) => (
+        <Sequence key={`${clip.track_id}-${clip.start_frame}`} from={clip.start_frame} durationInFrames={clip.end_frame - clip.start_frame}>
+          <Audio src={staticFile(clip.src)} volume={(f) => {
+            const length = clip.end_frame - clip.start_frame;
+            const fadeIn = index === 0 ? 1 : Math.min(1, f / Math.max(1, clip.fade_frames));
+            const fadeOut = index === clips.length - 1 ? 1 : Math.min(1, Math.max(0, (length - f) / Math.max(1, clip.fade_frames)));
+            return computeBgmVolume(props.audio_track.bgm!, f + clip.start_frame, props.video_config.duration_in_frames, props.video_config.fps) * fadeIn * fadeOut;
+          }} />
+        </Sequence>
+      ))}
+      {props.audio_track?.bgm?.enabled && !props.audio_track.bgm.playlist?.length && props.audio_track.bgm.src && (
         <Audio
           src={staticFile(props.audio_track.bgm.src)}
           loop={props.audio_track.bgm.loop ?? true}

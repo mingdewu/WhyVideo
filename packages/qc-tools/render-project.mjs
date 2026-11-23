@@ -3,25 +3,19 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { getProjectPaths } from './project-paths.mjs';
 
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const remotionBin = path.join(rootDir, 'node_modules/.bin/remotion');
 const entryPoint = path.join(rootDir, 'packages/video-template/src/index.ts');
 
 export function projectRenderPaths(projectId) {
-  if (!/^[a-zA-Z0-9_-]+$/.test(projectId || '')) {
-    throw new Error('工程 ID 只能包含字母、数字、下划线和连字符');
-  }
-  const projectDir = path.join(rootDir, 'projects', projectId);
+  const paths = getProjectPaths(projectId);
+  const { projectDir } = paths;
   if (!fs.statSync(projectDir, { throwIfNoEntry: false })?.isDirectory()) {
     throw new Error(`工程不存在：${projectId}`);
   }
-  return {
-    projectDir,
-    publicDir: path.join(projectDir, 'public'),
-    propsPath: path.join(projectDir, 'public', 'render-props.json'),
-    outputDir: path.join(projectDir, 'output'),
-  };
+  return paths;
 }
 
 export function makeRenderCommand(projectId, { preview = false, concurrency = 2, outputPath } = {}) {

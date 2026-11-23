@@ -1,3 +1,5 @@
+import { ROOT_DIR, PROJECTS_ROOT, listProjectIds, getProjectPaths as sharedProjectPaths } from '../qc-tools/project-paths.mjs';
+import { callLlmRemotionCompiler } from '../qc-tools/ui-server/lib/scene-compiler.mjs';
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
@@ -5,8 +7,6 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT_DIR = path.resolve(__dirname, "../..");
-const PROJECTS_ROOT = path.join(ROOT_DIR, "projects");
 const PORT = Number(process.env.WORKFLOW_PORT || 3200);
 
 // 获取已配置的 LLM API Key (优先 prompt-config.json, 其次系统环境变量)
@@ -28,245 +28,19 @@ function getEffectiveLlmConfig(projectId) {
   return { apiKey, baseUrl, model };
 }
 
-// 纯文本规则解析降级引擎 (离线时 100% 极速稳定命中)
-function parsePromptWithRules(prompt, hasAsset, assetType) {
-  const p = prompt.trim();
-  const lower = p.toLowerCase();
-
-  // 1. 判断是否需要切换为程序化场景（表格/图表/流程图/对比）
-  const isTableOrData = /数据|表格|分析|占比|指标|统计|金额|增长/.test(p);
-  const isFlowOrTimeline = /流程|步骤|时间线|演进|脉络|先.*后|第一.*第二/.test(p);
-  const isVersus = /对比|对决|pk|差异|优缺点|双方/.test(p);
-  const isKinetic = /大字|震撼|快闪|冲击|标语|口号/.test(p);
-
-  // 如果没有素材，或者明确要求制作图表/流程
-  if (!hasAsset || (!p.includes("剪") && !p.includes("秒") && !p.includes("放") && !p.includes("亮") && (isTableOrData || isFlowOrTimeline || isVersus || isKinetic))) {
-    if (isFlowOrTimeline) {
-      return {
-        action: "switch_procedural",
-        scene_type: "timeline",
-        procedural_props: {
-          badge_label: "流程演进",
-          headline: p.slice(0, 18),
-          subheadline: "系统自动化关键环节解析",
-          items: ["初始阶段：约束建立", "推进阶段：机制执行", "闭环阶段：成果沉淀"],
-        },
-      };
-    }
-    if (isVersus) {
-      return {
-        action: "switch_procedural",
-        scene_type: "versus_dual",
-        procedural_props: {
-          badge_label: "维度对比",
-          headline: p.slice(0, 18),
-          subheadline: "核心指标对决",
-          items: ["方案 A / 传统惯性模式", "方案 B / 现代自适应范式"],
-        },
-      };
-    }
-    if (isTableOrData) {
-      return {
-        action: "switch_procedural",
-        scene_type: "data_card",
-        procedural_props: {
-          badge_label: "数据看板",
-          headline: p.slice(0, 18),
-          subheadline: "关键指标量化统计",
-          items: ["核心指标 01：大幅提升", "核心指标 02：降本增效", "综合评级：深度达标"],
-        },
-      };
-    }
-    return {
-      action: "switch_procedural",
-      scene_type: "kinetic_text",
-      procedural_props: {
-        badge_label: "重点强调",
-        headline: p.slice(0, 16),
-        subheadline: "核心逻辑透传",
-        items: [p.slice(0, 20)],
-      },
-    };
-  }
-
-  // 2. 有素材场景：提取视频裁剪 (如 "8-15秒", "7到12秒", "从第5秒开始剪3秒")
-  let trim_start_sec = 0;
-  let trim_end_sec = undefined;
-
-  const rangeMatch = p.match(/(\d+(?:\.\d+)?)\s*(?:-|至|到)\s*(\d+(?:\.\d+)?)\s*秒?/);
-  if (rangeMatch) {
-    trim_start_sec = parseFloat(rangeMatch[1]);
-    trim_end_sec = parseFloat(rangeMatch[2]);
-  } else {
-    const singleMatch = p.match(/(\d+(?:\.\d+)?)\s*秒/);
-    if (singleMatch && (p.includes("前") || p.includes("截取") || p.includes("持续"))) {
-      trim_end_sec = parseFloat(singleMatch[1]);
-    }
-  }
-
-  // 3. 滤镜提取 (如 "亮一点", "对比度高", "复古", "黑白")
-  const filters = {};
-  if (p.includes("亮") || p.includes("明亮") || p.includes("曝光")) {
-    filters.brightness = 1.25;
-  } else if (p.includes("暗") || p.includes("压暗")) {
-    filters.brightness = 0.85;
-  }
-  if (p.includes("对比")) {
-    filters.contrast = 1.2;
-  }
-  if (p.includes("复古") || p.includes("胶片")) {
-    filters.sepia = 0.35;
-    filters.contrast = 1.1;
-  }
-  if (p.includes("黑白")) {
-    filters.grayscale = 1.0;
-  }
-
-  // 4. 图片运镜提取 (如 "缓慢放大", "持续3秒", "向左平移")
-  let motion = undefined;
-  if (assetType === "image" || p.includes("放大") || p.includes("缩小") || p.includes("平移") || p.includes("推")) {
-    let duration_sec = 3.0;
-    const durMatch = p.match(/持续\s*(\d+(?:\.\d+)?)\s*秒/);
-    if (durMatch) duration_sec = parseFloat(durMatch[1]);
-
-    if (p.includes("缩小") || p.includes("拉远")) {
-      motion = { motion_type: "zoom_out", duration_sec, scale_from: 1.15, scale_to: 1.0 };
-    } else if (p.includes("左")) {
-      motion = { motion_type: "pan_left", duration_sec, translate_x_px: -50 };
-    } else if (p.includes("右")) {
-      motion = { motion_type: "pan_right", duration_sec, translate_x_px: 50 };
-    } else {
-      // 默认缓慢放大
-      motion = { motion_type: "zoom_in", duration_sec, scale_from: 1.0, scale_to: 1.18 };
-    }
-  }
-
-  // 5. 艺术字/弹跳文字提取 (如 “为什么会这样呢” 从左边弹出震惊效果)
-  const text_overlays = [];
-  const quoteMatch = p.match(/["“'‘]([^"”'’]+)["”'’]/);
-  const shockMatch = /震惊|惊讶|弹|突出|标语|警告/.test(p);
-  if (quoteMatch || shockMatch) {
-    const textContent = quoteMatch ? quoteMatch[1] : p.split(/[,，！!]/)[0].slice(0, 14);
-    let animation = "pop_bounce";
-    if (p.includes("左") || p.includes("滑入")) animation = "slide_from_left";
-    if (p.includes("震") || p.includes("惊")) animation = "shock_shake";
-
-    text_overlays.push({
-      text: textContent,
-      style: shockMatch ? "dramatic_shock" : "neon_glow",
-      animation,
-      position: animation === "slide_from_left" ? "center_left" : "center",
-      start_frame: 10,
-      duration_frames: 90,
-    });
-  }
-
-  return {
-    action: "media_modifiers",
-    media_modifiers: {
-      trim_start_sec: trim_start_sec || undefined,
-      trim_end_sec: trim_end_sec || undefined,
-      filters: Object.keys(filters).length > 0 ? filters : undefined,
-      motion,
-      text_overlays: text_overlays.length > 0 ? text_overlays : undefined,
-    },
-  };
+// Legacy HTTP contracts are retained; interpretation and project paths are shared.
+async function parsePromptWithAiOrRules(prompt, hasAsset, assetType, projectId, scene) {
+  return callLlmRemotionCompiler(prompt, scene, hasAsset, assetType,
+    getEffectiveLlmConfig(projectId), sharedProjectPaths(projectId).projectDir);
 }
 
-// 调度 LLM（若可用）或自动降级为精准规则引擎
-async function parsePromptWithAiOrRules(prompt, hasAsset, assetType, projectId) {
-  const { apiKey, baseUrl, model } = getEffectiveLlmConfig(projectId);
-
-  if (apiKey) {
-    try {
-      const systemPrompt = `你是一个专业的 Remotion 视频代码与动效参数编译器。
-用户拖入了素材或输入了自然语言剪辑/排版意向。
-请务必返回且仅返回一个合法的 JSON 对象，不要添加任何 markdown 代码块标记，不要额外废话。
-JSON 格式规范：
-{
-  "action": "media_modifiers" | "switch_procedural",
-  "scene_type": "data_card" | "timeline" | "versus_dual" | "kinetic_text" (仅在 switch_procedural 时有效),
-  "media_modifiers": {
-    "trim_start_sec": number,
-    "trim_end_sec": number,
-    "filters": { "brightness": 1.25, "contrast": 1.1, "sepia": 0.3, "grayscale": 1.0 },
-    "motion": { "motion_type": "zoom_in", "duration_sec": 3.0, "scale_from": 1.0, "scale_to": 1.15, "translate_x_px": -30 },
-    "text_overlays": [
-      {
-        "text": "文字内容",
-        "style": "dramatic_shock" | "warning_badge" | "neon_glow" | "minimal_clean",
-        "animation": "slide_from_left" | "pop_bounce" | "shock_shake" | "fade_in",
-        "position": "center" | "center_left" | "top_left"
-      }
-    ]
-  },
-  "procedural_props": {
-    "badge_label": "标签",
-    "headline": "主标题",
-    "subheadline": "副标题",
-    "items": ["要点1", "要点2", "要点3"]
-  }
-}`;
-
-      const userPrompt = `用户指令: "${prompt}"\n当前素材状态: ${hasAsset ? `已绑定${assetType === 'video' ? '视频' : '图片'}` : '无素材 (纯文字排版)'}`;
-
-      const fetchUrl = `${baseUrl}/chat/completions`;
-      const response = await fetch(fetchUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify({
-          model,
-          messages: [
-            { role: "system", content: systemPrompt },
-            { role: "user", content: userPrompt },
-          ],
-          temperature: 0.2,
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const rawContent = data.choices?.[0]?.message?.content?.trim();
-        if (rawContent) {
-          const cleanJson = rawContent.replace(/^```json\s*/, "").replace(/^```\s*/, "").replace(/```$/, "").trim();
-          const parsed = JSON.parse(cleanJson);
-          return parsed;
-        }
-      }
-    } catch (err) {
-      console.warn("[AI Parser] LLM API 发生波动，已平滑无感切回本地高保真语义编译器:", err.message);
-    }
-  }
-
-  // 默认极速高可靠语义规则编译器
-  return parsePromptWithRules(prompt, hasAsset, assetType);
-}
-
-function listProjects() {
-  if (!fs.existsSync(PROJECTS_ROOT)) return [];
-  return fs
-    .readdirSync(PROJECTS_ROOT, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && !d.name.startsWith("."))
-    .map((d) => d.name)
-    .sort();
-}
+function listProjects() { return listProjectIds(); }
 
 function getProjectPaths(projectId) {
-  const projectDir = path.join(PROJECTS_ROOT, projectId);
-  return {
-    projectDir,
-    dataDir: path.join(projectDir, "data"),
-    publicDir: path.join(projectDir, "public"),
-    outputDir: path.join(projectDir, "output"),
-    sceneManifestPath: path.join(projectDir, "data/scene-manifest.json"),
-    assetIndexPath: path.join(projectDir, "data/asset-index.json"),
-    renderPropsPath: path.join(projectDir, "data/render-props.json"),
-    qcReportPath: path.join(projectDir, "output/video-qc-report.json"),
-    promptConfigPath: path.join(projectDir, "data/prompt-config.json"),
-  };
+  const paths = sharedProjectPaths(projectId);
+  return { ...paths, sceneManifestPath: paths.manifestPath,
+    renderPropsPath: paths.propsPath,
+    qcReportPath: path.join(paths.outputDir, 'video-qc-report.json') };
 }
 
 function ensureSceneTableFields(sceneManifest) {
@@ -699,14 +473,6 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 400, { error: "Prompt is required" });
       }
 
-      // 解析自然语言意图为 Remotion 执行结构
-      const parsedIntent = await parsePromptWithAiOrRules(
-        prompt,
-        Boolean(hasAsset),
-        assetType || "video",
-        projectId
-      );
-
       const sceneManifest = JSON.parse(
         fs.readFileSync(paths.sceneManifestPath, "utf8")
       );
@@ -717,6 +483,10 @@ const server = http.createServer(async (req, res) => {
       if (!targetScene) {
         return sendJson(res, 404, { error: "Scene not found" });
       }
+
+      const parsedIntent = await parsePromptWithAiOrRules(
+        prompt, Boolean(hasAsset), assetType || 'video', projectId, targetScene
+      );
 
       // 根据 AI 意图修改 targetScene
       if (parsedIntent.action === "switch_procedural") {

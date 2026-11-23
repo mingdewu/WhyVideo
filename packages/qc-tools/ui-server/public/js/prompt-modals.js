@@ -491,6 +491,8 @@
       { key: 'P3_image_prompt', shortLabel: '3. 超清实景图' },
       { key: 'P4_card_prompt', shortLabel: '4. 动效卡片' },
       { key: 'P5_clip_compiler', shortLabel: '5. 口语剪辑编译' },
+      { key: 'P6_bgm_director', shortLabel: '6. AI 自动配乐' },
+      { key: 'P7_art_director', shortLabel: '7. AI 重点艺术字' },
     ];
 
     let producerPromptsModalState = {

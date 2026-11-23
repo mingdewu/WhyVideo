@@ -1,4 +1,4 @@
-    let activeProjectId = new URLSearchParams(window.location.search).get('project') || localStorage.getItem('whyvideo_active_project') || 'why_nikko_heritage_road_001';
+    let activeProjectId = new URLSearchParams(window.location.search).get('project') || localStorage.getItem('whyvideo_active_project') || window.STUDIO_DEFAULT_PROJECT_ID;
     let manifestData = null;
     let assetIndexData = null;
     let projectsList = [];

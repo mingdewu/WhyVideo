@@ -1,3 +1,4 @@
+import { mediaFilterStyle } from "../media-filters";
 import React from "react";
 import {
   AbsoluteFill,
@@ -9,7 +10,6 @@ import {
 } from "remotion";
 import { TimelineTrackProp } from "../types";
 import { MissingAssetScene } from "./MissingAssetScene";
-import { TextOverlayLayer } from "./TextOverlayLayer";
 
 export const PhotoMotionScene: React.FC<{ track: TimelineTrackProp }> = ({
   track,
@@ -55,36 +55,7 @@ export const PhotoMotionScene: React.FC<{ track: TimelineTrackProp }> = ({
   );
 
   // 2. 滤镜
-  const filters = modifiers?.filters;
-  const filterList: string[] = [];
-  if (filters?.brightness && filters.brightness !== 1.0) {
-    filterList.push(`brightness(${filters.brightness})`);
-  }
-  if (filters?.contrast && filters.contrast !== 1.0) {
-    filterList.push(`contrast(${filters.contrast})`);
-  }
-  if (filters?.saturate && filters.saturate !== 1.0) {
-    filterList.push(`saturate(${filters.saturate})`);
-  }
-  if (filters?.sepia) {
-    filterList.push(`sepia(${filters.sepia})`);
-  }
-  if (filters?.grayscale) {
-    filterList.push(`grayscale(${filters.grayscale})`);
-  }
-  if (filters?.blur_px) {
-    filterList.push(`blur(${filters.blur_px}px)`);
-  }
-  if (filters?.hue_rotate_deg) {
-    filterList.push(`hue-rotate(${filters.hue_rotate_deg}deg)`);
-  }
-  if (filters?.invert) {
-    filterList.push(`invert(${filters.invert})`);
-  }
-  if (filters?.custom_css_filter) {
-    filterList.push(filters.custom_css_filter);
-  }
-  const filterStr = filterList.length > 0 ? filterList.join(" ") : undefined;
+  const filterStr = mediaFilterStyle(modifiers?.filters);
 
   return (
     <AbsoluteFill style={{ backgroundColor: "#0F1419", overflow: "hidden" }}>
@@ -100,7 +71,6 @@ export const PhotoMotionScene: React.FC<{ track: TimelineTrackProp }> = ({
       />
 
       {/* 顶层动效艺术字贴层 */}
-      <TextOverlayLayer track={track} />
     </AbsoluteFill>
   );
 };

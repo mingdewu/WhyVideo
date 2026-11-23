@@ -39,3 +39,9 @@ yarn-error.log*
 .vscode/
 *.swp
 *.swo
+
+# Local drafts and one-off scratch files
+/scratch/
+/why_*_script.md
+/final-script.json
+/.meowload/

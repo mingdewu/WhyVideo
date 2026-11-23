@@ -1,0 +1,251 @@
+  <!-- 【核心升级】：全功能 AI 模型指令调度中心 (紧凑自适应·折叠免滑动版) -->
+  <div id="visualModelModal" onclick="if(event.target===this) toggleVisualModelModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+    <div class="card w-full max-w-4xl p-4 sm:p-5 rounded-2xl border border-purple-500/50 shadow-2xl flex flex-col max-h-[96vh] overflow-hidden">
+      <!-- 弹窗固定头部：标题 + 醒目大热区退出叉 -->
+      <div class="flex items-center justify-between pb-2.5 border-b border-gray-800 shrink-0">
+        <div>
+          <h3 class="text-base sm:text-lg font-black text-white flex items-center gap-2">
+            🪐 AI 全流程模型调度中心
+          </h3>
+          <p class="text-[11px] text-purple-300/80 mt-0.5">统一配置网关与各阶段模型</p>
+        </div>
+        <button type="button" onclick="toggleVisualModelModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-300 hover:text-white bg-gray-800/80 hover:bg-rose-600/80 hover:border-rose-400 border border-gray-700 transition text-lg font-bold cursor-pointer shrink-0 shadow" title="关闭退出 (Esc)">✕</button>
+      </div>
+
+      <!-- 弹窗内部主体（自适应高度，小屏幕支持内部滚动避免底部保存按钮被裁切） -->
+      <div class="studio-modal-content space-y-2.5 pt-2.5 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto pr-0.5">
+        <!-- 当前各阶段生效模型总览 -->
+        <div class="flex flex-wrap items-center gap-1.5 px-2.5 py-2 rounded-xl bg-gray-950/70 border border-gray-800 shrink-0">
+          <span class="text-[11px] font-bold text-purple-300 shrink-0">🤖 当前生效：</span>
+          <span id="currentWriterModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-200 border border-amber-500/35">📝 文案: deepseek-chat</span>
+          <span id="currentVideoModelBadge" class="px-2 py-0.5 rounded text-[11px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/35">🎬 视频: minimax/hailuo-3</span>
+          <span id="currentTextModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-purple-500/20 text-purple-200 border border-purple-500/35">✍️ 分镜: deepseek-chat</span>
+          <span id="currentImageModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-500/20 text-blue-200 border border-blue-500/35">🖼️ 生图: flux-3-image</span>
+          <span id="currentKeywordModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-cyan-500/20 text-cyan-200 border border-cyan-500/35">🔎 关键词: deepseek-chat</span>
+        </div>
+        <!-- 1. 顶层快捷预设条与统一网关 (两列自适应高 ~75px) -->
+        <div class="p-2.5 rounded-xl bg-gradient-to-r from-blue-950/60 via-purple-950/50 to-cyan-950/60 border border-cyan-500/30 shrink-0 space-y-1.5">
+          <div class="flex flex-wrap items-center justify-between gap-1.5">
+            <div class="flex items-center gap-2 text-xs font-black text-cyan-300 flex-wrap">
+              <span>🪐 一键载入全家桶预设：</span>
+              <span id="modelCatalogStatusBadge" class="text-[10px] font-mono font-normal text-gray-400">⏳ 正在拉取实时模型列表...</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-1">
+              <button type="button" onclick="refreshAllOpenRouterModels(true)" id="btnRefreshOrModels" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-600/30 hover:bg-emerald-600/60 text-emerald-200 border border-emerald-400/50 transition shadow-sm cursor-pointer">
+                <span>🔄 刷新全部模型列表</span>
+              </button>
+              <button type="button" onclick="applyModelPreset('gemini')" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-600/30 hover:bg-blue-600/60 text-blue-200 border border-blue-400/50 transition shadow-sm">
+                <span>🪐 Gemini 生态</span>
+              </button>
+              <button type="button" onclick="applyModelPreset('openrouter-fast')" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-purple-600/30 hover:bg-purple-600/60 text-purple-200 border border-purple-400/50 transition shadow-sm">
+                <span>🚀 OpenRouter 混合</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 网关与事实检索密钥 -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-gray-800/80">
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label class="text-[10px] font-bold text-gray-300">🔑 统一 API Key：</label>
+                <div class="text-[9px]">
+                  <a href="https://openrouter.ai/keys" target="_blank" class="text-purple-400 hover:underline">OpenRouter ↗</a>
+                  <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-400 hover:underline ml-1">Gemini ↗</a>
+                </div>
+              </div>
+              <input type="password" id="currentApiKeyInput" placeholder="填入 OpenRouter Key (sk-or-...) 或 Gemini API Key"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label class="text-[10px] font-bold text-gray-300">🌐 统一 Base URL 网关：</label>
+                <div class="flex items-center gap-1.5 text-[9px]">
+                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://openrouter.ai/api/v1'; refreshAllOpenRouterModels(false);" class="text-purple-400 hover:underline cursor-pointer">OpenRouter</button>
+                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://generativelanguage.googleapis.com/v1beta/openai'; refreshAllOpenRouterModels(false);" class="text-blue-400 hover:underline cursor-pointer">Gemini</button>
+                </div>
+              </div>
+              <div class="flex items-center gap-1">
+                <input type="text" id="currentBaseUrlInput" value="https://openrouter.ai/api/v1" placeholder="网关地址..."
+                  class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
+                <button type="button" onclick="testCurrentProviderConnection()" id="btnTestProvider" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-purple-900/60 border border-purple-500/40 text-purple-200 transition shrink-0 cursor-pointer">⚡测试</button>
+              </div>
+              <div id="testConnStatus" class="hidden text-[11px] leading-snug pt-0.5"></div>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-gray-800/80">
+            <div>
+              <label for="currentTavilyKeyInput" class="text-[10px] font-bold text-gray-300 block mb-0.5">🔎 Tavily 搜索 API Key（资料考证）</label>
+              <div class="flex items-center gap-1">
+                <input type="password" id="currentTavilyKeyInput" autocomplete="off" placeholder="填写 Tavily Key；留空则保留已存 Key"
+                  class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-cyan-400" />
+                <button type="button" onclick="testTavilyConnection()" id="btnTestTavily" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-cyan-900/60 border border-cyan-500/40 text-cyan-200 transition shrink-0 cursor-pointer">⚡测试</button>
+              </div>
+              <div id="testTavilyStatus" class="hidden text-[11px] leading-snug pt-0.5"></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label class="text-[10px] font-bold text-teal-300">🐱 本机哼哼猫桌面端（全网视频本地下载）</label>
+                <span class="text-[9px] text-teal-400/80">本地 CLI · 无需 API Key</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <div class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-teal-500/40 text-teal-200/90 font-mono truncate">
+                  💻 连接本机哼哼猫客户端 (meowload CLI)
+                </div>
+                <button type="button" onclick="testMeowloadConnection()" id="btnTestMeowload" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-teal-900/60 border border-teal-500/40 text-teal-200 transition shrink-0 cursor-pointer">⚡检测连接</button>
+              </div>
+              <div id="testMeowloadStatus" class="hidden text-[11px] leading-snug pt-0.5"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 五大模型手风琴折叠组 (Accordion 1~5，单项展开，其余收起，零滑动) -->
+        <div class="space-y-1.5 shrink-0">
+          <!-- Item 1: ✍️ AI 知识文案创作与考证大模型 (Writer) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(1)" id="accordionHeaderModel1" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 font-bold flex items-center justify-center text-[10px] shrink-0">1</span>
+                <span class="text-xs font-bold text-gray-200 truncate">✍️ AI 知识文案创作与考证大模型</span>
+                <span id="modelHeaderBadgeWriter" class="px-2 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30 truncate max-w-[200px]">deepseek/deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel1" class="text-[10px] text-gray-400 font-mono transition">▼</span>
+            </button>
+            <div id="accordionBodyModel1" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5">
+              <datalist id="openrouterModelsList"></datalist>
+              <input type="search" id="writerModelSearch" oninput="filterModelSelect('writer')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-purple-400" />
+              <select id="writerModelSelect" onchange="if(this.value) selectWriterModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-purple-500/40 text-purple-100 font-mono focus:outline-none focus:border-purple-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentWriterModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入/搜索模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-purple-500/50 text-purple-200 font-mono font-bold focus:outline-none focus:border-purple-400" />
+            </div>
+          </div>
+
+          <!-- Item 2: 🎬 AI 视频生成模型 (Video) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(2)" id="accordionHeaderModel2" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-300 font-bold flex items-center justify-center text-[10px] shrink-0">2</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎬 AI 视频生成模型 (16:9 真实视频)</span>
+                <span id="modelHeaderBadgeVideo" class="px-2 py-0.2 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 truncate max-w-[200px]">minimax/hailuo-3</span>
+              </div>
+              <span id="accordionArrowModel2" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel2" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="videoModelSearch" oninput="filterModelSelect('video')" placeholder="🔍 实时搜索视频模型（如 veo / seedance / kling / hailuo / wan）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-emerald-400" />
+              <select id="videoModelSelect" onchange="if(this.value) selectVideoModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-emerald-500/40 text-emerald-100 font-mono focus:outline-none focus:border-emerald-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取视频模型列表...</option>
+              </select>
+              <input type="text" id="currentVideoModelInput" list="openrouterVideoModelsList" value="minimax/hailuo-3" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入视频模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-emerald-500/50 text-emerald-200 font-mono font-bold focus:outline-none focus:border-emerald-400" />
+              <datalist id="openrouterVideoModelsList"></datalist>
+            </div>
+          </div>
+
+          <!-- Item 3: 🎯 AI 分镜与指示词提炼模型 (Prompt Director) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(3)" id="accordionHeaderModel3" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 font-bold flex items-center justify-center text-[10px] shrink-0">3</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎯 AI 分镜与指示词提炼模型</span>
+                <span id="modelHeaderBadgeText" class="px-2 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30 truncate max-w-[200px]">deepseek/deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel3" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel3" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="textModelSearch" oninput="filterModelSelect('text')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-purple-400" />
+              <select id="textModelSelect" onchange="if(this.value) selectTextModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-purple-500/40 text-purple-100 font-mono focus:outline-none focus:border-purple-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentTextModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入分镜提炼模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-purple-400" />
+            </div>
+          </div>
+
+          <!-- Item 4: 🎨 AI 超清生图模型 (Image) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(4)" id="accordionHeaderModel4" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-blue-500/20 text-blue-300 font-bold flex items-center justify-center text-[10px] shrink-0">4</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎨 AI 超清摄影实景生图模型</span>
+                <span id="modelHeaderBadgeImage" class="px-2 py-0.2 rounded text-[10px] font-mono bg-blue-500/15 text-blue-300 border border-blue-500/30 truncate max-w-[200px]">flux-3-image</span>
+              </div>
+              <span id="accordionArrowModel4" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel4" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="imageModelSearch" oninput="filterModelSelect('image')" placeholder="🔍 实时搜索生图模型（如 flux / gemini / recraft / gpt-image / seedream）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-blue-400" />
+              <select id="imageModelSelect" onchange="if(this.value) selectImageModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-blue-500/40 text-blue-100 font-mono focus:outline-none focus:border-blue-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取生图模型列表...</option>
+              </select>
+              <input type="text" id="currentImageModelInput" list="openrouterImageModelsList" value="black-forest-labs/flux-3-image" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入生图模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-blue-400" />
+              <datalist id="openrouterImageModelsList"></datalist>
+            </div>
+          </div>
+
+          <!-- Item 5: 🎵 AI 自适应 BGM 音乐与审查模型 (BGM) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(5)" id="accordionHeaderModel5" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-amber-500/20 text-amber-300 font-bold flex items-center justify-center text-[10px] shrink-0">5</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎵 AI 自适应 BGM 背景音乐与审查模型</span>
+                <span id="modelHeaderBadgeBgm" class="px-2 py-0.2 rounded text-[10px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30 truncate max-w-[200px]">deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel5" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel5" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <p class="text-[11px] text-amber-300">自动配乐需要同时支持音频输入和文本输出的模型。模型列表未按音频能力筛选，请确认网关和模型兼容。</p>
+              <input type="search" id="bgmModelSearch" oninput="filterModelSelect('bgm')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-amber-400" />
+              <select id="bgmModelSelect" onchange="if(this.value) selectBgmModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-amber-500/40 text-amber-100 font-mono focus:outline-none focus:border-amber-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentBgmModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入 BGM 模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-amber-400" />
+            </div>
+          </div>
+
+          <!-- Item 6: 🔎 AI 搜索关键词提炼模型 (Keyword Extractor) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(6)" id="accordionHeaderModel6" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-300 font-bold flex items-center justify-center text-[10px] shrink-0">6</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🔎 AI 搜索关键词提炼模型（纯中文素材检索词）</span>
+                <span id="modelHeaderBadgeKeyword" class="px-2 py-0.2 rounded text-[10px] font-mono bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 truncate max-w-[200px]">deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel6" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel6" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="keywordModelSearch" oninput="filterModelSelect('keyword')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-cyan-400" />
+              <select id="keywordModelSelect" onchange="if(this.value) selectKeywordModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-cyan-500/40 text-cyan-100 font-mono focus:outline-none focus:border-cyan-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentKeywordModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入关键词提炼模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-cyan-400" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 弹窗固定底部栏：取消与保存应用 -->
+        <div class="flex justify-end items-center gap-2 pt-2 border-t border-gray-800 shrink-0">
+          <button type="button" onclick="toggleVisualModelModal()" class="px-3.5 py-1.5 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+            取消
+          </button>
+          <button type="button" onclick="saveVisualModelConfig()" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:brightness-110 text-white transition shadow-lg cursor-pointer">
+            💾 保存并应用全部模型配置
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>

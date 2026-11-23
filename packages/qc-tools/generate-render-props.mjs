@@ -1,6 +1,7 @@
+import { continueMediaModifiers } from './media-continuity.mjs';
 import fs from "node:fs";
 import path from "node:path";
-import { resolveProject } from "./scan-assets.mjs";
+import { resolveProject } from "./project-paths.mjs";
 import { compileBgmRenderProp } from "./bgm-manager.mjs";
 
 const { projectId, projectDir, dataDir, publicDir } = resolveProject();
@@ -71,15 +72,29 @@ function parseSrt(srtText) {
 const captions = parseSrt(srtRaw);
 
 const blockingReasons = [];
-const timelineTracks = sceneManifest.scenes.map((scene) => {
+const timelineTracks = [];
+for (const scene of sceneManifest.scenes) {
   const from_frame = Math.round((scene.start_ms / 1000) * FPS);
   const end_frame = Math.round((scene.end_ms / 1000) * FPS);
   const duration_in_frames = end_frame - from_frame;
 
+  const prevTrack =
+    timelineTracks.length > 0 ? timelineTracks[timelineTracks.length - 1] : null;
+  const shouldInheritPrev =
+    Boolean(scene.shared_asset_with_prev) &&
+    Boolean(prevTrack?.approved_asset) &&
+    (!scene.final_asset_id ||
+      scene.final_asset_id === prevTrack.approved_asset.asset_id);
+
   let resolvedAsset = null;
   let render_mode = "procedural_component";
+  let effectiveStatus = scene.status;
 
-  if (
+  if (shouldInheritPrev) {
+    resolvedAsset = { ...prevTrack.approved_asset };
+    render_mode = prevTrack.render_mode;
+    effectiveStatus = "READY_APPROVED";
+  } else if (
     scene.status === "NEEDS_HUMAN_ASSET" ||
     scene.asset_status === "NEEDS_HUMAN_ASSET"
   ) {
@@ -159,7 +174,42 @@ const timelineTracks = sceneManifest.scenes.map((scene) => {
       : [],
   };
 
-  return {
+  let mediaModifiers =
+    scene.media_modifiers || scene.trim_start_sec !== undefined
+      ? {
+          ...(scene.trim_start_sec !== undefined
+            ? {
+                trim_start_sec: scene.trim_start_sec,
+                trim_end_sec: scene.trim_end_sec,
+              }
+            : {}),
+          ...(scene.media_modifiers || {}),
+        }
+      : undefined;
+
+  let transition = scene.transition || {
+    in: "fade",
+    out: "fade",
+    duration_frames: 12,
+  };
+
+  if (shouldInheritPrev) {
+    mediaModifiers = continueMediaModifiers(
+      prevTrack, scene, FPS, resolvedAsset.duration_seconds
+    );
+
+    prevTrack.transition = {
+      ...(prevTrack.transition || { in: "fade", out: "fade", duration_frames: 12 }),
+      out: "cut",
+    };
+    transition = {
+      in: "cut",
+      out: scene.transition?.out || "fade",
+      duration_frames: scene.transition?.duration_frames ?? 12,
+    };
+  }
+
+  timelineTracks.push({
     scene_id: scene.scene_id,
     chapter_ref: scene.chapter_ref || "section",
     is_final_ending: Boolean(scene.is_final_ending),
@@ -169,7 +219,7 @@ const timelineTracks = sceneManifest.scenes.map((scene) => {
     duration_in_frames,
     visual_type: scene.visual_type || scene.scene_type,
     scene_type: scene.scene_type || scene.visual_type,
-    status: scene.status,
+    status: effectiveStatus,
     render_mode,
     narration_text: scene.narration_text,
     visual_purpose: scene.visual_purpose || scene.visual_intent,
@@ -186,21 +236,11 @@ const timelineTracks = sceneManifest.scenes.map((scene) => {
       component_spec: proceduralProps.component_spec || "",
     },
     approved_asset: resolvedAsset,
-    media_modifiers: (scene.media_modifiers || scene.trim_start_sec !== undefined) ? {
-      ...(scene.trim_start_sec !== undefined ? {
-        trim_start_sec: scene.trim_start_sec,
-        trim_end_sec: scene.trim_end_sec,
-      } : {}),
-      ...(scene.media_modifiers || {}),
-    } : undefined,
+    media_modifiers: mediaModifiers,
     procedural_props: proceduralProps,
-    transition: scene.transition || {
-      in: "fade",
-      out: "fade",
-      duration_frames: 12,
-    },
-  };
-});
+    transition,
+  });
+}
 
 const totalDurationFrames = Math.round(
   (sceneManifest.total_duration_ms / 1000) * FPS

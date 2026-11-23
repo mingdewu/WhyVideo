@@ -1,0 +1,30 @@
+export const ROOT_DIR: string;
+export const PROJECTS_ROOT: string;
+export interface ProjectPaths {
+  projectId: string;
+  projectDir: string;
+  dataDir: string;
+  publicDir: string;
+  outputDir: string;
+  humanReviewLogPath: string;
+  briefPath: string;
+  evidencePath: string;
+  outlinePath: string;
+  manifestPath: string;
+  assetIndexPath: string;
+  statusPath: string;
+  promptConfigPath: string;
+  bgmConfigPath: string;
+  writerPromptsPath: string;
+  finalScriptPath: string;
+  materialsPath: string;
+  videoPath: string;
+  audioDir: string;
+  bgmDir: string;
+  captionsPath: string;
+  propsPath: string;
+}
+export function listProjectIds(): string[];
+export function defaultProjectId(): string;
+export function getProjectPaths(projectId?: string): ProjectPaths;
+export function resolveProject(argv?: string[]): ProjectPaths & { availableProjects: string[] };

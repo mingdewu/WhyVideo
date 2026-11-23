@@ -1,5 +1,5 @@
 import React from "react";
-import { Composition, staticFile } from "remotion";
+import { Composition, staticFile, CalculateMetadataFunction } from "remotion";
 import {
   WhyExplainerComposition,
   RenderPropsType,
@@ -50,78 +50,45 @@ const GENERIC_DEFAULT_PROPS: RenderPropsType = {
   timeline_tracks: [],
 };
 
-export const RemotionRoot: React.FC = () => {
-  return (
-    <>
-      {/* 预览与审核版本 (带镜头标注 HUD) */}
-      <Composition
-        id="WhyExplainerMVP"
-        component={WhyExplainerComposition}
-        durationInFrames={GENERIC_DEFAULT_PROPS.video_config.duration_in_frames}
-        fps={GENERIC_DEFAULT_PROPS.video_config.fps}
-        width={GENERIC_DEFAULT_PROPS.video_config.width}
-        height={GENERIC_DEFAULT_PROPS.video_config.height}
-        defaultProps={{ ...GENERIC_DEFAULT_PROPS, isFinalRender: false }}
-        calculateMetadata={async ({ props }) => {
-          if (
-            props &&
-            props.timeline_tracks &&
-            props.timeline_tracks.length > 0
-          ) {
-            return {
-              durationInFrames: props.video_config.duration_in_frames,
-              fps: props.video_config.fps,
-              width: props.video_config.width,
-              height: props.video_config.height,
-              props: { ...props, isFinalRender: false },
-            };
-          }
-          const response = await fetch(staticFile("render-props.json"));
-          const loadedProps = (await response.json()) as RenderPropsType;
-          return {
-            durationInFrames: loadedProps.video_config.duration_in_frames,
-            fps: loadedProps.video_config.fps,
-            width: loadedProps.video_config.width,
-            height: loadedProps.video_config.height,
-            props: { ...loadedProps, isFinalRender: false },
-          };
-        }}
-      />
+type CompositionSchema = NonNullable<Parameters<typeof Composition>[0]["schema"]>;
 
-      {/* 最终纯净成片版本 (1080p 纯净无调试框与镜头HUD) */}
-      <Composition
-        id="WhyExplainerFinal"
+type StudioCompositionProps = RenderPropsType & {
+  isFinalRender: boolean;
+} & Record<string, unknown>;
+
+function metadataFor(isFinalRender: boolean): CalculateMetadataFunction<StudioCompositionProps> {
+  return async ({ props, abortSignal }) => {
+    let loadedProps: RenderPropsType = props;
+    if (!props.timeline_tracks?.length) {
+      const response = await fetch(staticFile("render-props.json"), { signal: abortSignal });
+      if (!response.ok) throw new Error(`无法加载渲染参数：${response.status}`);
+      loadedProps = await response.json() as RenderPropsType;
+    }
+    return {
+      durationInFrames: loadedProps.video_config.duration_in_frames,
+      fps: loadedProps.video_config.fps,
+      width: loadedProps.video_config.width,
+      height: loadedProps.video_config.height,
+      props: { ...loadedProps, isFinalRender },
+    };
+  };
+}
+
+export const RemotionRoot: React.FC = () => (
+  <>
+    {[false, true].map(isFinalRender => {
+      const defaultProps: StudioCompositionProps = { ...GENERIC_DEFAULT_PROPS, isFinalRender };
+      return <Composition<CompositionSchema, StudioCompositionProps>
+        key={String(isFinalRender)}
+        id={isFinalRender ? "WhyExplainerFinal" : "WhyExplainerMVP"}
         component={WhyExplainerComposition}
         durationInFrames={GENERIC_DEFAULT_PROPS.video_config.duration_in_frames}
         fps={GENERIC_DEFAULT_PROPS.video_config.fps}
         width={GENERIC_DEFAULT_PROPS.video_config.width}
         height={GENERIC_DEFAULT_PROPS.video_config.height}
-        defaultProps={{ ...GENERIC_DEFAULT_PROPS, isFinalRender: true }}
-        calculateMetadata={async ({ props }) => {
-          if (
-            props &&
-            props.timeline_tracks &&
-            props.timeline_tracks.length > 0
-          ) {
-            return {
-              durationInFrames: props.video_config.duration_in_frames,
-              fps: props.video_config.fps,
-              width: props.video_config.width,
-              height: props.video_config.height,
-              props: { ...props, isFinalRender: true },
-            };
-          }
-          const response = await fetch(staticFile("render-props.json"));
-          const loadedProps = (await response.json()) as RenderPropsType;
-          return {
-            durationInFrames: loadedProps.video_config.duration_in_frames,
-            fps: loadedProps.video_config.fps,
-            width: loadedProps.video_config.width,
-            height: loadedProps.video_config.height,
-            props: { ...loadedProps, isFinalRender: true },
-          };
-        }}
-      />
-    </>
-  );
-};
+        defaultProps={defaultProps}
+        calculateMetadata={metadataFor(isFinalRender)}
+      />;
+    })}
+  </>
+);

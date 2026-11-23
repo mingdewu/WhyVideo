@@ -7,10 +7,10 @@
 
 import fs from 'fs';
 import path from 'path';
+import { defaultProjectId, getProjectPaths } from './project-paths.mjs';
 
-const defaultProjectId = 'why_ryokan_small_dishes_001';
-const projectId = process.argv[2] || defaultProjectId;
-const projectDir = path.resolve(process.cwd(), 'projects', projectId);
+const projectId = process.argv[2] || defaultProjectId();
+const { projectDir } = getProjectPaths(projectId);
 
 if (!fs.existsSync(projectDir)) {
   console.error(`\x1b[31m[错误] 项目目录不存在: ${projectDir}\x1b[0m`);

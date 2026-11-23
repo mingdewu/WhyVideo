@@ -12,9 +12,10 @@ import {
   buildProjectTimingSummary,
 } from '../lib/project-store.mjs';
 import { extractVisualKeywordsMap, syncLocalProjectAssets } from '../lib/media-gateway.mjs';
-import { getMeowloadApiKey } from '../lib/llm-gateway.mjs';
+import { getMeowloadApiKey, callOpenRouterText, extractJsonFromText } from '../lib/llm-gateway.mjs';
 import {
   getProducerPromptsState,
+  renderProducerPrompt,
   saveProjectProducerPromptPreset,
   resetProjectProducerPromptPreset,
 } from '../../producer-prompts.mjs';
@@ -38,9 +39,81 @@ import {
 } from '../../cut-planner.mjs';
 import { loadBgmConfig } from '../../bgm-manager.mjs';
 
+// Only bounded declarative design data reaches Remotion; model output is never executed.
+function normalizeArtDesign(value) {
+  if (!value || typeof value !== 'object' || !Array.isArray(value.keyframes) || value.keyframes.length < 2 || value.keyframes.length > 12) return null;
+  const clamp = (v, min, max) => Math.min(max, Math.max(min, Number(v)));
+  const ranges = {x:[8,92], y:[10,78], font_size:[28,130], font_weight:[400,900], background_opacity:[0,1], border_width:[0,12], radius:[0,80], padding_x:[0,80], padding_y:[0,50], letter_spacing:[-3,15], glow:[0,60]};
+  const out = {};
+  for (const [key, range] of Object.entries(ranges)) { if (!Number.isFinite(Number(value[key]))) return null; out[key] = clamp(value[key], ...range); }
+  for (const key of ['text_color','background_color','border_color']) { if (!/^#[0-9a-f]{6}$/i.test(value[key] || '')) return null; out[key] = value[key]; }
+  out.keyframes = [];
+  for (const frame of value.keyframes) {
+    if (!frame || !['at','x','y','scale','rotation','opacity'].every(k => Number.isFinite(Number(frame[k])))) return null;
+    out.keyframes.push({at:clamp(frame.at,0,1), x:clamp(frame.x,-1000,1000), y:clamp(frame.y,-600,600), scale:clamp(frame.scale,0.1,3), rotation:clamp(frame.rotation,-90,90), opacity:clamp(frame.opacity,0,1)});
+  }
+  if (out.keyframes[0].at !== 0 || out.keyframes.at(-1).at !== 1 || out.keyframes.some((f,i) => i > 0 && f.at <= out.keyframes[i-1].at)) return null;
+  return out;
+}
+
 const autoPlanProgressMap = globalThis.__whyvideoAutoPlanProgressMap || (globalThis.__whyvideoAutoPlanProgressMap = new Map());
 
 export async function handleProducerRoutes(req, res, { url, pathname, queryProject, paths }) {
+  // 全文艺术字：先生成可编辑提案，应用时才修改镜头。
+  if (req.method === 'POST' && pathname === '/api/producer/art-text/generate') {
+    const body = await readBody(req);
+    const manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
+    const scenes = (manifest.scenes || []).filter(s => s.narration_text && s.duration_ms > 0);
+    if (!scenes.length) { res.writeHead(400); return res.end(JSON.stringify({error: '请先生成带旁白的分镜'})); }
+    const cfg = fs.existsSync(paths.promptConfigPath) ? JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8')) : {};
+    const input = scenes.map(s => ({id: s.scene_id, text: s.narration_text, duration: Math.round(s.duration_ms / 100) / 10}));
+    const response = await callOpenRouterText(renderProducerPrompt(paths.projectDir, 'P7_art_director'), JSON.stringify({creative_request: String(body.creative_request || '').slice(0, 1000), scenes: input}), {apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: cfg.textModel || cfg.model, maxTokens: 6000});
+    if (!response) { res.writeHead(502); return res.end(JSON.stringify({error: 'AI 生成失败：' + (globalThis.__lastWriterLlmError || '请检查模型配置')})); }
+    const result = extractJsonFromText(response);
+    if (!Array.isArray(result?.items)) { res.writeHead(502); return res.end(JSON.stringify({error: 'AI 返回格式不正确，请重试'})); }
+    const seen = new Set();
+    const items = result.items.flatMap(item => {
+      const scene = scenes.find(s => s.scene_id === item.scene_id);
+      const text = String(item.text || '').trim().slice(0, 40);
+      const anchor = String(item.anchor || '').trim();
+      const design = normalizeArtDesign(item.design);
+      if (!scene || !text || !anchor || !scene.narration_text.includes(anchor) || seen.has(scene.scene_id) || !design) return [];
+      seen.add(scene.scene_id);
+      const duration = scene.duration_ms / 1000;
+      const estimate = scene.narration_text.indexOf(anchor) / Math.max(1, scene.narration_text.length) * duration;
+      return [{scene_id: scene.scene_id, text, anchor, start_sec: Math.round(Math.max(0, Math.min(duration - 0.5, estimate)) * 10) / 10, duration_sec: Math.max(0.5, Math.min(Number(item.duration_sec) || 3, 6, duration)), reason: String(item.reason || '').slice(0, 160), design}];
+    });
+    res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'}); return res.end(JSON.stringify({ok: true, items}));
+  }
+
+  if (req.method === 'POST' && pathname === '/api/producer/art-text/apply') {
+    const body = await readBody(req);
+    if (!Array.isArray(body.items) || body.items.length > 200) { res.writeHead(400); return res.end(JSON.stringify({error:'提案格式不正确'})); }
+    const manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
+    const projectConfig = fs.existsSync(path.join(paths.dataDir, 'project-config.json')) ? JSON.parse(fs.readFileSync(path.join(paths.dataDir, 'project-config.json'), 'utf8')) : {};
+    const fps = Number(projectConfig.video_spec?.fps || 30);
+    const additions = [];
+    for (const item of body.items) {
+      const scene = (manifest.scenes || []).find(s => s.scene_id === item.scene_id);
+      const duration = Number(scene?.duration_ms) / 1000;
+      const text = String(item.text || '').trim();
+      const start = Number(item.start_sec), length = Number(item.duration_sec);
+      const design = normalizeArtDesign(item.design);
+      if (!scene || !text || text.length > 40 || !Number.isFinite(start) || !Number.isFinite(length) || start < 0 || start >= duration || length <= 0 || !design) {
+        res.writeHead(400); return res.end(JSON.stringify({error: '请检查文字、镜头时间和动画设置'}));
+      }
+      additions.push({scene, overlay: {text, design, reason:String(item.reason || '').slice(0, 160), start_frame:Math.round(start * fps), duration_frames:Math.max(1, Math.min(Math.round(length * fps), Math.round(duration * fps) - Math.round(start * fps))), source:'ai_art_text', anchor:String(item.anchor || '').slice(0, 150)}});
+    }
+    for (const {scene, overlay} of additions) {
+      scene.media_modifiers ||= {};
+      scene.media_modifiers.text_overlays ||= [];
+      scene.media_modifiers.text_overlays.push(overlay);
+    }
+    fs.writeFileSync(paths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    recompileProject(queryProject);
+    res.writeHead(200, {'Content-Type':'application/json; charset=utf-8'}); return res.end(JSON.stringify({ok:true, count:additions.length}));
+  }
+
   // 0. 工程列表 API
   if (req.method === 'GET' && pathname === '/api/projects') {
     const projects = listProjects();

@@ -23,6 +23,8 @@ export function defaultBgmConfig() {
   return {
     enabled: false,
     selected_track_id: null,
+    multi_track: false,
+    ai_plan: null,
     tracks: [],
     settings: {
       base_volume_db: -16,
@@ -191,6 +193,8 @@ export function loadBgmConfig(projectDir, publicDir) {
     ...defaults,
     enabled,
     selected_track_id: selectedTrackId,
+    multi_track: Boolean(raw.multi_track),
+    ai_plan: raw.ai_plan || null,
     tracks: syncedTracks,
     settings: normalizeBgmSettings(raw.settings || {}),
     segments: Array.isArray(raw.segments) ? raw.segments : [],
@@ -333,7 +337,7 @@ export function buildBgmAudit(config, manifest = {}, { modelUsed = 'deterministi
   if (!selectedTrack) {
     warnings.push('尚未选择或上传本地授权 BGM 音频文件。');
     score -= 35;
-  } else if (totalMs > 0 && selectedTrack.duration_ms && selectedTrack.duration_ms < totalMs && !settings.loop) {
+  } else if (!config?.multi_track && totalMs > 0 && selectedTrack.duration_ms && selectedTrack.duration_ms < totalMs && !settings.loop) {
     warnings.push(`所选 BGM 时长（${(selectedTrack.duration_ms / 1000).toFixed(1)}s）短于成片（${(totalMs / 1000).toFixed(1)}s），且未开启循环播放，后半段将静音。`);
     score -= 20;
   }
@@ -390,6 +394,8 @@ export function buildBgmAudit(config, manifest = {}, { modelUsed = 'deterministi
     ? `优良（基准 ${settings.base_volume_db} dB，淡入 ${(settings.fade_in_ms / 1000).toFixed(1)}s / 淡出 ${(settings.fade_out_ms / 1000).toFixed(1)}s）`
     : `需微调（基准 ${settings.base_volume_db} dB，淡入 ${settings.fade_in_ms}ms / 淡出 ${settings.fade_out_ms}ms）`;
 
+  if (config?.multi_track) warnings.push(config.ai_plan ? 'AI 已根据音乐片段制定选曲顺序，请试听成片确认效果。' : '多曲轮换基于时长和文件名中的 BPM，尚未进行 AI 音频分析。');
+
   const summary = !selectedTrack
     ? '请先上传或选择本地合法 BGM 音频，再同步至 Remotion。'
     : !config?.enabled
@@ -441,6 +447,40 @@ export function mergeSpeechWindows(captions = [], fps = 30, mergeGapMs = 250) {
   });
 }
 
+// Arrange available tracks to cover the film; overlap neighbouring clips for a smooth transition.
+// BPM from filenames is only a rough pacing hint, not an analysis of the music's mood.
+export function buildBgmPlaylist(tracks, segments, totalMs, fps = 30, aiOrder = []) {
+  const usable = tracks.filter(t => t.src && Number(t.duration_ms) > 4000);
+  if (!usable.length || totalMs <= 0) return [];
+  const result = [];
+  const used = new Map();
+  let start = 0;
+  let orderIndex = 0;
+  const validOrder = aiOrder.map(id => usable.find(t => t.track_id === id)).filter(Boolean);
+  const overlap = 2000;
+  while (start < totalMs) {
+    const seg = segments.find(s => start >= s.start_ms && start < s.end_ms) || segments[segments.length - 1];
+    const desired = seg?.energy === 'low' ? 90 : seg?.energy === 'high' ? 125 : 110;
+    const choices = usable.filter(t => usable.length === 1 || t.track_id !== result[result.length - 1]?.track_id);
+    choices.sort ( (a, b) => {
+      const score = t => (used.get(t.track_id) || 0) * 1000 + Math.abs(Number(String(t.title).match(/BPM\s*(\d+)/i)?.[1] || 110) - desired);
+      return score(a) - score(b);
+    });
+    let track = validOrder.length ? validOrder[orderIndex++ % validOrder.length] : choices[0];
+    if (validOrder.length && usable.length > 1 && track.track_id === result.at(-1)?.track_id) {
+      track = validOrder.find(t => t.track_id !== track.track_id) || choices[0];
+    }
+    used.set(track.track_id, (used.get(track.track_id) || 0) + 1);
+    const end = Math.min(totalMs, start + Number(track.duration_ms));
+    const startFrame = Math.round(start * fps / 1000);
+    const endFrame = Math.round(end * fps / 1000);
+    result.push({track_id: track.track_id, title: track.title, src: track.src, start_frame: startFrame, end_frame: endFrame, fade_frames: Math.round(overlap * fps / 1000)});
+    if (end >= totalMs) break;
+    start = end - overlap;
+  }
+  return result;
+}
+
 export function compileBgmRenderProp(projectDir, publicDir, manifest = {}, captions = [], fps = 30) {
   const config = loadBgmConfig(projectDir, publicDir);
   if (!config.enabled || !config.selected_track_id) return null;
@@ -486,6 +526,7 @@ export function compileBgmRenderProp(projectDir, publicDir, manifest = {}, capti
     fade_out_ms: settings.fade_out_ms,
     segments,
     speech_windows,
+    ...(config.multi_track ? { playlist: buildBgmPlaylist(config.tracks, normalizedSegments, totalMs, fps, config.ai_plan?.track_order || []) } : {}),
   };
 }
 

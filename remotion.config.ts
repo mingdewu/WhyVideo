@@ -2,23 +2,17 @@ import fs from "node:fs";
 import path from "node:path";
 import { Config } from "@remotion/cli/config";
 
-function resolveProjectPublicDir(): string {
-  const projectsRoot = path.join(process.cwd(), "projects");
-  const envProjectId = process.env.PROJECT_ID;
-  if (envProjectId) {
-    return path.join(projectsRoot, envProjectId, "public");
-  }
-  if (fs.existsSync(projectsRoot)) {
-    const dirs = fs
-      .readdirSync(projectsRoot, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && !d.name.startsWith("."))
-      .map((d) => d.name)
-      .sort();
-    if (dirs.length > 0) {
-      return path.join(projectsRoot, dirs[0], "public");
-    }
-  }
-  return path.join(process.cwd(), "public");
+// Remotion bundles this configuration as CommonJS; avoid importing modules
+// that depend on import.meta.url from here.
+const rootDir = process.cwd();
+const projectsRoot = path.join(rootDir, "projects");
+const projectIds = fs.existsSync(projectsRoot)
+  ? fs.readdirSync(projectsRoot, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && !entry.name.startsWith("."))
+      .map((entry) => entry.name).sort()
+  : [];
+const selectedId = process.env.PROJECT_ID || projectIds[0];
+if (selectedId && !/^[a-zA-Z0-9_-]+$/.test(selectedId)) {
+  throw new Error("工程 ID 只能包含字母、数字、下划线和连字符");
 }
-
-Config.setPublicDir(resolveProjectPublicDir());
+Config.setPublicDir(selectedId ? path.join(projectsRoot, selectedId, "public") : path.join(rootDir, "public"));

@@ -1,6 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'node:crypto';
+import { generateAiBgmPlan } from '../../bgm-ai.mjs';
+const bgmAiJobs = new Map();
 import {
   getPaths,
   readBody,
@@ -20,6 +22,7 @@ import {
   ALLOWED_AUDIO_EXTS,
   BGM_PUBLIC_SUBDIR,
   buildBgmAudit,
+  buildBgmPlaylist,
   buildDeterministicSegments,
   loadBgmConfig,
   normalizeBgmSegments,
@@ -94,6 +97,7 @@ const buildBgmApiResponse = (targetProj, configOverride = null, extra = {}) => {
     projectId: targetProj,
     config: {
       ...config,
+      playlist: config.multi_track ? buildBgmPlaylist(config.tracks, config.segments, totalDurationMs, 30, config.ai_plan?.track_order || []).map(c => ({ ...c, start_ms: Math.round(c.start_frame * 1000 / 30) })) : [],
       tracks: tracksWithUrl,
       audit: computedAudit,
     },
@@ -511,6 +515,7 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
     }
 
     config.tracks.splice(idx, 1);
+    if (config.ai_plan?.track_order?.includes(trackId)) config.ai_plan = null;
     if (config.selected_track_id === trackId) {
       config.selected_track_id = config.tracks[0]?.track_id || null;
     }
@@ -533,6 +538,47 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
         })
       )
     );
+  }
+
+  if (req.method === 'GET' && pathname === '/api/bgm/auto-status') {
+    const job = bgmAiJobs.get(queryProject);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ok:true, job:job || {status:'idle'}}));
+  }
+
+  if (req.method === 'POST' && pathname === '/api/bgm/auto') {
+    const body = await readBody(req);
+    const targetProj = body.projectId || queryProject;
+    const {curPaths, manifest, normalizedCfg} = loadBgmProjectContext(targetProj);
+    const existing = bgmAiJobs.get(targetProj);
+    if (existing?.status === 'running') {
+      res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ok:false,error:'此工程的 AI 配乐正在进行中。'}));
+    }
+    const config = loadBgmConfig(curPaths.projectDir, curPaths.publicDir);
+    const job = {status:'running',progress:'正在准备音乐与旁白',started_at:new Date().toISOString()};
+    bgmAiJobs.set(targetProj, job);
+    const model = String(body.bgmModel || normalizedCfg.bgmModel || '').trim();
+    const baseUrl = String(body.baseUrl || normalizedCfg.baseUrl || '').trim();
+    const apiKey = String(body.apiKey || normalizedCfg.apiKey || process.env.OPENROUTER_API_KEY || '').trim();
+    void (async () => {
+      try {
+        const ai = await generateAiBgmPlan({projectDir:curPaths.projectDir, publicDir:curPaths.publicDir,config,manifest,model,baseUrl,apiKey,onProgress:p=>{job.progress=p;}});
+        const latest = loadBgmConfig(curPaths.projectDir,curPaths.publicDir);
+        if (ai.track_order.some(id => !latest.tracks.some(t => t.track_id === id))) throw new Error('分析期间曲库发生变化，请重新生成配乐。');
+        latest.ai_plan=ai;
+        latest.segments=ai.segments;
+        latest.enabled=true;
+        latest.multi_track=true;
+        latest.selected_track_id=ai.track_order[0];
+        latest.audit=buildBgmAudit(latest,manifest,{modelUsed:model});
+        saveBgmConfig(curPaths.projectDir,latest);
+        job.compiledToRenderProps=safeRecompileBgmProject(curPaths,targetProj);
+        job.status='complete'; job.progress='AI 配乐方案已生成';
+      } catch(err) {job.status='error'; job.error=String(err.message || err);}
+    })();
+    res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
+    return res.end(JSON.stringify({ok:true,job}));
   }
 
   if (req.method === 'POST' && pathname === '/api/bgm/analyze') {
@@ -677,6 +723,8 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
         config.selected_track_id = body.selected_track_id;
       }
     }
+
+    if (body.multi_track !== undefined) config.multi_track = Boolean(body.multi_track);
 
     if (body.settings && typeof body.settings === 'object') {
       config.settings = normalizeBgmSettings({ ...config.settings, ...body.settings });

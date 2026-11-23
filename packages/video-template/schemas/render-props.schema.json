@@ -122,6 +122,17 @@
                 }
               }
             },
+            "playlist": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["track_id", "title", "src", "start_frame", "end_frame", "fade_frames"],
+                "properties": {
+                  "track_id": { "type": "string" }, "title": { "type": "string" }, "src": { "type": "string" },
+                  "start_frame": { "type": "integer" }, "end_frame": { "type": "integer" }, "fade_frames": { "type": "integer" }
+                }
+              }
+            },
             "speech_windows": {
               "type": "array",
               "items": {

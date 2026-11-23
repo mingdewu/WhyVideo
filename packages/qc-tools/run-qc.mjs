@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { resolveProject, scanProjectAssets } from "./scan-assets.mjs";
+import { resolveProject } from "./project-paths.mjs";
+import { scanProjectAssets } from "./scan-assets.mjs";
 
 const resolved = resolveProject();
 const { projectId, dataDir, outputDir, humanReviewLogPath } = resolved;

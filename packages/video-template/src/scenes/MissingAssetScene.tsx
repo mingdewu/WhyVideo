@@ -85,10 +85,10 @@ export const MissingAssetScene: React.FC<{ track: TimelineTrackProp }> = ({
               🔍 中文/英文检索词 (Search Queries)
             </div>
             <div style={{ fontSize: 20, color: "#E5E7EB", marginTop: 8 }}>
-              ZH: {track.search_queries_zh.join(" / ")}
+              ZH: {(track.search_queries_zh ?? []).join(" / ")}
             </div>
             <div style={{ fontSize: 18, color: "#9CA3AF", marginTop: 6 }}>
-              EN: {track.search_queries_en.join(" / ")}
+              EN: {(track.search_queries_en ?? []).join(" / ")}
             </div>
           </div>
 
@@ -104,10 +104,10 @@ export const MissingAssetScene: React.FC<{ track: TimelineTrackProp }> = ({
               ✅ 必现 / ❌ 禁现约束 (Must / Must Not Show)
             </div>
             <div style={{ fontSize: 19, color: "#E5E7EB", marginTop: 8 }}>
-              必现: {track.must_show.join("；")}
+              必现: {(track.must_show ?? []).join("；")}
             </div>
             <div style={{ fontSize: 19, color: "#FCA5A5", marginTop: 6 }}>
-              禁现: {track.must_not_show.join("；")}
+              禁现: {(track.must_not_show ?? []).join("；")}
             </div>
           </div>
         </div>
@@ -123,7 +123,9 @@ export const MissingAssetScene: React.FC<{ track: TimelineTrackProp }> = ({
           }}
         >
           <strong>Fallback 替代组件方案：</strong>
-          {track.fallback.component_spec}
+          {track.fallback?.component_spec ||
+            track.procedural_props?.component_spec ||
+            "（未指定）"}
         </div>
       </div>
     </AbsoluteFill>

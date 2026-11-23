@@ -10,39 +10,50 @@ WhyVideo 是一个基于 **Antigravity Agent Skills**、**Web 交互式创作与
 
 ```text
 WhyVideo/
-├── .agents/skills/
-│   ├── why_explainer_video_writer/      # 文案创作 Skill：资料提取、证据卡、5~7 章大纲与四段式撰写
-│   └── why_explainer_video_producer/    # 视觉制作 Skill：镜头切分、画面意图、素材匹配与 QC 质检
-│
+├── .agents/skills/                     # 文案与制作 Agent Skills、提示词和模板
 ├── packages/
-│   ├── video-template/                  # 通用 Remotion 渲染模板、视觉 Schema 与场景组件库
-│   │   ├── schemas/                     # asset-index / scene-manifest / render-props JSON Schema
-│   │   └── src/scenes/                  # BrollScene / PhotoMotionScene / TextOverlayLayer 等 9 类场景层
-│   │
-│   ├── qc-tools/                        # 一体化创作/分镜 Web 工作台与 CLI 工具集
-│   │   ├── ui-server.mjs                # 双标签一体化 Web 工作台 (Port 4000, npm run ui)
-│   │   ├── writer-prompts.mjs           # 文案 7 阶段提示词注册表、风格预设与工程级校验引擎
-│   │   ├── project-status.mjs           # 本地五阶段进度看板 CLI (npm run status)
-│   │   ├── sync-airtable.mjs            # Airtable 云端数据双向同步 (npm run airtable:sync)
-│   │   ├── generate-render-props.mjs    # 渲染参数编译器 (npm run compile:props)
-│   │   ├── scan-assets.mjs              # 本地资产存在性与分辨率扫描 (npm run scan:assets)
-│   │   ├── run-qc.mjs                   # 多维自动化质量检测 (npm run qc)
-│   │   ├── import-project-ymyp.mjs      # 文案/分镜工程导入脚本
-│   │   ├── dev-bridge.mjs               # 开发辅助桥接工具
-│   │   ├── synthesize-elevenlabs.mjs    # ElevenLabs 语音合成脚本
-│   │   └── synthesize-voicebox.mjs      # Voicebox 语音合成脚本
-│   │
-│   └── workflow-studio/                 # 独立长视频台本策划工作室 (Port 3200)
-│       ├── server.mjs
-│       └── index.html
-│
-└── projects/                            # 独立隔离的视频工程目录（数据 / 素材 / 成品输出）
-    ├── why_ryokan_small_dishes_001/     # 实战案例：日本温泉旅馆小碟子晚餐之谜
-    ├── why_ai_renamed_to_si_001/        # 扩展案例工程
-    └── why_preview/                     # 预览工程
-        ├── data/                        # brief / outline / final-script / scene-manifest / writer-prompts 等
-        ├── public/                      # narration.wav / captions.srt / assets
-        └── output/                      # preview.mp4 / final_video_1080p.mp4
+│   ├── qc-tools/
+│   │   ├── ui-server.mjs               # 主工作台 HTTP 入口（默认 4000）
+│   │   ├── project-paths.mjs           # Web / CLI / Remotion 共用工程选择和路径
+│   │   ├── ui-server/
+│   │   │   ├── lib/                   # 文案、素材、下载、配音、工程存储等服务
+│   │   │   ├── routes/                # 文案 / 制作 / 模型 / 素材 / 配音渲染接口
+│   │   │   └── public/
+│   │   │       ├── index.html         # 页面外壳与脚本加载顺序
+│   │   │       ├── partials/          # 制作台、文案台、模型、配音、BGM 等 HTML
+│   │   │       ├── js/                # 按表格、素材、时间线、语音、文案阶段拆分
+│   │   │       │   └── shared/        # 浏览器和 Node 共用的纯提示词规则
+│   │   │       └── styles.css
+│   │   ├── writer-prompts.mjs         # 文案提示词与审核契约
+│   │   ├── producer-prompts.mjs       # 分镜提示词与风格预设
+│   │   ├── cut-planner.mjs            # 智能切点与镜头节奏
+│   │   ├── narration-timing.mjs        # 旁白对齐与时间轴
+│   │   ├── align_whisper.py           # 完整旁白逐字对齐
+│   │   ├── transcribe_voice_worker.py # 短语音剪辑指令转写
+│   │   ├── bgm-manager.mjs            # 背景音乐与混音配置
+│   │   ├── media-continuity.mjs       # 连用素材的续播、速度及滤镜继承
+│   │   ├── generate-render-props.mjs   # 编译 Remotion 参数
+│   │   ├── render-project.mjs         # 工程渲染入口
+│   │   ├── scan-assets.mjs            # 素材扫描
+│   │   ├── run-qc.mjs                 # 视频质量检查
+│   │   ├── project-status.mjs         # 工程状态 CLI
+│   │   ├── sync-airtable.mjs          # Airtable 同步
+│   │   ├── synthesize-elevenlabs.mjs
+│   │   └── synthesize-voicebox.mjs
+│   ├── video-template/                # Remotion 组件、类型及 JSON Schema
+│   │   ├── schemas/
+│   │   └── src/scenes/
+│   ├── workflow-studio/               # 保留的旧工作室（3200），复用工程路径及剪辑编译器
+│   └── legacy-tools/                  # 归档的一次性工程导入脚本
+├── tests/system-refactor.test.mjs      # 连用、共享规则、页面装配和入口回归检查
+├── public/render-props.json            # 无本地工程时的预览回退参数
+├── exports/                            # 本地文稿，不纳入 Git
+└── projects/                           # 本地工程，不纳入 Git（保留 .gitkeep）
+    ├── <project_id>/
+    │   ├── data/                      # brief / outline / final-script / scene-manifest
+    │   ├── public/                    # 配音、字幕、素材、render-props.json
+    │   └── output/                    # 预览和成片
+    └── .archive/root-drafts/           # 从根目录归档的历史文稿，不参与工程扫描
 ```
 
 ---
@@ -61,7 +72,9 @@ npm run ui
 - **文案创作工坊 (`?tab=writer`)**：覆盖立项与资料调研 / `exports/` 一键切镜导入 → 原子化证据卡提取核验 → 5~7 章大纲审核门禁 → 四段式逐章撰写 → 全文统稿、De-AI 真人化修复与一键同步制作台。
 - **视觉分镜台 (`?tab=producer`)**：集分镜排版调优、本地素材拖拽即时检验、自然语言 AI 剪辑导演与模型指令调度于一体。
 
-### 2. 长视频台本策划与工作流工作室（Port 3200）
+### 2. 旧版工作流工作室（Port 3200，兼容保留）
+
+新工程使用上面的 4000 主入口。旧工作室保留原有界面与接口，工程路径和自然语言剪辑编译器复用主工作台实现。
 ```bash
 node packages/workflow-studio/server.mjs
 # 访问: http://localhost:3200
@@ -107,9 +120,22 @@ AIRTABLE_BASE_ID=your_base_id_here
 PORT=4000
 ```
 
-> 本地未配置在线大模型 Key 时，文案创作台内置 `mockStage` 免 Key Mock 链路，可用于调试全流程界面与本地持久化交互。
+> AI 文案与在线素材生成需要配置相应 Key；离线剪辑指令和画面提示词使用本地规则降级。
 
 ---
+
+## 本地维护与检查
+
+```bash
+node --test tests/system-refactor.test.mjs
+npx tsc --noEmit
+```
+
+工程选择统一遵循显式 `--project <id>`、`PROJECT_ID` 环境变量、按名称排序的首个本地工程。Web 可以通过 `?project=<id>` 和工程选择器指定；浏览器沿用此前选择。Remotion 通过 `PROJECT_ID` 指定工程。
+
+根目录历史文稿已归档到 `projects/.archive/root-drafts/`，本地内容保留。`exports/`、根目录 `why_*_script.md` 与 `final-script.json` 不再纳入 Git。`packages/legacy-tools/import-project-ymyp.mjs` 是写死来源与目标的旧迁移脚本，仅供历史查阅，不作为通用导入入口；请使用工作台文案导入功能。
+
+拆分后的前端仍使用 classic script 和现有全局按钮入口；`index.html` 中 `prompt-modals.js` 最后加载并执行初始化。新增模块需在初始化前加载。`partials/` 由服务端装配，直接双击 HTML 不会装配页面。
 
 ## 🌟 更新日志
 

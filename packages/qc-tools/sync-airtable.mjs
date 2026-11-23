@@ -7,6 +7,7 @@
 
 import fs from 'fs';
 import path from 'path';
+import { defaultProjectId, getProjectPaths } from './project-paths.mjs';
 
 // 优先从环境变量或本地 .env 读取，杜绝代码泄露 Token
 function loadEnv() {
@@ -26,9 +27,8 @@ function loadEnv() {
 }
 loadEnv();
 
-const defaultProjectId = 'why_ryokan_small_dishes_001';
-const projectId = process.argv[2] || defaultProjectId;
-const projectDir = path.resolve(process.cwd(), 'projects', projectId);
+const projectId = process.argv[2] || defaultProjectId();
+const { projectDir } = getProjectPaths(projectId);
 
 const token = process.env.AIRTABLE_API_KEY;
 const baseId = process.env.AIRTABLE_BASE_ID || 'app3VJhyGcpy08Gdf';

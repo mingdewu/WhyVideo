@@ -65,6 +65,7 @@ export interface TimelineTrackProp {
   media_modifiers?: {
     trim_start_sec?: number;
     trim_end_sec?: number;
+    playback_rate?: number;
     keep_original_audio?: boolean;
     original_audio_volume?: number;
     filters?: {
@@ -74,9 +75,12 @@ export interface TimelineTrackProp {
       sepia?: number;      // 0 ~ 1
       grayscale?: number;  // 0 ~ 1
       blur_px?: number;    // 模糊像素
+      hue_rotate_deg?: number;
+      invert?: number;
+      custom_css_filter?: string;
     };
     motion?: {
-      motion_type?: "zoom_in" | "zoom_out" | "pan_left" | "pan_right" | "pan_up" | "pan_down" | "static";
+      motion_type?: "zoom_in" | "zoom_out" | "pan_left" | "pan_right" | "pan_up" | "pan_down" | "shake" | "static";
       duration_sec?: number;
       scale_from?: number;
       scale_to?: number;
@@ -85,8 +89,16 @@ export interface TimelineTrackProp {
     };
     text_overlays?: Array<{
       text: string;
+      source?: string;
+      design?: {
+        x: number; y: number; font_size: number; font_weight: number;
+        text_color: string; background_color: string; background_opacity: number;
+        border_color: string; border_width: number; radius: number; padding_x: number;
+        padding_y: number; letter_spacing: number; glow: number;
+        keyframes: Array<{ at: number; x: number; y: number; scale: number; rotation: number; opacity: number }>;
+      };
       style?: "dramatic_shock" | "warning_badge" | "neon_glow" | "minimal_clean";
-      animation?: "slide_from_left" | "pop_bounce" | "fade_in" | "shock_shake";
+      animation?: "slide_from_left" | "pop_bounce" | "fade_in" | "shock_shake" | "float_in";
       start_frame?: number;
       duration_frames?: number;
       position?: "center" | "top_left" | "bottom_center" | "center_left";
@@ -139,6 +151,7 @@ export interface BgmTrackProp {
   fade_out_ms: number;
   segments?: BgmSegmentProp[];
   speech_windows?: BgmSpeechWindowProp[];
+  playlist?: {track_id: string; title: string; src: string; start_frame: number; end_frame: number; fade_frames: number}[];
 }
 
 export interface RenderPropsType {

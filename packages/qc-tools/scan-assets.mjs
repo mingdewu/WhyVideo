@@ -1,62 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 
-export const ROOT_DIR = process.cwd();
-export const PROJECTS_ROOT = path.join(ROOT_DIR, "projects");
-
-/**
- * Resolves `projects/<project_id>/` and its subpaths (`data/`, `public/`, `output/`, `human-review-log.json`).
- * Zero hardcoded topic or project names.
- */
-export function resolveProject(argv = process.argv.slice(2)) {
-  let requestedId = process.env.PROJECT_ID || null;
-
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === "--project" && argv[i + 1]) {
-      requestedId = argv[i + 1];
-      break;
-    }
-    if (argv[i].startsWith("--project=")) {
-      requestedId = argv[i].split("=")[1];
-      break;
-    }
-  }
-
-  if (!fs.existsSync(PROJECTS_ROOT)) {
-    throw new Error(`Projects root directory not found: ${PROJECTS_ROOT}`);
-  }
-
-  const availableProjects = fs
-    .readdirSync(PROJECTS_ROOT, { withFileTypes: true })
-    .filter((d) => d.isDirectory() && !d.name.startsWith("."))
-    .map((d) => d.name)
-    .sort();
-
-  if (availableProjects.length === 0) {
-    throw new Error(`No project directories found inside ${PROJECTS_ROOT}`);
-  }
-
-  const projectId = requestedId || availableProjects[0];
-  const projectDir = path.join(PROJECTS_ROOT, projectId);
-
-  if (!fs.existsSync(projectDir)) {
-    throw new Error(
-      `Project '${projectId}' not found in ${PROJECTS_ROOT}. Available: ${availableProjects.join(
-        ", "
-      )}`
-    );
-  }
-
-  return {
-    projectId,
-    projectDir,
-    dataDir: path.join(projectDir, "data"),
-    publicDir: path.join(projectDir, "public"),
-    outputDir: path.join(projectDir, "output"),
-    humanReviewLogPath: path.join(projectDir, "human-review-log.json"),
-    availableProjects,
-  };
-}
+import { resolveProject } from './project-paths.mjs';
+export { ROOT_DIR, PROJECTS_ROOT, resolveProject } from './project-paths.mjs';
 
 function inspectPng(filePath) {
   const buf = fs.readFileSync(filePath);

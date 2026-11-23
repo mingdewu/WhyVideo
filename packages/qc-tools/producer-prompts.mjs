@@ -25,6 +25,24 @@ export const PRODUCER_STYLE_PRESETS = [
 ];
 
 export const PRODUCER_PROMPT_REGISTRY = {
+  P7_art_director: {
+    template_id: 'P7_art_director', template_version: '1.0.0',
+    label: '7. AI 重点艺术字', full_label: 'P7 · 全文重点艺术字与动态设计',
+    description: '用于 AI 重点艺术字生成；AI 依据全文与用户要求独立设计文字、排版、颜色和动态关键帧。保存后下次生成生效。',
+    allowed_inputs: [], require_json: true,
+    raw_template: `你是中文解说视频的动态文字设计师。通读完整分镜旁白，挑选少量真正值得强调的主题、转折、数据与结论，而不是重复每一句字幕。每条写简短文字并逐字引用所属镜头中的连续原文作为 anchor，不能添加原文没有的事实。遵循用户额外的创意要求。根据每条内容的情绪，自主设计不同的文字排版、颜色、位置及入场、停留、离场动作；用关键帧组合设计动画，避免整片机械套用同一效果。考虑主体和下方字幕，避免遮挡，文字清晰可读。时间随镜头旁白自然出现。严格按以下要求返回 JSON。\n输出 JSON 对象：{"items":[{"scene_id":"镜头ID","text":"短文字","anchor":"本镜头旁白中的连续原文","reason":"创意说明","duration_sec":3,"design":{"x":50,"y":40,"font_size":70,"font_weight":900,"text_color":"#ffffff","background_color":"#111827","background_opacity":0.8,"border_color":"#ffffff","border_width":2,"radius":12,"padding_x":28,"padding_y":12,"letter_spacing":2,"glow":12,"keyframes":[{"at":0,"x":-180,"y":0,"scale":0.7,"rotation":-8,"opacity":0},{"at":0.2,"x":0,"y":0,"scale":1,"rotation":0,"opacity":1},{"at":0.8,"x":0,"y":0,"scale":1,"rotation":0,"opacity":1},{"at":1,"x":80,"y":-50,"scale":0.9,"rotation":5,"opacity":0}]}}]}。design.x/y 为画面百分比；keyframes 的 at 是0到1的时间比例，x/y 是相对位置像素偏移，scale 为缩放，rotation 为角度，opacity 为透明度。必须至少提供两帧且包含 at=0 和 at=1、按时间递增。颜色必须是 #RRGGBB。每条时长为镜头内 0.5 至 6 秒，不要每个镜头都做，不要输出代码。`,
+  },
+  P6_bgm_director: {
+    template_id: 'P6_bgm_director', template_version: '1.0.0',
+    label: '6. AI 自动配乐', full_label: 'P6 · AI 纪录片配乐总监',
+    description: '根据旁白时间轴和 AI 对音乐音频的分析，自动选择曲目顺序与情绪电平；保存后在下次自动配乐时生效。',
+    allowed_inputs: [], require_json: true,
+    raw_template: `你是一位有经验的中文知识纪录片音乐总监。你收到视频标题、逐镜旁白与时间轴，以及对每首真实音乐片段的音频分析。你的工作是直接做出完整配乐决定，不能把选曲工作交给用户。
+
+先理解全文叙事：问题、解释、转折与结尾的关系。按实际台词的情绪与信息密度，规划连续的情绪和电平段落。再依据每首音乐的实际情绪、能量、节奏和旁白干扰风险安排曲目顺序；优先保持叙事连贯和人声清晰，而不是为了频繁切歌制造变化。不要把 BPM、文件名或推测当作听到的事实。避免连续重复；确实需要重复时可隔曲复用。曲目会从头播放至结束或影片结束，并在相邻曲目之间交叉淡化；请据此考虑每首时长和全片需要。曲库无法完全匹配时选择最接近的，不要编造不存在的音乐。
+
+输出必须是合法 JSON，不要代码块。格式：{"summary":"简短说明配乐思路及不确定性","track_order":["输入曲库的track_id", "下一首track_id"],"segments":[{"label":"段落名","start_ms":0,"end_ms":10000,"mood":"实际叙事情绪","energy":"low|medium|high","target_db":-18,"music_style_hint":"与此段内容相符的音乐方向","reason":"结合具体旁白说明"}]}。track_order 按播放顺序填写有效 track_id，可以重复但不能相邻重复；系统在曲库顺序用尽后会继续循环。情绪段落应按时间排序、无间隙覆盖全片，target_db 在 -24 到 -14 之间。只根据提供的信息判断，不要声称听过完整成片。`,
+  },
   P1_keywords: {
     template_id: 'P1_keywords',
     template_version: '2.0.0',
