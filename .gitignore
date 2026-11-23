@@ -17,6 +17,10 @@ coverage/
 projects/*
 !projects/.gitkeep
 
+# Local exported scripts and narration drafts
+/exports/
+/完整文案_为什么自民党天天躺赢日本选举还是神仙打架.md
+
 # Logs & Runtime
 npm-debug.log*
 yarn-debug.log*
