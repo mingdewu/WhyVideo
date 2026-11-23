@@ -40,12 +40,18 @@ import {
 import { loadBgmConfig } from '../../bgm-manager.mjs';
 
 // Only bounded declarative design data reaches Remotion; model output is never executed.
-function normalizeArtDesign(value) {
+export function normalizeArtDesign(value) {
   if (!value || typeof value !== 'object' || !Array.isArray(value.keyframes) || value.keyframes.length < 2 || value.keyframes.length > 12) return null;
   const clamp = (v, min, max) => Math.min(max, Math.max(min, Number(v)));
   const ranges = {x:[8,92], y:[10,78], font_size:[28,130], font_weight:[400,900], background_opacity:[0,1], border_width:[0,12], radius:[0,80], padding_x:[0,80], padding_y:[0,50], letter_spacing:[-3,15], glow:[0,60]};
   const out = {};
-  for (const [key, range] of Object.entries(ranges)) { if (!Number.isFinite(Number(value[key]))) return null; out[key] = clamp(value[key], ...range); }
+  const weights = {normal: 400, bold: 700, bolder: 800, lighter: 400};
+  for (const [key, range] of Object.entries(ranges)) {
+    const raw = key === 'font_weight' && typeof value[key] === 'string'
+      ? (weights[value[key].trim().toLowerCase()] ?? value[key]) : value[key];
+    if (raw === null || raw === '' || raw === undefined || !Number.isFinite(Number(raw))) return null;
+    out[key] = clamp(raw, ...range);
+  }
   for (const key of ['text_color','background_color','border_color']) { if (!/^#[0-9a-f]{6}$/i.test(value[key] || '')) return null; out[key] = value[key]; }
   out.keyframes = [];
   for (const frame of value.keyframes) {
@@ -67,28 +73,51 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
     if (!scenes.length) { res.writeHead(400); return res.end(JSON.stringify({error: '请先生成带旁白的分镜'})); }
     const cfg = fs.existsSync(paths.promptConfigPath) ? JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8')) : {};
     const input = scenes.map(s => ({id: s.scene_id, text: s.narration_text, duration: Math.round(s.duration_ms / 100) / 10}));
-    const response = await callOpenRouterText(renderProducerPrompt(paths.projectDir, 'P7_art_director'), JSON.stringify({creative_request: String(body.creative_request || '').slice(0, 1000), scenes: input}), {apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: cfg.textModel || cfg.model, maxTokens: 6000});
-    if (!response) { res.writeHead(502); return res.end(JSON.stringify({error: 'AI 生成失败：' + (globalThis.__lastWriterLlmError || '请检查模型配置')})); }
-    const result = extractJsonFromText(response);
-    if (!Array.isArray(result?.items)) { res.writeHead(502); return res.end(JSON.stringify({error: 'AI 返回格式不正确，请重试'})); }
+    // Keep the full story available for context, but distribute detailed design output
+    // across bounded sections so a long video is not limited to one response.
+    const chunks = [];
+    for (let i = 0; i < scenes.length; i += 12) chunks.push(scenes.slice(i, i + 12));
+    const prompt = renderProducerPrompt(paths.projectDir, 'P7_art_director');
+    const creativeRequest = String(body.creative_request || '').slice(0, 1000);
+    const responses = new Array(chunks.length);
+    let nextChunk = 0;
+    async function generateSection() {
+      while (nextChunk < chunks.length) {
+        const sectionIndex = nextChunk++;
+        const section = chunks[sectionIndex];
+        const sectionIds = section.map(s => s.scene_id);
+        const response = await callOpenRouterText(prompt, JSON.stringify({creative_request: creativeRequest, full_story: input, section_index: sectionIndex + 1, total_sections: chunks.length, target_scene_ids: sectionIds, instruction: '全文仅供理解上下文。本次只为 target_scene_ids 的镜头生成艺术字，独立考虑本段所有值得强调的内容。允许同一镜头出现多条不同重点。'}), {apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, model: cfg.textModel || cfg.model, maxTokens: 6000});
+        if (!response) throw new Error(`第 ${sectionIndex + 1}/${chunks.length} 段生成失败：${globalThis.__lastWriterLlmError || '请检查模型配置'}`);
+        const parsed = extractJsonFromText(response);
+        if (!Array.isArray(parsed?.items)) throw new Error(`第 ${sectionIndex + 1}/${chunks.length} 段 AI 返回格式不完整，请重试`);
+        responses[sectionIndex] = parsed.items.filter(item => sectionIds.includes(item.scene_id));
+      }
+    }
+    try { await Promise.all(Array.from({length: Math.min(3, chunks.length)}, generateSection)); }
+    catch (error) { res.writeHead(502); return res.end(JSON.stringify({error: error.message})); }
     const seen = new Set();
-    const items = result.items.flatMap(item => {
+    const stats = { returned: responses.flat().length, unmatched: 0, invalid_design: 0, duplicate: 0 };
+    const items = responses.flat().flatMap(item => {
       const scene = scenes.find(s => s.scene_id === item.scene_id);
       const text = String(item.text || '').trim().slice(0, 40);
       const anchor = String(item.anchor || '').trim();
       const design = normalizeArtDesign(item.design);
-      if (!scene || !text || !anchor || !scene.narration_text.includes(anchor) || seen.has(scene.scene_id) || !design) return [];
-      seen.add(scene.scene_id);
+      const key = JSON.stringify([item.scene_id, anchor, text]);
+      if (!scene || !text || !anchor || !scene.narration_text.includes(anchor)) { stats.unmatched++; return []; }
+      if (!design) { stats.invalid_design++; return []; }
+      if (seen.has(key)) { stats.duplicate++; return []; }
+      seen.add(key);
       const duration = scene.duration_ms / 1000;
       const estimate = scene.narration_text.indexOf(anchor) / Math.max(1, scene.narration_text.length) * duration;
-      return [{scene_id: scene.scene_id, text, anchor, start_sec: Math.round(Math.max(0, Math.min(duration - 0.5, estimate)) * 10) / 10, duration_sec: Math.max(0.5, Math.min(Number(item.duration_sec) || 3, 6, duration)), reason: String(item.reason || '').slice(0, 160), design}];
+      return [{scene_id: scene.scene_id, text, anchor, start_sec: Math.round(Math.max(0, Math.min(duration - 0.5, estimate)) * 10) / 10, duration_sec: Math.max(0.5, Math.min(Number(item.duration_sec) || 3, duration)), reason: String(item.reason || '').slice(0, 160), design}];
     });
-    res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'}); return res.end(JSON.stringify({ok: true, items}));
+    if (!items.length && stats.returned) { res.writeHead(422, {'Content-Type': 'application/json; charset=utf-8'}); return res.end(JSON.stringify({error: `AI 返回了 ${stats.returned} 条提案，但未通过检查：${stats.unmatched} 条原文或镜头无法匹配，${stats.invalid_design} 条设计参数不完整，${stats.duplicate} 条重复。`, stats})); }
+    res.writeHead(200, {'Content-Type': 'application/json; charset=utf-8'}); return res.end(JSON.stringify({ok: true, items, stats}));
   }
 
   if (req.method === 'POST' && pathname === '/api/producer/art-text/apply') {
     const body = await readBody(req);
-    if (!Array.isArray(body.items) || body.items.length > 200) { res.writeHead(400); return res.end(JSON.stringify({error:'提案格式不正确'})); }
+    if (!Array.isArray(body.items) || body.items.length > 1000) { res.writeHead(400); return res.end(JSON.stringify({error:'提案格式不正确'})); }
     const manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
     const projectConfig = fs.existsSync(path.join(paths.dataDir, 'project-config.json')) ? JSON.parse(fs.readFileSync(path.join(paths.dataDir, 'project-config.json'), 'utf8')) : {};
     const fps = Number(projectConfig.video_spec?.fps || 30);

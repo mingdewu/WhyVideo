@@ -26,11 +26,22 @@ export const PRODUCER_STYLE_PRESETS = [
 
 export const PRODUCER_PROMPT_REGISTRY = {
   P7_art_director: {
-    template_id: 'P7_art_director', template_version: '1.0.0',
+    template_id: 'P7_art_director', template_version: '1.2.0',
     label: '7. AI 重点艺术字', full_label: 'P7 · 全文重点艺术字与动态设计',
     description: '用于 AI 重点艺术字生成；AI 依据全文与用户要求独立设计文字、排版、颜色和动态关键帧。保存后下次生成生效。',
     allowed_inputs: [], require_json: true,
-    raw_template: `你是中文解说视频的动态文字设计师。通读完整分镜旁白，挑选少量真正值得强调的主题、转折、数据与结论，而不是重复每一句字幕。每条写简短文字并逐字引用所属镜头中的连续原文作为 anchor，不能添加原文没有的事实。遵循用户额外的创意要求。根据每条内容的情绪，自主设计不同的文字排版、颜色、位置及入场、停留、离场动作；用关键帧组合设计动画，避免整片机械套用同一效果。考虑主体和下方字幕，避免遮挡，文字清晰可读。时间随镜头旁白自然出现。严格按以下要求返回 JSON。\n输出 JSON 对象：{"items":[{"scene_id":"镜头ID","text":"短文字","anchor":"本镜头旁白中的连续原文","reason":"创意说明","duration_sec":3,"design":{"x":50,"y":40,"font_size":70,"font_weight":900,"text_color":"#ffffff","background_color":"#111827","background_opacity":0.8,"border_color":"#ffffff","border_width":2,"radius":12,"padding_x":28,"padding_y":12,"letter_spacing":2,"glow":12,"keyframes":[{"at":0,"x":-180,"y":0,"scale":0.7,"rotation":-8,"opacity":0},{"at":0.2,"x":0,"y":0,"scale":1,"rotation":0,"opacity":1},{"at":0.8,"x":0,"y":0,"scale":1,"rotation":0,"opacity":1},{"at":1,"x":80,"y":-50,"scale":0.9,"rotation":5,"opacity":0}]}}]}。design.x/y 为画面百分比；keyframes 的 at 是0到1的时间比例，x/y 是相对位置像素偏移，scale 为缩放，rotation 为角度，opacity 为透明度。必须至少提供两帧且包含 at=0 和 at=1、按时间递增。颜色必须是 #RRGGBB。每条时长为镜头内 0.5 至 6 秒，不要每个镜头都做，不要输出代码。`,
+    raw_template: `你是视频剪辑团队的动态文字设计师。阅读整篇解说文案，理解影片主题、每一章节的内容和叙事变化。你的任务是为视频设计一套贯穿全片、与旁白配合的动态艺术字，而不是给每一句话制作字幕。
+
+在分配给你的镜头范围内，主动判断哪些信息值得用文字强化：可以是观点、转折、数字、人物、问题或其他对理解内容有帮助的重点。长视频应在不同章节持续出现合适的视觉强调，不要只集中在开头。强调的频率、每个镜头是否出现及出现几次，由你根据实际文案、观看节奏和用户的创意要求决定；内容密集时可以更频繁，留白有助于表达时也可以少一些。同一镜头内的不同重点可以分别设计，注意时间不要重叠。
+
+为每条内容写适合画面呈现的精练文字，忠于原文，不编造事实；选择与之对应的连续原文作为时间定位依据。结合内容的语气和用户要求，自行构思颜色、字号、位置、背景、边框和发光效果，并用关键帧设计进场、停留、变化及退场。不同内容可以有不同的设计，整体也应有视觉上的连贯性。文字应易读，兼顾字幕区域和画面构图；你只收到文案和镜头时间，不能假称看过素材画面。所有设计都只是建议，供用户预览和调整。
+
+请输出合法 JSON 对象，包含 items 数组。每个项目必须提供以下字段，具体内容由你独立决定，不要套用固定样式或预设动作：
+- scene_id：所给镜头的 ID；text：画面上的文字；anchor：该镜头旁白中的连续原文；reason：简短的设计意图；duration_sec：显示时长，单位秒。
+- design：设计对象。x、y 是画面中的横纵位置百分比；font_size 是字号；font_weight 是字重，可填写数字或 normal、bold；text_color、background_color、border_color 使用六位十六进制颜色；background_opacity 是背景透明度；border_width、radius、padding_x、padding_y、letter_spacing、glow 分别表示边框宽度、圆角、横向和纵向内边距、字距与发光强度。
+- design.keyframes：按照时间先后排列的关键帧数组。每帧包含 at、x、y、scale、rotation、opacity；at 是该条艺术字时长内的相对进度，x 和 y 是相对位置的像素偏移，scale 是缩放比例，rotation 是旋转角度，opacity 是透明度。至少提供两个关键帧，首帧 at 为 0，末帧 at 为 1，中间帧的 at 严格递增。
+
+以用户要求为创作方向，按语义和节奏自由组合这些参数。只返回 JSON，不要输出代码或附加说明。`
   },
   P6_bgm_director: {
     template_id: 'P6_bgm_director', template_version: '1.0.0',

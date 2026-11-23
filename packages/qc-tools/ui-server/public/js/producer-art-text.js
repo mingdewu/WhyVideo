@@ -33,14 +33,14 @@ let artTextDraft = [];
     async function generateArtText() {
       if (!activeProjectId) return;
       const btn = document.getElementById('artGenerateBtn'), status = document.getElementById('artTextStatus');
-      const project = activeProjectId; btn.disabled = true; status.textContent = 'AI 正在阅读全文并挑选重点，请稍候…';
+      const project = activeProjectId; btn.disabled = true; status.textContent = 'AI 正在阅读全文，并分段设计各章节的重点艺术字；长视频可能需要几分钟…';
       try {
         const response = await fetch('/api/producer/art-text/generate?project=' + encodeURIComponent(project), {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({creative_request: document.getElementById('artCreativeRequest').value})});
         const data = await response.json(); if (!response.ok) throw new Error(data.error || '生成失败');
         if (project !== activeProjectId) throw new Error('工程已切换，请在当前工程重新生成');
         artDraftProject = project;
         artTextDraft = data.items.map(item => ({...item, enabled: !(manifestData?.scenes || []).find(scene => scene.scene_id === item.scene_id)?.media_modifiers?.text_overlays?.length}));
-        renderArtTextDraft(); status.textContent = artTextDraft.length ? `已生成 ${artTextDraft.length} 条提案。已有艺术字的镜头默认不勾选；时间是镜头内的秒数。` : 'AI 没有返回可匹配原文的提案，请重试。';
+        renderArtTextDraft(); status.textContent = artTextDraft.length ? `已生成 ${artTextDraft.length} 条提案${data.stats && data.stats.returned > artTextDraft.length ? `（另有 ${data.stats.returned - artTextDraft.length} 条未通过检查）` : ""}。已有艺术字的镜头默认不勾选；时间是镜头内的秒数。` : 'AI 本次没有生成提案，请调整创意要求后重试。';
       } catch (err) { status.textContent = '生成失败：' + err.message; } finally { btn.disabled = false; }
     }
     async function applyArtText() {
