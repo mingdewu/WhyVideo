@@ -181,7 +181,10 @@ const timelineTracks = sceneManifest.scenes.map((scene) => {
     search_queries_en: scene.search_queries_en || [],
     must_show: scene.must_show || [],
     must_not_show: scene.must_not_show || [],
-    fallback: scene.fallback,
+    fallback: scene.fallback || {
+      fallback_scene_type: proceduralProps.fallback_scene_type || "data_card",
+      component_spec: proceduralProps.component_spec || "",
+    },
     approved_asset: resolvedAsset,
     media_modifiers: (scene.media_modifiers || scene.trim_start_sec !== undefined) ? {
       ...(scene.trim_start_sec !== undefined ? {
@@ -192,9 +195,9 @@ const timelineTracks = sceneManifest.scenes.map((scene) => {
     } : undefined,
     procedural_props: proceduralProps,
     transition: scene.transition || {
-      in: "cut",
-      out: "cut",
-      duration_frames: 10,
+      in: "fade",
+      out: "fade",
+      duration_frames: 12,
     },
   };
 });

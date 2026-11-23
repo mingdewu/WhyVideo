@@ -24,6 +24,12 @@ export interface ProceduralNodeProp {
   detail: string;
 }
 
+export interface SceneTransitionProp {
+  in?: "fade" | "cut" | "none" | string;
+  out?: "fade" | "cut" | "none" | string;
+  duration_frames?: number;
+}
+
 export interface TimelineTrackProp {
   scene_id: string;
   chapter_ref: string;
@@ -50,9 +56,9 @@ export interface TimelineTrackProp {
   search_queries_en: string[];
   must_show: string[];
   must_not_show: string[];
-  fallback: {
-    fallback_scene_type: string;
-    component_spec: string;
+  fallback?: {
+    fallback_scene_type?: string;
+    component_spec?: string;
   };
   approved_asset: ApprovedAssetProp | null;
   // AI 智能指令驱动的特效与裁剪修饰 (Media & Animation Modifiers)
@@ -95,6 +101,7 @@ export interface TimelineTrackProp {
     items: string[];
     nodes?: ProceduralNodeProp[];
   };
+  transition?: SceneTransitionProp;
 }
 
 export interface CaptionItemProp {

@@ -1,0 +1,2149 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhyVideo Studio - 视觉模型配置与生成工作台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="/studio/styles.css">
+</head>
+<body class="studio-page min-h-screen p-3 sm:p-5">
+  <div id="appRootShell" class="max-w-[1720px] mx-auto space-y-3">
+
+    <!-- 顶部导航栏与工程选择 -->
+    <header id="appHeader" class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] items-start gap-x-6 gap-y-2.5 pb-3 border-b border-gray-800">
+      <div class="min-w-0 space-y-2.5">
+        <!-- 第一行：左上角黄色标牌 + 制作工程黄色框 -->
+        <div class="flex flex-wrap items-center gap-2.5">
+          <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 shrink-0">
+            WhyVideo Studio
+          </span>
+          
+          <!-- 制作工程黄色选择框 -->
+          <div class="project-picker flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-xl border border-amber-500/40 shadow-inner relative z-20 shrink-0">
+            <label for="projectSelect" class="text-xs font-bold text-amber-300 shrink-0">📁 制作工程：</label>
+            <select id="projectSelect" onchange="onProjectSelectChange(this.value)" style="color-scheme: dark;" class="relative z-30 bg-gray-950 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400 cursor-pointer min-w-[180px] max-w-[300px]">
+              <!--SERVER_PROJECT_OPTIONS-->
+            </select>
+            <button id="btnConfirmProject" onclick="confirmSwitchProject()" class="px-3 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-gray-950 font-black text-xs shadow transition cursor-pointer shrink-0">确定</button>
+            <button id="btnDeleteProject" onclick="deleteCurrentProject()" class="px-2.5 py-1 rounded-lg bg-rose-950/70 hover:bg-rose-600 border border-rose-500/50 text-rose-300 hover:text-white text-xs font-bold transition cursor-pointer shrink-0" title="删除当前工程">🗑️ 删除</button>
+          </div>
+        </div>
+
+        <!-- 第二行：【文案创作台 / 视觉分镜台】导航切换胶囊 与 页面大标题 -->
+        <div class="flex flex-wrap sm:flex-nowrap items-center gap-3 pt-0.5 min-w-0">
+          <div class="workspace-tabs inline-flex p-1 bg-gray-950/90 rounded-xl border border-purple-500/40 shadow-inner shrink-0">
+            <button id="navTabWriter" type="button" onclick="switchWorkspaceTab('writer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
+              ✍️ 文案创作台 (Writer)
+            </button>
+            <button id="navTabProducer" type="button" onclick="switchWorkspaceTab('producer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow cursor-pointer">
+              🎬 视觉分镜台 (Producer)
+            </button>
+          </div>
+
+          <h1 id="projectHeaderTitle" class="text-base sm:text-lg font-black text-white truncate min-w-0">
+            视觉镜头工作台
+          </h1>
+        </div>
+      </div>
+
+      <!-- 右侧：对应工作台快捷动作组 -->
+      <div class="min-w-0 flex flex-col items-end gap-2 w-full">
+        <!-- 两种工作台共用固定高度的操作区，避免下方内容随按钮换行跳动 -->
+        <div class="min-h-[56px] w-full flex items-start justify-end">
+          <!-- 视觉分镜制作台快捷操作组 -->
+          <div id="producerHeaderActions" class="w-full flex flex-wrap content-start justify-end items-center gap-2">
+            <button type="button" id="producerPromptsModalBtn" onclick="openProducerPromptsModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-teal-600/20 hover:bg-teal-600/35 text-teal-300 border border-teal-500/40 transition shadow flex items-center gap-1.5 cursor-pointer" title="查看并全量自定义当前工程的视觉分镜台 AI 提示词模板（关键词、视频、实景图、卡片、口语剪辑）">
+              ⚙️ 提示词设置: <span id="producerPromptsBtnStatus" class="text-teal-200 font-extrabold">出厂默认</span>
+            </button>
+            <button type="button" onclick="toggleVisualModelModal('video')" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="查看与切换文案、视频、分镜、生图与关键词模型">
+              🪐 AI 全流程模型调度中心
+            </button>
+            <button onclick="toggleAudioModal()" id="btnOpenAudioModal" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="配置 AI 配音引擎（ElevenLabs 云端 / Voicebox 本地）">
+              🎙️ 配音引擎配置 <span id="audioProviderHeaderBadge" class="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-black/25 text-rose-100">Voicebox本地</span>
+            </button>
+            <button type="button" id="btnOpenBgmModal" onclick="toggleBgmModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-gray-950 transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="配置 AI 自适应 BGM 与自动人声避让 (Ducking)">
+              🎵 AI 自适应 BGM <span id="bgmHeaderBadge" class="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-black/20 text-gray-950">未启用</span>
+            </button>
+            <button onclick="saveAll()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 transition shadow-lg cursor-pointer">
+              💾 保存并同步 Remotion
+            </button>
+            <button type="button" id="startFinalRenderBtn" onclick="openFinalRenderConfirmModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="开始当前工程最终渲染（含已配置音频）">
+              🎬 最终渲染
+            </button>
+            <a href="http://localhost:3100" target="_blank" class="px-3 py-1.5 text-xs font-semibold rounded-xl card hover:border-blue-500 text-blue-300 transition">
+              🎬 Remotion (:3100) ↗
+            </a>
+          </div>
+
+          <!-- 文案创作台快捷操作组 (初始隐藏，切换到 Writer 时激活) -->
+          <div id="writerHeaderActions" class="hidden w-full flex flex-wrap content-start justify-end items-center gap-2.5">
+            <button type="button" onclick="openCreateBlankProjectModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 transition shadow flex items-center gap-1.5 cursor-pointer" title="创建一个全新的空白文案工程（不影响当前工程）">
+              ✨ 新建空白工程
+            </button>
+            <button type="button" id="writerPromptsModalBtn" onclick="openWriterPromptsModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-teal-600/20 hover:bg-teal-600/35 text-teal-300 border border-teal-500/40 transition shadow flex items-center gap-1.5 cursor-pointer" title="查看并全量自定义当前工程的文案提示词模板与风格预设（仅对本工程生效）">
+              ⚙️ 提示词设置: <span id="writerPromptsBtnStatus" class="text-teal-200 font-extrabold">出厂默认</span>
+            </button>
+            <button type="button" onclick="openWriterModelModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="点击随时查看、输入 Key，自由切换网关与文案大模型">
+              ⚙️ AI 写作模型与网关配置
+            </button>
+            <button type="button" onclick="openWriterImportDirectly()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
+              📥 导入已有文案 (exports/)
+            </button>
+            <button type="button" onclick="saveCurrentWriterPart()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gray-900 hover:bg-gray-800 text-amber-300 border border-amber-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
+              💾 保存当前草稿
+            </button>
+            <button type="button" onclick="syncWriterToProducerUI()" class="px-4 py-1.5 text-xs font-extrabold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 transition shadow-xl flex items-center gap-1.5 cursor-pointer">
+              🚀 文案定稿 · 一键流转至制作台
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- 视图 1：视觉分镜制作台 (Producer Workspace) -->
+    <div id="viewProducerContainer" class="space-y-3">
+
+    <!-- 渲染进度 / 成片反馈条（平时隐藏，仅在渲染中、报错或已有成片时按需出现） -->
+    <div id="renderStatusBanner" class="hidden card px-3.5 py-2 rounded-xl border border-emerald-500/25 space-y-2">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex flex-wrap items-center gap-2.5 min-w-0">
+          <span id="renderJobStatus" class="text-xs font-semibold text-emerald-300"></span>
+          <a id="renderJobOutput" class="hidden text-xs font-bold text-emerald-300 hover:text-emerald-200 underline" target="_blank" rel="noopener">↗ 新窗口打开成片</a>
+        </div>
+        <button type="button" id="toggleVideoPreviewBtn" onclick="toggleVideoPreviewDrawer()" class="hidden px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 text-[11px] font-bold transition cursor-pointer">
+          ▶ 预览成片
+        </button>
+      </div>
+      <div id="videoContainer" class="hidden pt-1"></div>
+      <pre id="renderJobError" class="hidden w-full whitespace-pre-wrap text-xs text-rose-300 bg-rose-950/30 border border-rose-500/30 rounded-lg p-2"></pre>
+    </div>
+
+    <!-- 紧凑单行信息栏：当前指定模型 + 可折叠全局画面规则 + 节拍统计 -->
+    <div class="card px-3.5 py-2 rounded-xl border border-gray-800/90 space-y-2">
+      <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <!-- 左侧：全局画面规则与批量关键词工具 -->
+        <div class="flex flex-wrap items-center gap-1.5 min-w-0">
+          <button type="button" id="toggleGlobalPromptBtn" onclick="toggleGlobalPromptDrawer()" class="px-2 py-0.5 rounded text-[11px] font-semibold text-gray-300 hover:text-white bg-gray-900/90 hover:bg-gray-800 border border-gray-700/80 transition cursor-pointer" title="展开或收起 AI 全局画面生成规则">
+            ✏️ 全局画面规则 <span id="globalPromptChevron">▸</span>
+          </button>
+          <button type="button" id="btnBatchExtractKeywords" onclick="batchExtractAllSearchKeywords()" class="px-2.5 py-0.5 rounded text-[11px] font-bold text-cyan-100 bg-cyan-700/70 hover:bg-cyan-600 border border-cyan-400/50 transition cursor-pointer shadow-sm" title="使用选定的关键词模型，为本工程全部镜头批量提炼纯中文素材搜索关键词">
+            ✨ 批量提炼全部镜头关键词
+          </button>
+        </div>
+
+        <!-- 右侧：紧凑内联节拍统计 -->
+        <div class="flex flex-wrap items-center gap-2 text-[11px] min-w-0 max-w-full lg:shrink-0">
+          <span class="px-2.5 py-0.5 rounded-lg bg-gray-900/90 border border-gray-700/80 text-gray-300">
+            总数 <strong class="text-white font-black" id="statTotal">-</strong>
+            <span class="text-gray-400 ml-1" id="statAvgDur">平均 -s/镜</span>
+          </span>
+          <span class="px-2.5 py-0.5 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-300" title="最适眼球留存">
+            🟢 ≤8.5s <strong class="font-black" id="statGold">-</strong>
+          </span>
+          <span class="px-2.5 py-0.5 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-300" title="建议点击 ✂️ 加切点">
+            🔴 >10s <strong class="font-black" id="statOver">-</strong>
+          </span>
+        </div>
+      </div>
+
+      <!-- 真实配音时间轴与关键词智能切点控制条 -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-1.5 border-t border-gray-800/70 text-[11px]">
+        <div class="flex flex-wrap items-center gap-2 min-w-0">
+          <span id="timingStatusBadge" class="px-2.5 py-0.5 rounded-lg bg-gray-900 border border-gray-700 text-gray-300 font-semibold">
+            📐 时间轴：等待载入...
+          </span>
+          <span id="timingRhythmBadge" class="hidden px-2 py-0.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300"></span>
+          <div id="mainNarrationAudioWrap" class="hidden flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-emerald-950/50 border border-emerald-500/40">
+            <span class="text-[10px] font-bold text-emerald-300 shrink-0">🎧 全片旁白试听:</span>
+            <audio id="mainNarrationAudioPlayer" controls preload="metadata" class="h-6 w-52 sm:w-64"></audio>
+          </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <button type="button" id="btnSynthFull" onclick="synthesizeFullNarration()" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white border border-emerald-400/40 font-extrabold transition cursor-pointer shadow-sm" title="使用已保存的配音引擎设置，自动合并全部分镜文案生成整部视频配音并对齐时间轴">
+            🎙️ 一键生成全片旁白
+          </button>
+          <button type="button" id="btnCancelVoiceboxMain" onclick="cancelVoiceboxJob()" class="hidden px-2.5 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-700 border border-rose-500/60 text-rose-200 font-bold transition cursor-pointer shadow-sm" title="取消当前正在运行的配音任务">
+            🛑 取消配音
+          </button>
+          <button type="button" id="btnAutoPlanCuts" onclick="autoPlanProjectCuts()" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-indigo-600 to-purple-600 hover:brightness-110 text-white border border-purple-400/40 font-bold transition cursor-pointer shadow-sm" title="保留既有素材，自动把换画面点对齐到关键词说出时刻或停顿处，并切分过长镜头">
+            ⚡ 按关键词/停顿智能排切点
+          </button>
+        </div>
+      </div>
+
+      <!-- 关键词/停顿智能排切点进度条 -->
+      <div id="autoPlanCutsProgressWrap" class="hidden pt-1.5 border-t border-gray-800/70 space-y-1">
+        <div class="flex items-center justify-between text-[11px] text-indigo-200">
+          <span id="autoPlanCutsProgressText" class="truncate font-semibold">⏳ 准备按关键词/停顿排切点...</span>
+          <span id="autoPlanCutsProgressPct" class="shrink-0 font-mono font-bold text-purple-300">0%</span>
+        </div>
+        <div class="w-full h-1.5 rounded-full bg-gray-900 border border-gray-800 overflow-hidden">
+          <div id="autoPlanCutsProgressBar" class="h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 rounded-full transition-all duration-300" style="width: 0%;"></div>
+        </div>
+      </div>
+
+      <!-- 默认收起的全局画面规则输入框 -->
+      <div id="globalPromptDrawer" class="hidden pt-1 border-t border-gray-800/80">
+        <textarea id="globalPromptInput" rows="2" class="w-full px-3 py-1.5 text-xs rounded-lg bg-gray-950 border border-gray-700 text-gray-100 focus:outline-none focus:border-purple-500" placeholder="在此输入你的 AI 画面生成规则..."></textarea>
+      </div>
+    </div>
+
+    <!-- 视觉镜头主表格 -->
+    <div class="card rounded-2xl overflow-hidden border border-gray-800">
+      <div id="producerSceneList" class="scene-list max-h-[calc(100vh-210px)] min-h-[520px] overflow-y-auto overflow-x-auto">
+        <table class="w-full lg:table-fixed text-left text-xs db-table border-collapse" role="table" aria-label="分镜列表">
+          <thead role="rowgroup">
+            <tr class="text-gray-300 font-bold uppercase tracking-wider text-[11px]" role="row">
+              <th role="columnheader" scope="col" class="p-3 lg:w-44 text-center">镜头序号 / 时长</th>
+              <th role="columnheader" scope="col" class="p-3">当前镜头覆盖的旁白文本（支持点字切画面）</th>
+              <th role="columnheader" scope="col" class="p-3 lg:w-36">画面方式</th>
+              <th role="columnheader" scope="col" class="p-3 lg:w-[40%]">📥 素材上传与 AI 剪辑 / 🎨 AI 生成画面（随画面方式切换）</th>
+              <th role="columnheader" scope="col" class="p-3 lg:w-32 text-center">节拍调整</th>
+            </tr>
+          </thead>
+          <tbody id="tableBody" class="lg:divide-y lg:divide-gray-800" role="rowgroup">
+          </tbody>
+        </table>
+      </div>
+
+      <div class="scene-save-bar p-3 bg-gray-900/60 border-t border-gray-800 flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span class="text-[11px] text-gray-400">💡 点击镜头内的生成按钮，可使用指定的 AI 模型查看 16:9 画面预览。</span>
+        </div>
+        <button onclick="saveAll()" class="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-gray-950 text-xs font-bold transition">
+          💾 保存修改并同步渲染
+        </button>
+      </div>
+    </div>
+
+  </div>
+  <!-- 视觉分镜制作台 (Producer Workspace) 结束 -->
+
+  <!-- 视图 2：✍️ 知识长视频文案创作工坊 (Writer Workspace - 深度落地 WhyExplainerVideoWriter 标准) -->
+  <div id="viewWriterContainer" class="space-y-5 hidden">
+    
+    <!-- 顶部五阶段导航与人工审核门禁指示条 (单屏紧凑版) -->
+    <div class="card p-2.5 rounded-2xl border border-purple-500/30 bg-gradient-to-r from-gray-950 via-purple-950/20 to-gray-950 shrink-0">
+      <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-gray-800/80">
+        <div class="flex items-center gap-2">
+          <span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-purple-500/20 text-purple-300 border border-purple-500/40" title="遵循知识型纪录片规范 · 零编造 · 证据卡核验 · 5~7章大纲 · 四段式单章受控撰写 · 单一终局结尾">
+            ✍️ 文案策划工作流
+          </span>
+          <span class="hidden xl:inline text-[11px] text-gray-400">
+            零编造 · 证据卡核验 · 5~7章大纲 · 四段式单章 · 单一终局结尾
+          </span>
+        </div>
+        <div class="flex items-center gap-2 text-xs flex-wrap">
+          <span id="writerPersistenceStatusBadge" class="px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="显示当前文案创作台内容是否已写入本地 projects/<projectId>/data/">
+            ✅ 已同步本地
+          </span>
+          <span class="text-gray-400">当前阶段：</span>
+          <span id="writerCurrentStepBadge" class="px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+            Step 1 · 立项与资料输入
+          </span>
+        </div>
+      </div>
+
+      <!-- 五阶段按钮指示器 (单行紧凑胶囊) -->
+      <div id="writerSteps" class="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
+        <button type="button" onclick="setWriterStep(1, true)" id="stepBtn1" aria-current="step" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-purple-600 text-white font-bold flex items-center justify-center text-[11px] shrink-0">1</span>
+          <div class="text-xs font-bold truncate">立项与资料</div>
+        </button>
+
+        <button type="button" onclick="setWriterStep(2, true)" id="stepBtn2" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">2</span>
+          <div class="text-xs font-bold truncate">证据卡提取核验</div>
+        </button>
+
+        <button type="button" onclick="setWriterStep(3, true)" id="stepBtn3" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">3</span>
+          <div class="text-xs font-bold truncate">完整大纲策划</div>
+        </button>
+
+        <button type="button" onclick="setWriterStep(4, true)" id="stepBtn4" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">4</span>
+          <div class="text-xs font-bold truncate">逐章撰写与润色</div>
+        </button>
+
+        <button type="button" onclick="setWriterStep(5, true)" id="stepBtn5" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">5</span>
+          <div class="text-xs font-bold truncate">全文统稿与定稿</div>
+        </button>
+      </div>
+    </div>
+
+    <!-- 主工作区：审阅态左 2 列 (~17%) + 右 10 列 (~83%)，编辑参数态左 4 列 + 右 8 列 -->
+    <div id="writerMainGrid" class="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 min-h-0">
+      
+      <!-- 左栏 (审阅态 2 Cols / 编辑态 4 Cols) -->
+      <div id="writerLeftCol" class="lg:col-span-2 lg:h-full lg:overflow-y-auto pr-0.5 space-y-2.5">
+
+        <!-- 模式 A：已有文案工程 · 工程文案实况摘要卡 (Project Script Inspector · 紧凑版) -->
+        <div id="wInspectorCard" class="hidden card p-3 rounded-2xl border border-purple-500/40 bg-gradient-to-b from-purple-950/30 via-gray-950 to-gray-950 space-y-2.5 shadow-xl">
+          <div class="flex flex-wrap items-center justify-between gap-1.5 pb-2 border-b border-gray-800/90">
+            <span class="text-xs font-black text-purple-300 flex items-center gap-1">
+              <span>📊 实况概览</span>
+            </span>
+            <span id="wInspectorStatusPill" class="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold truncate max-w-full">
+              已有文案 · 审阅模式
+            </span>
+          </div>
+
+          <div class="space-y-0.5 min-w-0">
+            <div class="text-[10px] font-mono text-gray-400 truncate" id="wInspectorProjectId">why_project</div>
+            <div class="text-xs font-black text-white leading-snug break-words" id="wInspectorTitle">加载中...</div>
+          </div>
+
+          <!-- 紧凑单列工程统计 -->
+          <div class="space-y-1.5">
+            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-gray-900/90 border border-gray-800">
+              <span class="text-[11px] text-gray-400">📝 字数</span>
+              <span class="text-xs font-black text-white font-mono" id="wInspectorWords">-</span>
+            </div>
+            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-gray-900/90 border border-gray-800">
+              <span class="text-[11px] text-gray-400">⏱️ 时长</span>
+              <span class="text-xs font-black text-amber-300 font-mono" id="wInspectorDuration">-</span>
+            </div>
+            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-gray-900/90 border border-gray-800">
+              <span class="text-[11px] text-gray-400">📑 章节</span>
+              <span class="text-xs font-black text-purple-300 font-mono" id="wInspectorChapters">-</span>
+            </div>
+            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-gray-900/90 border border-gray-800">
+              <span class="text-[11px] text-gray-400">🗂️ 资料</span>
+              <span class="text-xs font-black text-cyan-300 font-mono" id="wInspectorEvidence">-</span>
+            </div>
+          </div>
+
+          <!-- 展开立项参数与资料抽屉 + 安全新建/重置操作 -->
+          <div class="pt-2 border-t border-gray-800 space-y-1.5">
+            <button type="button" onclick="toggleWriterSetupDrawer()" id="btnToggleWriterSetupDrawer" class="w-full py-1.5 px-2.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-700 text-[11px] font-semibold text-gray-300 flex items-center justify-between gap-1 transition cursor-pointer">
+              <span class="truncate">⚙️ 参数与资料</span>
+              <span id="wSetupDrawerArrow" class="text-[10px] text-gray-400 shrink-0">▼ 展开</span>
+            </button>
+
+            <button type="button" onclick="openCreateBlankProjectModal()" class="w-full py-1.5 px-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer">
+              <span>✨ 新建空白工程</span>
+            </button>
+            <button type="button" onclick="openResetWriterConfirmModal()" class="w-full py-1.5 px-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/50 border border-rose-500/40 text-rose-300 text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer">
+              <span>🔄 清零重写文案</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 模式 B（或展开抽屉后）：工程基础设定与资料库 -->
+        <div id="wWriterSetupDrawer" class="space-y-4">
+        
+        <!-- 工程基础卡片 -->
+        <div id="wWriterBasicCard" class="card p-4 rounded-2xl border border-gray-800 space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-gray-800">
+            <span class="text-xs font-bold text-white flex items-center gap-1.5">
+              <span>📌 当前工程信息</span>
+            </span>
+            <span id="writerProjectIdBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-800 text-purple-300 font-bold">
+              why_project
+            </span>
+          </div>
+
+          <div>
+            <label class="block text-xs font-bold text-gray-300 mb-1">🏷️ 视频核心标题（提问形式）</label>
+            <input type="text" id="wInputTitle" placeholder="例如：为什么日本温泉旅馆的晚餐常常是一小碟一小碟？"
+              class="w-full bg-gray-950 text-white font-bold text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+          </div>
+
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-[11px] text-gray-400 mb-1">⏱️ 目标时长 (分钟)</label>
+              <input type="number" id="wInputDuration" value="25" min="5" max="60"
+                class="w-full bg-gray-950 text-white font-mono text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+            </div>
+            <div>
+              <label class="block text-[11px] text-gray-400 mb-1">📑 规划章节数</label>
+              <input type="number" id="wInputChapterCount" value="6" min="5" max="7"
+                class="w-full bg-gray-950 text-white font-mono text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+            </div>
+          </div>
+
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-[11px] text-gray-400">🤖 写作所用大模型 (OpenRouter / 统一网关)</label>
+              <button type="button" onclick="openWriterModelModal()" class="text-[10px] text-purple-400 hover:text-purple-300 underline flex items-center gap-0.5 cursor-pointer">
+                ⚙️ 配置网关与 Key
+              </button>
+            </div>
+            <select id="wInputModel" onchange="syncWriterModelToConfig(this.value)" class="w-full bg-gray-950 text-white text-xs px-2.5 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500">
+              <option value="deepseek/deepseek-chat" selected>DeepSeek V3 / Chat (逻辑严谨 · 证据卡推荐)</option>
+              <option value="anthropic/claude-sonnet-4">Claude Sonnet 4 (纪录片文学文风)</option>
+              <option value="google/gemini-2.5-pro">Gemini 2.5 Pro (超长上下文事实考证)</option>
+              <option value="google/gemini-2.5-flash">Gemini 2.5 Flash (极速构思)</option>
+              <option value="qwen/qwen-2.5-72b-instruct">通义千问 Qwen 2.5 72B</option>
+              <option value="meta-llama/llama-3.3-70b-instruct">Llama 3.3 70B Instruct</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 文案快速导入入口 (仅新建/空白工程显示) -->
+        <div id="wWriterImportQuickCard" class="card p-3.5 rounded-2xl border border-violet-500/40 bg-gradient-to-r from-violet-950/40 to-indigo-950/30 space-y-2">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-black text-violet-300 flex items-center gap-1.5">
+              <span>📥 本地已有文案？</span>
+            </span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/20 text-violet-300 border border-violet-500/30">
+              免从头生成
+            </span>
+          </div>
+          <p class="text-[11px] text-gray-300 leading-relaxed">
+            本地已有定稿文案？一键直接载入并自动切分分镜。
+          </p>
+          <button type="button" onclick="switchStep1SubTab('import')" class="w-full py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow flex items-center justify-center gap-1.5 cursor-pointer">
+            📝 打开文案导入中心 (exports/ 库)
+          </button>
+        </div>
+
+        <!-- 原始资料与文献输入区 (半自动事实考证体系：支持自主录入或智能自动调研) -->
+        <div id="wWriterMaterialsCard" class="card p-4 rounded-2xl border border-gray-800 space-y-2.5">
+          <div class="flex items-center justify-between pb-2 border-b border-gray-800">
+            <span class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+              <span>📚 原始研究资料与考证来源</span>
+            </span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold">半自动调查 · 真实有据</span>
+          </div>
+
+          <p class="text-[11px] text-gray-400 leading-relaxed">
+            支持手动粘贴历史文献，亦可点击下方一键联网调查事实真相并自动充实资料库，无需每次手动搜集。
+          </p>
+
+          <textarea id="wInputMaterials" rows="3" placeholder="可手动粘贴文献记载、统计数字，亦可留空——系统将自动联网考证事实真相并补充资料..."
+            class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-cyan-500 font-mono leading-relaxed resize-y"></textarea>
+
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
+            <span id="wMaterialWordCount" class="text-[11px] text-gray-400">已就绪资料：0 字</span>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="loadSampleMaterialToWriter()" class="text-xs text-purple-400 hover:underline cursor-pointer">
+                💡 示例资料
+              </button>
+              <button type="button" onclick="aiAutoResearchMaterials()" id="btnAutoResearchMaterials" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-cyan-600/30 hover:bg-cyan-600/60 text-cyan-200 border border-cyan-400/50 transition flex items-center gap-1 cursor-pointer shadow-sm">
+                <span>🌐 联网调查事实补充资料</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        </div> <!-- /#wWriterSetupDrawer -->
+
+      </div>
+
+      <!-- 右栏 (审阅态 10 Cols / 编辑态 8 Cols)：阶段执行与人工审核看板 -->
+      <div id="writerRightCol" class="lg:col-span-10 lg:h-full min-h-0 flex flex-col">
+
+        <!-- ==================== Step 1 面板：立项与设问定义 (Brief) / 本地文案直接导入 ==================== -->
+        <div id="wPanelStep1" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2.5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
+            <div>
+              <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <span>📋 阶段 1：立项设问与文案建项</span>
+              </h3>
+              <p class="text-xs text-gray-400 mt-0.5">支持从 0 全新设问立项，或直接从本地 exports/ 库导入已有定稿文案</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="button" id="btnStep1ResetWriter" onclick="openResetWriterConfirmModal()" class="hidden px-3 py-1.5 rounded-xl bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/40 text-rose-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="将当前工程的文案表单清零，从第一步空内容重新开始">
+                🔄 清零重做文案
+              </button>
+              <button type="button" onclick="openCreateBlankProjectModal()" class="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="新建一个全新的空白工程（保留当前工程内容）">
+                ✨ 新建空白工程
+              </button>
+              <!-- 双模式切换 Tab 胶囊 -->
+              <div class="inline-flex p-1 bg-gray-950 rounded-xl border border-purple-500/30">
+                <button type="button" id="wStep1SubTabCreateBtn" onclick="switchStep1SubTab('create')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-purple-600 text-white shadow cursor-pointer">
+                  ✍️ 全新设问立项
+                </button>
+                <button type="button" id="wStep1SubTabImportBtn" onclick="switchStep1SubTab('import')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
+                  📂 导入本地已有文案 (exports/)
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 子模式 1：从 0 全新设问立项 (Brief Setup) -->
+          <div id="wStep1SubViewCreate" class="space-y-2.5 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto">
+            <div class="flex flex-wrap items-center justify-between gap-2 bg-purple-950/20 p-2.5 rounded-xl border border-purple-500/30 shrink-0">
+              <div class="text-xs text-purple-200">
+                <span class="font-bold">🎯 标准 5 步流程：</span>基于左侧考证资料，提炼核心设问与开篇答案
+              </div>
+              <div class="flex items-center gap-2 flex-wrap">
+                <button type="button" onclick="saveWriterPartManual('brief')" class="px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                  <span>💾 保存立项与资料</span>
+                </button>
+                <button type="button" onclick="aiGenerateBrief()" id="btnAiBrief" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                  <span>🤖 AI 分析资料并生成 Brief</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="space-y-2.5 flex-1 min-h-0 flex flex-col justify-center">
+              <div>
+                <label class="block text-xs font-bold text-gray-300 mb-1">🎯 全片核心问题 (Core Question)</label>
+                <input type="text" id="wBriefCoreQuestion" placeholder="例如：为什么富士山能跨越千年成为日本的国家精神象征，并在全世界享誉盛名？"
+                  class="w-full bg-gray-950 text-white text-xs px-3 py-1.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+              </div>
+
+              <div>
+                <label class="block text-xs font-bold text-gray-300 mb-1">⚡ 开篇前2分钟简短直接答案 (Immediate Short Answer)</label>
+                <textarea id="wBriefShortAnswer" rows="2" placeholder="先用 2~4 句话给出客观清晰的答案框架，拒绝卖关子拖延，让观众一听就懂核心因果链条..."
+                  class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500 font-sans leading-relaxed"></textarea>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                <div>
+                  <label class="block text-xs font-bold text-gray-300 mb-1">🗺️ 讨论范围与地理/历史跨度</label>
+                  <input type="text" id="wBriefScope" placeholder="例如：从公元864年贞观喷发至2024年现代过度旅游治理"
+                    class="w-full bg-gray-950 text-white text-xs px-3 py-1.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-300 mb-1">🚫 内容禁区与排外排除规范</label>
+                  <input type="text" id="wBriefTaboos" value="严禁模仿特定博主口吻、零编造数据年代、禁用排外与煽情口吻"
+                    class="w-full bg-gray-950 text-white text-xs px-3 py-1.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+                </div>
+              </div>
+            </div>
+
+            <div class="pt-2 border-t border-gray-800 flex items-center justify-between shrink-0">
+              <span class="text-xs text-gray-400">💡 确认立项信息无误后，即可进入证据卡提取</span>
+              <button type="button" onclick="setWriterStep(2)" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer">
+                <span>👉 进入阶段 2：提取证据卡</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 子模式 2：直接导入本地已有文案 (exports/ 库快速切镜建项) -->
+          <div id="wStep1SubViewImport" class="space-y-2.5 flex-1 min-h-0 flex flex-col hidden">
+            <div class="p-3 rounded-xl bg-gradient-to-r from-violet-950/40 via-indigo-950/30 to-gray-950 border border-violet-500/40 space-y-1.5 shrink-0">
+              <div class="flex items-center justify-between">
+                <div class="text-xs font-black text-violet-300 flex items-center gap-1.5">
+                  <span>📂 本地 exports/ 文案库扫描</span>
+                  <span class="px-2 py-0.5 rounded-full text-[10px] bg-violet-500/20 text-violet-200 border border-violet-500/30">
+                    一键切镜建项
+                  </span>
+                </div>
+                <button type="button" onclick="loadStep1ScannedScripts()" class="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1 cursor-pointer">
+                  🔄 刷新 exports/ 目录
+                </button>
+              </div>
+              <p class="text-[11px] text-gray-400 leading-snug">
+                无需从头策划，直接选择下方已完成的深度长片文案（包含《富士山》《美国AI改名SI》等），系统将自动进行 4.0 ~ 8.0 秒智能节奏切镜并建立工程：
+              </p>
+            </div>
+
+            <!-- 扫描到的文案列表容器 -->
+            <div id="wStep1ScannedList" class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
+              <div class="text-center py-8 text-gray-500 text-xs">正在扫描 exports/ 文案...</div>
+            </div>
+
+            <!-- 当前选中导入的文案参数与切镜配置 -->
+            <div id="wStep1ImportConfigBox" class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2 shrink-0 hidden">
+              <div class="flex items-center justify-between pb-2 border-b border-gray-800">
+                <span class="text-xs font-bold text-amber-300 flex items-center gap-1">
+                  <span>⚡ 切镜与建项设定</span>
+                </span>
+                <span id="wStep1SelectedSummary" class="text-xs text-purple-300 font-mono"></span>
+              </div>
+
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-xs font-bold text-gray-300 mb-1">🆔 项目英文 ID</label>
+                  <input type="text" id="wStep1ImportProjId" class="w-full bg-gray-900 text-white font-mono text-xs px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-violet-500" />
+                </div>
+                <div>
+                  <label class="block text-xs font-bold text-gray-300 mb-1">🏷️ 视频中文标题</label>
+                  <input type="text" id="wStep1ImportProjTitle" class="w-full bg-gray-900 text-white font-bold text-xs px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-violet-500" />
+                </div>
+              </div>
+
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs text-gray-400">⏱️ 切镜步长：</span>
+                  <select id="wStep1ImportDuration" onchange="previewStep1ImportSegmentation()" class="bg-gray-900 text-white text-xs px-2 py-1 rounded border border-gray-700">
+                    <option value="5.5" selected>标准长视频节奏 (4.0 ~ 7.5 秒/镜 · 推荐)</option>
+                    <option value="4.2">紧凑信息流节奏 (3.5 ~ 5.5 秒/镜)</option>
+                    <option value="7.0">沉稳纪录片节奏 (5.5 ~ 9.0 秒/镜)</option>
+                  </select>
+                </div>
+                <div id="wStep1ImportPreviewCount" class="text-xs text-emerald-400 font-bold"></div>
+              </div>
+
+              <div class="pt-2 flex flex-wrap justify-end gap-2 border-t border-gray-800">
+                <button type="button" onclick="loadSelectedScriptToStep5ForHumanize()" class="px-4 py-2 text-xs font-bold rounded-xl card hover:border-violet-500 text-violet-300 transition flex items-center gap-1.5 cursor-pointer">
+                  ✨ 载入阶段 5 进行去 AI 味修复 ➔
+                </button>
+                <button type="button" onclick="confirmStep1ImportToProducer()" id="btnStep1ImportExec" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
+                  🚀 确认切镜并直接进入制作台
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== Step 2 面板：证据卡提取与核验 (Evidence Cards) ==================== -->
+        <div id="wPanelStep2" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2.5 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
+            <div>
+              <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <span>🗂️ 阶段 2：证据卡提取与事实分型 (Evidence Cards Review)</span>
+              </h3>
+              <p class="text-[11px] text-gray-400">单一主张原则 · 严格区分事实(verified_fact)与传说(legend_or_anecdote)</p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button type="button" onclick="saveStep2EvidenceCards()" class="px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                <span>💾 保存证据卡</span>
+              </button>
+              <button type="button" onclick="addCustomEvidenceCard()" class="px-3 py-1.5 rounded-xl card hover:border-gray-600 text-xs font-bold text-gray-300 transition flex items-center gap-1 cursor-pointer">
+                <span>➕ 手动添加证据卡</span>
+              </button>
+              <button type="button" onclick="aiExtractEvidence()" id="btnAiEvidence" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <span>🤖 从资料中提取证据卡</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 证据卡列表容器 -->
+          <div id="wEvidenceCardsList" class="space-y-2.5 flex-1 min-h-0 overflow-y-auto pr-1">
+            <div class="text-center py-10 text-gray-500 text-xs">暂无证据卡，请在左侧填入资料后点击上方「🤖 从资料中提取证据卡」</div>
+          </div>
+
+          <!-- 人工审核门禁 (Human Review Gate) -->
+          <div class="p-2.5 rounded-xl bg-gray-950 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
+            <div class="flex items-center gap-2">
+              <span class="text-base">🚦</span>
+              <div>
+                <div class="text-xs font-bold text-amber-300">人工审核门禁：事实真实性核对</div>
+                <div class="text-[11px] text-gray-400">请逐一核验上述证据卡是否存在编造或存疑，确认无误后方可生成大纲。</div>
+              </div>
+            </div>
+            <button type="button" onclick="approveEvidenceCardsGate()" class="px-4 py-1.5 text-xs font-extrabold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition shadow flex items-center gap-1.5 shrink-0 cursor-pointer">
+              <span>✅ 证据核验无误 · 解锁大纲策划</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ==================== Step 3 面板：完整大纲策划与审核门禁 (Outline) ==================== -->
+        <div id="wPanelStep3" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
+            <div>
+              <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <span>📑 阶段 3：完整大纲策划 (Outline Gate)</span>
+              </h3>
+              <p class="text-[11px] text-gray-400">单章单问原则 · 层层递进 · 绑定证据卡 · 严禁未审核即写正文</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="saveOutlineManual()" class="px-3 py-1.5 rounded-xl card hover:border-purple-500/60 text-xs font-bold text-purple-200 transition flex items-center gap-1 cursor-pointer">
+                <span>💾 保存大纲修改</span>
+              </button>
+              <button type="button" onclick="aiBuildOutline()" id="btnAiOutline" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <span>🤖 基于证据卡生成大纲</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 开篇反差设计 -->
+          <div class="p-2.5 rounded-xl bg-gray-950 border border-gray-800 space-y-1.5 shrink-0">
+            <div class="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+              <span>🪝 开篇反差切入与直接答案 (Opening Hook)</span>
+            </div>
+            <input type="text" id="wOutlineOpeningQuestion" placeholder="开篇具体反常矛盾..."
+              class="w-full bg-gray-900 text-white text-xs px-3 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+            <textarea id="wOutlineOpeningAnswer" rows="1" placeholder="开篇简短直接结论..."
+              class="w-full bg-gray-900 text-gray-300 text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500"></textarea>
+          </div>
+
+          <!-- 5~7 章列表容器 -->
+          <div class="flex-1 min-h-0 flex flex-col space-y-1">
+            <div class="flex items-center justify-between text-xs font-bold text-gray-300 px-1 shrink-0">
+              <span>📚 章节规划列表 (严格 5~7 章)：</span>
+              <span id="wOutlineChapterCountBadge" class="text-[10px] text-purple-400 font-mono">0 章</span>
+            </div>
+            <div id="wOutlineChaptersList" class="space-y-2.5 flex-1 min-h-0 overflow-y-auto pr-1">
+              <div class="text-center py-8 text-gray-500 text-xs">暂无大纲数据，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>
+            </div>
+          </div>
+
+          <!-- 唯一终局结尾规划 -->
+          <div class="p-2.5 rounded-xl bg-gray-950 border border-gray-800 space-y-1 shrink-0">
+            <div class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+              <span>🏁 全片唯一终局收尾规划 (Single Ending Plan)</span>
+              <span class="text-[10px] text-gray-500 font-normal">全片只准保留一个正式结尾，严禁在中间各章作总结</span>
+            </div>
+            <input type="text" id="wOutlineEndingTakeaway" placeholder="回扣核心问题，升华本质运转机制..."
+              class="w-full bg-gray-900 text-white text-xs px-3 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400" />
+          </div>
+
+          <!-- 大纲审核门禁 (STOP & REVIEW) -->
+          <div class="p-2.5 rounded-xl bg-purple-950/30 border border-purple-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
+            <div>
+              <div class="text-xs font-extrabold text-purple-300 flex items-center gap-1.5">
+                <span>🛑 强制人工审核门禁 (STOP & REVIEW)</span>
+              </div>
+              <div class="text-[11px] text-gray-400">
+                请确认上述章节是否条理清晰、因果链条严密。<b>未经明确确认，系统绝不启动正文撰写！</b>
+              </div>
+            </div>
+            <button type="button" onclick="approveOutlineGate()" id="btnApproveOutline" class="px-4 py-1.5 text-xs font-black rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer">
+              <span>👉 审核通过大纲 · 解锁逐章撰写</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- ==================== Step 4 面板：逐章受控撰写与四段式结构 (Chapter Writer) ==================== -->
+        <div id="wPanelStep4" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
+            <div>
+              <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <span>✍️ 阶段 4：单章受控撰写 (Chapter by Chapter)</span>
+              </h3>
+              <p class="text-[11px] text-gray-400">一次只写一章 · 强制四段式结构 · 绑定证据卡 · 最多重写2次防死循环</p>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button type="button" onclick="saveCurrentChapterDraft()" class="px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                <span>💾 保存本章</span>
+              </button>
+              <button type="button" onclick="aiWriteCurrentChapter()" id="btnAiWriteChapter" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <span>🤖 AI 撰写当前章节</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 章节切换 Tabs -->
+          <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5 shrink-0" id="wChapterTabsBar">
+            <span class="text-xs text-gray-500">大纲审核后在此切换章节</span>
+          </div>
+
+          <!-- 当前章节信息概览（支持直接修改章节标题） -->
+          <div class="p-2.5 rounded-xl bg-gray-950 border border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
+            <div class="flex-1 min-w-0 space-y-1">
+              <div class="flex items-center gap-2">
+                <span id="wCurChapterPrefix" class="px-2 py-0.5 rounded bg-purple-600/25 text-purple-300 border border-purple-500/30 text-[11px] font-black shrink-0">第 1 章</span>
+                <input type="text" id="wCurChapterTitleInput" placeholder="输入本章标题..."
+                  class="flex-1 min-w-0 bg-gray-900 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+              </div>
+              <div class="text-[11px] text-purple-300 truncate" id="wCurChapterSubQuestion">子问题：...</div>
+            </div>
+            <div class="flex items-center gap-2 text-xs shrink-0">
+              <span class="text-gray-400">已写字数: <b id="wCurChapterWordCount" class="text-emerald-400 font-mono">0</b> 字</span>
+              <span id="wCurChapterRevisionBadge" class="text-[10px] px-2 py-0.5 rounded bg-gray-800 text-gray-400">初稿</span>
+            </div>
+          </div>
+
+          <!-- 单章四段式结构编辑器 (2x2 网格一屏全显) -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 flex-1 min-h-0">
+            <div class="flex flex-col min-h-0">
+              <label class="block text-xs font-bold text-amber-300 mb-1 shrink-0">
+                1️⃣ 章节问题或矛盾 (承接上文悬念，抛出本章反差)
+              </label>
+              <textarea id="wSec1Question" oninput="updateCurrentChapterLiveWordCount()" placeholder="三五句话点出本章要解决的具体矛盾或反常现象..."
+                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 leading-relaxed resize-none"></textarea>
+            </div>
+
+            <div class="flex flex-col min-h-0">
+              <label class="block text-xs font-bold text-blue-300 mb-1 shrink-0">
+                2️⃣ 形成机制或背景 (拆解气候/运输/技术/商业/制度底层逻辑)
+              </label>
+              <textarea id="wSec2Mechanism" oninput="updateCurrentChapterLiveWordCount()" placeholder="清晰拆解运作逻辑，把复杂概念拆成听得懂的因果链条..."
+                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-400 leading-relaxed resize-none"></textarea>
+            </div>
+
+            <div class="flex flex-col min-h-0">
+              <label class="block text-xs font-bold text-emerald-300 mb-1 shrink-0">
+                3️⃣ 有来源的具体例子 (基于证据卡，具象平实，严禁伪造内心戏)
+              </label>
+              <textarea id="wSec3Examples" oninput="updateCurrentChapterLiveWordCount()" placeholder="具体案例、器物细节、动作或数据对比，必须严格有证据卡支持..."
+                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-emerald-400 leading-relaxed resize-none"></textarea>
+            </div>
+
+            <div class="flex flex-col min-h-0">
+              <label class="block text-xs font-bold text-purple-300 mb-1 shrink-0">
+                4️⃣ 小结与自然过渡 (收束本章子问题，引出下一章疑问，非终章严禁总结)
+              </label>
+              <textarea id="wSec4Transition" oninput="updateCurrentChapterLiveWordCount()" placeholder="简短收束本章，并抛出下一章的悬念..."
+                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-400 leading-relaxed resize-none"></textarea>
+            </div>
+          </div>
+
+          <div class="pt-2 border-t border-gray-800 flex items-center justify-between shrink-0">
+            <span class="text-xs text-gray-400">💡 每一章完成后点击保存，全部写完即可进入全文统稿</span>
+            <div class="flex items-center gap-2">
+              <button type="button" onclick="saveCurrentChapterDraft()" class="px-3.5 py-1.5 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+                💾 保存本章
+              </button>
+              <button type="button" onclick="setWriterStep(5)" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer">
+                <span>👉 进入阶段 5：全文统稿与定稿</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ==================== Step 5 面板：全文统稿去伪结尾与定稿同步 (Finalize) ==================== -->
+        <div id="wPanelStep5" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2 hidden">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
+            <div>
+              <h3 class="text-sm font-black text-white flex items-center gap-2">
+                <span>🏁 阶段 5：全文统稿与定稿 (Full Script Finalize & Sync)</span>
+              </h3>
+              <p class="text-[11px] text-gray-400">跨章节去重 · 专有名词与年代统一 · 剔除中间伪结尾 · 唯一结尾回扣</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 shrink-0">
+              <button type="button" id="btnOpenEditorialRevision" onclick="openEditorialRevisionWorkbench()" class="px-3 py-1.5 rounded-xl bg-amber-950/60 hover:bg-amber-900/70 border border-amber-500/50 text-amber-200 text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer" title="打开总编审稿与定向改稿窗口（查看历史快照、制定改稿方案、左右对比定稿）">
+                <span>🧭 总编审稿与定向改稿</span>
+                <span id="wRevisionPendingDot" class="hidden w-2 h-2 rounded-full bg-amber-400"></span>
+              </button>
+              <button type="button" id="btnOpenHumanizeModal" onclick="openHumanizeWorkbenchModal()" class="px-3 py-1.5 rounded-xl bg-violet-950/60 hover:bg-violet-900/70 border border-violet-500/50 text-violet-200 text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer" title="打开全篇文案 AI 去AI味与真人化修复弹窗">
+                <span>✨ AI 去AI味修复</span>
+              </button>
+              <button type="button" onclick="saveFinalScriptOnlyUI()" class="px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer" title="将当前全文文案立即持久化到本地 final-script.json（不改动制作台）">
+                <span>💾 保存文案底稿</span>
+              </button>
+              <button type="button" onclick="aiFinalizeFullScript()" id="btnAiFinalize" class="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <span>🤖 AI 全文统稿去重去伪结尾</span>
+              </button>
+              <button type="button" onclick="syncWriterToProducerUI()" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 text-xs font-black transition flex items-center gap-1 shadow-lg cursor-pointer">
+                <span>🚀 保存并同步制作台</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex-1 min-h-0 overflow-y-auto space-y-2.5 pr-0.5">
+
+          <!-- 统稿编辑报告 (可折叠，默认收起节省一屏空间) -->
+          <div id="wEditorialLogContainer" class="px-3 py-1.5 rounded-xl bg-gray-950 border border-gray-800 text-xs shrink-0">
+            <div class="font-bold text-gray-300 flex items-center justify-between cursor-pointer select-none" onclick="toggleEditorialLogDetails()">
+              <span>📊 统稿清洗审计报告 <span id="wEditorialLogToggleHint" class="text-[10px] font-normal text-gray-500 ml-1">[▾ 详情]</span></span>
+              <span id="wRemovedFalseEndingsBadge" class="text-[10px] text-amber-400">已清理伪结尾: 0 处</span>
+            </div>
+            <div id="wEditorialLogDetails" class="text-gray-400 space-y-1 font-mono text-[11px] mt-1.5 pt-1.5 border-t border-gray-800/80 max-h-[110px] overflow-y-auto hidden">
+              <div>- 暂无统稿清洗记录，点击上方按钮由 AI 进行跨章去重与格式统稿。</div>
+            </div>
+          </div>
+
+          <!-- 共用主工作大框：定稿编辑态 vs 对比审阅态（互斥切换） -->
+          <div id="wStep5MainStage" class="flex flex-col gap-2">
+            <!-- 视图 A：完整长视频定稿文案（平时编辑态显示，对比审阅时自动隐藏） -->
+            <div id="wFinalScriptEditorStage" class="flex flex-col gap-1.5">
+              <div class="flex items-center justify-between text-xs shrink-0">
+                <span class="font-bold text-white">📑 完整长视频定稿文案 (Ready for Narration)：</span>
+                <span class="text-purple-300">总字数: <b id="wFinalScriptWords" class="font-mono">0</b> 字 · 预估播讲: <b id="wFinalScriptMin" class="font-mono">0.0</b> 分钟</span>
+              </div>
+              <textarea id="wFinalScriptFullText" oninput="updateFinalScriptLiveStats()" placeholder="统稿后的完整旁白文案将在此呈现，包含开篇导引、各章正文与唯一定稿结尾..."
+                class="min-h-[480px] w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 font-mono leading-relaxed resize-y"></textarea>
+            </div>
+
+            <!-- 视图 B：AI 修复对比审阅（替代定稿大框展开，确认替换或放弃后自动消失并切回定稿框） -->
+            <div id="wHumanizeAuditBox" class="p-3.5 rounded-xl bg-gray-950 border border-emerald-500/40 space-y-3 hidden">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-gray-800">
+                <div class="flex items-center gap-2 flex-wrap">
+                  <span class="text-sm font-black text-emerald-400 flex items-center gap-1.5">
+                    <span>🎉 全篇文案修复对比 (Diff Review)</span>
+                  </span>
+                  <span id="wHumanizePendingBadge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    ⏳ 待审阅 · 未覆盖原文件
+                  </span>
+                </div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <button type="button" onclick="acceptHumanizedScript()" id="btnAcceptHumanize" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow transition cursor-pointer">
+                    ✅ 确认替换定稿文案
+                  </button>
+                  <button type="button" onclick="revertHumanizedScript()" id="btnRevertScript" class="px-3 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-xs font-bold text-rose-300 transition cursor-pointer hidden">
+                    ↩️ 放弃并还原原稿
+                  </button>
+                  <button type="button" onclick="copyHumanizedScript()" class="text-xs text-violet-400 hover:underline cursor-pointer">
+                    📋 复制文案
+                  </button>
+                </div>
+              </div>
+
+              <div id="wHumanizeAuditContent" class="text-[11px] text-gray-300 grid grid-cols-2 sm:grid-cols-4 gap-2">
+              </div>
+              <div id="wHumanizeAuditSummary" class="text-[11px] text-gray-400 font-mono bg-gray-900/80 p-2 rounded border border-gray-800"></div>
+
+              <!-- GitHub 风格对比视图（共用宽大主视区） -->
+              <div id="wHumanizeDiffContainer" class="rounded-xl border border-gray-800 bg-[#0d1117] overflow-hidden">
+                <div class="px-3 py-2 bg-[#161b22] border-b border-gray-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div class="flex items-center gap-3 font-mono">
+                    <span class="font-bold text-gray-200">🔍 修复前后对比</span>
+                    <span class="text-emerald-400 font-bold">+<span id="wDiffAddedCount">0</span> 新增/改写</span>
+                    <span class="text-rose-400 font-bold">-<span id="wDiffRemovedCount">0</span> 原文删改</span>
+                  </div>
+                  <div class="flex items-center gap-3">
+                    <label class="inline-flex items-center gap-1.5 text-gray-300 cursor-pointer select-none">
+                      <input type="checkbox" id="wDiffChangesOnlyCheckbox" onchange="renderHumanizeDiffView()" class="accent-violet-500" />
+                      <span>仅看改动</span>
+                    </label>
+                    <div class="inline-flex p-0.5 bg-gray-900 rounded-lg border border-gray-700">
+                      <button type="button" id="btnDiffSplit" onclick="setHumanizeDiffMode('split')" class="px-2.5 py-0.5 rounded bg-violet-600 text-white font-bold cursor-pointer">
+                        左右并排 (Split)
+                      </button>
+                      <button type="button" id="btnDiffUnified" onclick="setHumanizeDiffMode('unified')" class="px-2.5 py-0.5 rounded text-gray-400 hover:text-white font-bold cursor-pointer">
+                        红绿混合 (Unified)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+                <div id="wHumanizeDiffBody" class="min-h-[360px] max-h-[60vh] overflow-y-auto bg-[#0d1117] text-[13px] leading-relaxed divide-y divide-gray-800/50">
+                </div>
+              </div>
+            </div>
+
+            <!-- 视图 C：AI 全文统稿对比审阅（同样共用主大框） -->
+            <section id="wFinalizeReview" class="hidden rounded-xl border border-purple-500/50 bg-gray-950 p-3.5 space-y-3" aria-label="AI 统稿结果审阅">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <div><h4 class="text-sm font-bold text-purple-200">🔍 AI 统稿结果 · 待审阅</h4>
+                  <p id="wFinalizeReviewNote" class="text-xs text-gray-400 mt-1">左侧为生成前定稿，右侧为 AI 统稿结果；红色为原文删改，绿色为新增或改写。确认前不会覆盖已保存的定稿。</p></div>
+                <div class="flex gap-2"><button type="button" id="btnAcceptFinalize" onclick="acceptFinalizedScript()" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer">✅ 确认替换并保存</button>
+                  <button type="button" id="btnDiscardFinalize" onclick="discardFinalizedScript()" class="px-3.5 py-1.5 rounded-lg border border-gray-600 text-gray-200 text-xs font-bold cursor-pointer">放弃结果</button></div>
+              </div>
+              <div class="flex flex-wrap items-center gap-4 text-xs"><span class="text-rose-300">−<span id="wFinalizeRemovedCount">0</span> 原文删改</span><span class="text-emerald-300">+<span id="wFinalizeAddedCount">0</span> 新增或改写</span>
+                <label class="text-gray-300"><input id="wFinalizeChangesOnly" type="checkbox" onchange="renderFinalizeDiffView()" class="accent-purple-500"> 仅看改动</label></div>
+              <div id="wFinalizeDiffBody" class="min-h-[360px] max-h-[60vh] overflow-auto rounded-lg border border-gray-800 bg-[#0d1117] text-[13px] leading-relaxed divide-y divide-gray-800/60"></div>
+              <p class="text-[11px] text-gray-400">对比按句子显示；刷新或切换工程后，未确认的结果不会保留。统稿依据章节稿生成，可能与当前定稿不同。</p>
+            </section>
+          </div>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </div>
+  <!-- ✍️ 知识长视频文案创作工坊结束 -->
+
+  <!-- 最终渲染确认弹窗 -->
+  <div id="finalRenderConfirmModal" onclick="if(event.target===this) closeFinalRenderConfirmModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 hidden" role="dialog" aria-modal="true" aria-labelledby="finalRenderConfirmTitle">
+    <div class="card w-full max-w-md p-5 rounded-2xl border border-emerald-500/40 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-2.5 border-b border-gray-800">
+        <h3 id="finalRenderConfirmTitle" class="text-base font-black text-white flex items-center gap-2">
+          🎬 确认开始最终渲染
+        </h3>
+        <button type="button" onclick="closeFinalRenderConfirmModal()" class="w-8 h-8 rounded-lg bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white flex items-center justify-center transition cursor-pointer" aria-label="关闭">✕</button>
+      </div>
+
+      <div class="space-y-2.5 text-xs text-gray-300">
+        <div class="p-3 rounded-xl bg-gray-950/90 border border-gray-800 space-y-1.5">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-gray-400">当前工程</span>
+            <span id="finalRenderProjectName" class="font-bold text-amber-300 truncate">-</span>
+          </div>
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-gray-400">镜头规模</span>
+            <span id="finalRenderSceneSummary" class="font-semibold text-white">-</span>
+          </div>
+        </div>
+        <p class="text-[11px] text-gray-400 leading-relaxed">
+          将使用当前已保存的镜头配置、配音及 BGM 进行 1080p 后台渲染。渲染期间切换工程或刷新页面不会中断任务。
+        </p>
+      </div>
+
+      <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-gray-800">
+        <button type="button" onclick="closeFinalRenderConfirmModal()" class="px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 text-gray-300 border border-gray-700 text-xs font-bold transition cursor-pointer">
+          取消
+        </button>
+        <button type="button" id="confirmStartFinalRenderBtn" onclick="confirmStartFinalRender()" class="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg transition cursor-pointer">
+          🚀 确认并开始渲染
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 【核心升级】：全功能 AI 模型指令调度中心 (紧凑自适应·折叠免滑动版) -->
+  <div id="visualModelModal" onclick="if(event.target===this) toggleVisualModelModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 hidden">
+    <div class="card w-full max-w-4xl p-4 sm:p-5 rounded-2xl border border-purple-500/50 shadow-2xl flex flex-col max-h-[96vh] overflow-hidden">
+      <!-- 弹窗固定头部：标题 + 醒目大热区退出叉 -->
+      <div class="flex items-center justify-between pb-2.5 border-b border-gray-800 shrink-0">
+        <div>
+          <h3 class="text-base sm:text-lg font-black text-white flex items-center gap-2">
+            🪐 AI 全流程模型调度中心
+          </h3>
+          <p class="text-[11px] text-purple-300/80 mt-0.5">统一配置网关与各阶段模型</p>
+        </div>
+        <button type="button" onclick="toggleVisualModelModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-300 hover:text-white bg-gray-800/80 hover:bg-rose-600/80 hover:border-rose-400 border border-gray-700 transition text-lg font-bold cursor-pointer shrink-0 shadow" title="关闭退出 (Esc)">✕</button>
+      </div>
+
+      <!-- 弹窗内部主体（自适应高度，小屏幕支持内部滚动避免底部保存按钮被裁切） -->
+      <div class="studio-modal-content space-y-2.5 pt-2.5 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto pr-0.5">
+        <!-- 当前各阶段生效模型总览 -->
+        <div class="flex flex-wrap items-center gap-1.5 px-2.5 py-2 rounded-xl bg-gray-950/70 border border-gray-800 shrink-0">
+          <span class="text-[11px] font-bold text-purple-300 shrink-0">🤖 当前生效：</span>
+          <span id="currentWriterModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-amber-500/20 text-amber-200 border border-amber-500/35">📝 文案: deepseek-chat</span>
+          <span id="currentVideoModelBadge" class="px-2 py-0.5 rounded text-[11px] font-extrabold bg-emerald-500/20 text-emerald-300 border border-emerald-500/35">🎬 视频: minimax/hailuo-3</span>
+          <span id="currentTextModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-purple-500/20 text-purple-200 border border-purple-500/35">✍️ 分镜: deepseek-chat</span>
+          <span id="currentImageModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-blue-500/20 text-blue-200 border border-blue-500/35">🖼️ 生图: flux-3-image</span>
+          <span id="currentKeywordModelBadge" class="px-2 py-0.5 rounded text-[11px] font-bold bg-cyan-500/20 text-cyan-200 border border-cyan-500/35">🔎 关键词: deepseek-chat</span>
+        </div>
+        <!-- 1. 顶层快捷预设条与统一网关 (两列自适应高 ~75px) -->
+        <div class="p-2.5 rounded-xl bg-gradient-to-r from-blue-950/60 via-purple-950/50 to-cyan-950/60 border border-cyan-500/30 shrink-0 space-y-1.5">
+          <div class="flex flex-wrap items-center justify-between gap-1.5">
+            <div class="flex items-center gap-2 text-xs font-black text-cyan-300 flex-wrap">
+              <span>🪐 一键载入全家桶预设：</span>
+              <span id="modelCatalogStatusBadge" class="text-[10px] font-mono font-normal text-gray-400">⏳ 正在拉取实时模型列表...</span>
+            </div>
+            <div class="flex flex-wrap items-center gap-1">
+              <button type="button" onclick="refreshAllOpenRouterModels(true)" id="btnRefreshOrModels" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-emerald-600/30 hover:bg-emerald-600/60 text-emerald-200 border border-emerald-400/50 transition shadow-sm cursor-pointer">
+                <span>🔄 刷新全部模型列表</span>
+              </button>
+              <button type="button" onclick="applyModelPreset('gemini')" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-blue-600/30 hover:bg-blue-600/60 text-blue-200 border border-blue-400/50 transition shadow-sm">
+                <span>🪐 Gemini 生态</span>
+              </button>
+              <button type="button" onclick="applyModelPreset('openrouter-fast')" class="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-purple-600/30 hover:bg-purple-600/60 text-purple-200 border border-purple-400/50 transition shadow-sm">
+                <span>🚀 OpenRouter 混合</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- 网关与事实检索密钥 -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-gray-800/80">
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label class="text-[10px] font-bold text-gray-300">🔑 统一 API Key：</label>
+                <div class="text-[9px]">
+                  <a href="https://openrouter.ai/keys" target="_blank" class="text-purple-400 hover:underline">OpenRouter ↗</a>
+                  <a href="https://aistudio.google.com/app/apikey" target="_blank" class="text-blue-400 hover:underline ml-1">Gemini ↗</a>
+                </div>
+              </div>
+              <input type="password" id="currentApiKeyInput" placeholder="填入 OpenRouter Key (sk-or-...) 或 Gemini API Key"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label class="text-[10px] font-bold text-gray-300">🌐 统一 Base URL 网关：</label>
+                <div class="flex items-center gap-1.5 text-[9px]">
+                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://openrouter.ai/api/v1'; refreshAllOpenRouterModels(false);" class="text-purple-400 hover:underline cursor-pointer">OpenRouter</button>
+                  <button type="button" onclick="document.getElementById('currentBaseUrlInput').value = 'https://generativelanguage.googleapis.com/v1beta/openai'; refreshAllOpenRouterModels(false);" class="text-blue-400 hover:underline cursor-pointer">Gemini</button>
+                </div>
+              </div>
+              <div class="flex items-center gap-1">
+                <input type="text" id="currentBaseUrlInput" value="https://openrouter.ai/api/v1" placeholder="网关地址..."
+                  class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-purple-400" />
+                <button type="button" onclick="testCurrentProviderConnection()" id="btnTestProvider" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-purple-900/60 border border-purple-500/40 text-purple-200 transition shrink-0 cursor-pointer">⚡测试</button>
+              </div>
+              <div id="testConnStatus" class="hidden text-[11px] leading-snug pt-0.5"></div>
+            </div>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1 border-t border-gray-800/80">
+            <div>
+              <label for="currentTavilyKeyInput" class="text-[10px] font-bold text-gray-300 block mb-0.5">🔎 Tavily 搜索 API Key（资料考证）</label>
+              <div class="flex items-center gap-1">
+                <input type="password" id="currentTavilyKeyInput" autocomplete="off" placeholder="填写 Tavily Key；留空则保留已存 Key"
+                  class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono focus:outline-none focus:border-cyan-400" />
+                <button type="button" onclick="testTavilyConnection()" id="btnTestTavily" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-cyan-900/60 border border-cyan-500/40 text-cyan-200 transition shrink-0 cursor-pointer">⚡测试</button>
+              </div>
+              <div id="testTavilyStatus" class="hidden text-[11px] leading-snug pt-0.5"></div>
+            </div>
+            <div>
+              <div class="flex items-center justify-between mb-0.5">
+                <label class="text-[10px] font-bold text-teal-300">🐱 本机哼哼猫桌面端（全网视频本地下载）</label>
+                <span class="text-[9px] text-teal-400/80">本地 CLI · 无需 API Key</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <div class="flex-1 px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-teal-500/40 text-teal-200/90 font-mono truncate">
+                  💻 连接本机哼哼猫客户端 (meowload CLI)
+                </div>
+                <button type="button" onclick="testMeowloadConnection()" id="btnTestMeowload" class="px-2 py-1 text-[10px] font-bold rounded-lg bg-gray-800 hover:bg-teal-900/60 border border-teal-500/40 text-teal-200 transition shrink-0 cursor-pointer">⚡检测连接</button>
+              </div>
+              <div id="testMeowloadStatus" class="hidden text-[11px] leading-snug pt-0.5"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 五大模型手风琴折叠组 (Accordion 1~5，单项展开，其余收起，零滑动) -->
+        <div class="space-y-1.5 shrink-0">
+          <!-- Item 1: ✍️ AI 知识文案创作与考证大模型 (Writer) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(1)" id="accordionHeaderModel1" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 font-bold flex items-center justify-center text-[10px] shrink-0">1</span>
+                <span class="text-xs font-bold text-gray-200 truncate">✍️ AI 知识文案创作与考证大模型</span>
+                <span id="modelHeaderBadgeWriter" class="px-2 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30 truncate max-w-[200px]">deepseek/deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel1" class="text-[10px] text-gray-400 font-mono transition">▼</span>
+            </button>
+            <div id="accordionBodyModel1" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5">
+              <datalist id="openrouterModelsList"></datalist>
+              <input type="search" id="writerModelSearch" oninput="filterModelSelect('writer')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-purple-400" />
+              <select id="writerModelSelect" onchange="if(this.value) selectWriterModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-purple-500/40 text-purple-100 font-mono focus:outline-none focus:border-purple-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentWriterModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入/搜索模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-purple-500/50 text-purple-200 font-mono font-bold focus:outline-none focus:border-purple-400" />
+            </div>
+          </div>
+
+          <!-- Item 2: 🎬 AI 视频生成模型 (Video) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(2)" id="accordionHeaderModel2" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-emerald-500/20 text-emerald-300 font-bold flex items-center justify-center text-[10px] shrink-0">2</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎬 AI 视频生成模型 (16:9 真实视频)</span>
+                <span id="modelHeaderBadgeVideo" class="px-2 py-0.2 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 truncate max-w-[200px]">minimax/hailuo-3</span>
+              </div>
+              <span id="accordionArrowModel2" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel2" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="videoModelSearch" oninput="filterModelSelect('video')" placeholder="🔍 实时搜索视频模型（如 veo / seedance / kling / hailuo / wan）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-emerald-400" />
+              <select id="videoModelSelect" onchange="if(this.value) selectVideoModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-emerald-500/40 text-emerald-100 font-mono focus:outline-none focus:border-emerald-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取视频模型列表...</option>
+              </select>
+              <input type="text" id="currentVideoModelInput" list="openrouterVideoModelsList" value="minimax/hailuo-3" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入视频模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-emerald-500/50 text-emerald-200 font-mono font-bold focus:outline-none focus:border-emerald-400" />
+              <datalist id="openrouterVideoModelsList"></datalist>
+            </div>
+          </div>
+
+          <!-- Item 3: 🎯 AI 分镜与指示词提炼模型 (Prompt Director) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(3)" id="accordionHeaderModel3" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-purple-500/20 text-purple-300 font-bold flex items-center justify-center text-[10px] shrink-0">3</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎯 AI 分镜与指示词提炼模型</span>
+                <span id="modelHeaderBadgeText" class="px-2 py-0.2 rounded text-[10px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30 truncate max-w-[200px]">deepseek/deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel3" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel3" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="textModelSearch" oninput="filterModelSelect('text')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-purple-400" />
+              <select id="textModelSelect" onchange="if(this.value) selectTextModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-purple-500/40 text-purple-100 font-mono focus:outline-none focus:border-purple-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentTextModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入分镜提炼模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-purple-400" />
+            </div>
+          </div>
+
+          <!-- Item 4: 🎨 AI 超清生图模型 (Image) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(4)" id="accordionHeaderModel4" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-blue-500/20 text-blue-300 font-bold flex items-center justify-center text-[10px] shrink-0">4</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎨 AI 超清摄影实景生图模型</span>
+                <span id="modelHeaderBadgeImage" class="px-2 py-0.2 rounded text-[10px] font-mono bg-blue-500/15 text-blue-300 border border-blue-500/30 truncate max-w-[200px]">flux-3-image</span>
+              </div>
+              <span id="accordionArrowModel4" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel4" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="imageModelSearch" oninput="filterModelSelect('image')" placeholder="🔍 实时搜索生图模型（如 flux / gemini / recraft / gpt-image / seedream）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-blue-400" />
+              <select id="imageModelSelect" onchange="if(this.value) selectImageModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-blue-500/40 text-blue-100 font-mono focus:outline-none focus:border-blue-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取生图模型列表...</option>
+              </select>
+              <input type="text" id="currentImageModelInput" list="openrouterImageModelsList" value="black-forest-labs/flux-3-image" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入生图模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-blue-400" />
+              <datalist id="openrouterImageModelsList"></datalist>
+            </div>
+          </div>
+
+          <!-- Item 5: 🎵 AI 自适应 BGM 音乐与审查模型 (BGM) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(5)" id="accordionHeaderModel5" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-amber-500/20 text-amber-300 font-bold flex items-center justify-center text-[10px] shrink-0">5</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🎵 AI 自适应 BGM 背景音乐与审查模型</span>
+                <span id="modelHeaderBadgeBgm" class="px-2 py-0.2 rounded text-[10px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30 truncate max-w-[200px]">deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel5" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel5" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="bgmModelSearch" oninput="filterModelSelect('bgm')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-amber-400" />
+              <select id="bgmModelSelect" onchange="if(this.value) selectBgmModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-amber-500/40 text-amber-100 font-mono focus:outline-none focus:border-amber-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentBgmModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入 BGM 模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-amber-400" />
+            </div>
+          </div>
+
+          <!-- Item 6: 🔎 AI 搜索关键词提炼模型 (Keyword Extractor) -->
+          <div class="rounded-xl border border-gray-800 bg-gray-950 overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(6)" id="accordionHeaderModel6" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-gray-900 transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-cyan-500/20 text-cyan-300 font-bold flex items-center justify-center text-[10px] shrink-0">6</span>
+                <span class="text-xs font-bold text-gray-200 truncate">🔎 AI 搜索关键词提炼模型（纯中文素材检索词）</span>
+                <span id="modelHeaderBadgeKeyword" class="px-2 py-0.2 rounded text-[10px] font-mono bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 truncate max-w-[200px]">deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel6" class="text-[10px] text-gray-400 font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel6" class="p-2.5 border-t border-gray-800/80 bg-gray-900/40 space-y-1.5 hidden">
+              <input type="search" id="keywordModelSearch" oninput="filterModelSelect('keyword')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / claude / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950/90 border border-gray-700 text-white focus:outline-none focus:border-cyan-400" />
+              <select id="keywordModelSelect" onchange="if(this.value) selectKeywordModelSlug(this.value)" style="color-scheme: dark;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-950 border border-cyan-500/40 text-cyan-100 font-mono focus:outline-none focus:border-cyan-400 cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentKeywordModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入关键词提炼模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-gray-900 border border-gray-700 text-white font-mono font-bold focus:outline-none focus:border-cyan-400" />
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 弹窗固定底部栏：取消与保存应用 -->
+        <div class="flex justify-end items-center gap-2 pt-2 border-t border-gray-800 shrink-0">
+          <button type="button" onclick="toggleVisualModelModal()" class="px-3.5 py-1.5 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+            取消
+          </button>
+          <button type="button" onclick="saveVisualModelConfig()" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-emerald-600 hover:brightness-110 text-white transition shadow-lg cursor-pointer">
+            💾 保存并应用全部模型配置
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 配音配置抽屉/弹窗 -->
+  <div id="audioModal" onclick="if(event.target===this) toggleAudioModal()" class="studio-modal fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-xl p-6 rounded-2xl border border-rose-500/40 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-gray-800">
+        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          🎙️ AI 配音引擎控制中心
+        </h3>
+        <button type="button" onclick="toggleAudioModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800/80 transition duration-150 text-xl font-bold cursor-pointer shrink-0 border border-transparent hover:border-gray-700" title="关闭退出 (Esc)">✕</button>
+      </div>
+
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">选择配音提供商：</label>
+          <div class="grid grid-cols-2 gap-3">
+            <label id="labelAudioProviderElevenlabs" class="flex items-center gap-2 p-2.5 rounded-xl border border-gray-700 bg-gray-900 cursor-pointer text-xs font-bold text-gray-400 transition">
+              <input type="radio" name="audioProvider" value="elevenlabs" onchange="updateAudioProviderUI()" />
+              <span>ElevenLabs 云端配音</span>
+            </label>
+            <label id="labelAudioProviderVoicebox" class="flex items-center gap-2 p-2.5 rounded-xl border border-rose-500 bg-rose-500/10 cursor-pointer text-xs font-bold text-rose-200 transition">
+              <input type="radio" name="audioProvider" value="voicebox" checked onchange="updateAudioProviderUI()" />
+              <span>Voicebox 本地模型</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="elevenlabsFields" class="hidden space-y-3">
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">
+            ElevenLabs API Key：
+            <a href="https://elevenlabs.io" target="_blank" class="text-rose-400 hover:underline text-[11px] font-normal ml-2">获取 API Key ↗</a>
+          </label>
+          <div class="flex items-center gap-2">
+            <input type="password" id="elevenlabsKeyInput" oninput="onElevenlabsKeyInputChange()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadElevenlabsVoices(true);}" placeholder="在此输入 xi-api-key（或在根目录 .env 中写入）..." class="flex-1 px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500" />
+            <button type="button" id="btnFetchElevenlabsVoices" onclick="loadElevenlabsVoices(true)" class="px-3 py-2 text-xs font-bold rounded-xl bg-rose-600/25 hover:bg-rose-600 text-rose-100 border border-rose-500/40 transition shrink-0 cursor-pointer">
+              🔄 拉取我的音色
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between gap-2 mb-1">
+            <label class="block text-xs font-semibold text-gray-300">我的 ElevenLabs 音色列表 (Voice ID)：</label>
+            <div class="flex items-center gap-2">
+              <span id="elevenlabsVoiceStatus" class="text-[11px] text-gray-400"></span>
+              <button type="button" id="btnPreviewElevenlabsVoice" onclick="previewSelectedElevenlabsVoice()" disabled class="px-2 py-0.5 text-[11px] font-semibold rounded-lg bg-gray-800 hover:bg-gray-700 text-rose-200 border border-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer">
+                ▶ 试听原声
+              </button>
+            </div>
+          </div>
+          <select id="voiceIdSelect" onchange="onElevenlabsVoiceSelectChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">
+            <option value="">请先输入 API Key 并点击「拉取我的音色」</option>
+          </select>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 mb-1">语音模型 (Model)：</label>
+            <select id="elevenlabsModelSelect" onchange="syncElevenlabsStabilityStep(true)" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">
+              <option value="eleven_v4">Eleven v4（推荐，精细可调）</option>
+              <option value="eleven_v4_turbo">Eleven v4 Turbo（极速）</option>
+              <option value="eleven_v3">Eleven v3（表现力强，3档稳定度）</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-gray-300 mb-1">语言 (Language)：</label>
+            <select id="elevenlabsLanguageSelect" onchange="onElevenlabsParamChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">
+              <option value="zh">中文（推荐）</option>
+              <option value="">自动检测</option>
+              <option value="en">English</option>
+              <option value="ja">日本語</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3 p-3 rounded-xl bg-gray-950/70 border border-gray-800">
+          <div>
+            <div class="flex items-center justify-between text-xs mb-1">
+              <span class="font-semibold text-gray-300">稳定性 (Stability)</span>
+              <span id="elevenlabsStabilityLabel" class="font-mono text-rose-300 font-bold">35%</span>
+            </div>
+            <input type="range" id="elevenlabsStabilitySlider" min="0" max="1" step="0.05" value="0.35" oninput="onElevenlabsParamChange()" class="w-full accent-rose-500 cursor-pointer" />
+            <div class="flex justify-between text-[10px] text-gray-500 mt-0.5">
+              <span>创意</span>
+              <span>稳健</span>
+            </div>
+          </div>
+          <div>
+            <div class="flex items-center justify-between text-xs mb-1">
+              <span class="font-semibold text-gray-300">相似度 (Similarity)</span>
+              <span id="elevenlabsSimilarityLabel" class="font-mono text-rose-300 font-bold">80%</span>
+            </div>
+            <input type="range" id="elevenlabsSimilaritySlider" min="0" max="1" step="0.05" value="0.8" oninput="onElevenlabsParamChange()" class="w-full accent-rose-500 cursor-pointer" />
+            <div class="flex justify-between text-[10px] text-gray-500 mt-0.5">
+              <span>低</span>
+              <span>高</span>
+            </div>
+          </div>
+        </div>
+        </div>
+
+        <div id="voiceboxFields">
+          <label class="block text-xs font-semibold text-gray-300 mb-1">Voicebox 本地音色：</label>
+          <select id="voiceboxProfileSelect" onchange="onVoiceboxProfileSelectChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white">
+            <option value="">正在读取本地音色…</option>
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-gray-300 mb-1">试听测试文本（仅用于「试听测试」）：</label>
+          <textarea id="sampleAudioText" rows="2" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">这是来自 WhyVideo 工作台的高保真纪录片旁白语音测试。</textarea>
+        </div>
+        <div id="fullScriptSummaryBox" class="px-3 py-2 rounded-xl bg-emerald-950/35 border border-emerald-500/30 text-xs text-emerald-200">
+          📄 全片旁白：确认保存当前配音引擎设置后，点击主界面顶部的「🎙️ 一键生成全片旁白」即可生成整部视频配音并对齐时间轴
+        </div>
+        <label id="useAsNarrationLabel" class="flex items-center gap-2 text-xs text-gray-300">
+          <input type="checkbox" id="useAsNarrationCheckbox" class="accent-emerald-500" />
+          试听测试时也设为当前工程成片旁白（Voicebox）
+        </label>
+        <div id="voiceboxJobStatus" class="text-xs text-gray-300 font-medium"></div>
+
+        <div id="audioPlayerContainer" class="hidden p-3 rounded-xl bg-gray-950 border border-gray-800">
+          <audio id="audioPreviewPlayer" controls class="w-full h-8"></audio>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap justify-end gap-2.5 pt-3 border-t border-gray-800">
+        <button onclick="toggleAudioModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+          取消
+        </button>
+        <button onclick="cancelVoiceboxJob()" id="btnCancelVoicebox" class="hidden px-4 py-2 text-xs font-semibold rounded-xl bg-gray-800 hover:bg-gray-700 border border-rose-500/50 text-rose-300 transition cursor-pointer">
+          🛑 取消配音
+        </button>
+        <button onclick="synthesizeTestVoice()" id="btnSynth" class="px-4 py-2 text-xs font-bold rounded-xl bg-rose-600/80 hover:bg-rose-500 text-white transition shadow cursor-pointer">
+          🔊 试听测试配音
+        </button>
+        <button onclick="confirmSaveAudioConfig()" id="btnConfirmAudioConfig" class="px-5 py-2 text-xs font-extrabold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white transition shadow-lg cursor-pointer">
+          ✅ 确认保存设置
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 🎵 AI 自适应 BGM 背景音乐与闭环 Review 工作台 -->
+  <div id="bgmModal" onclick="if(event.target===this) toggleBgmModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-3xl p-6 rounded-2xl border border-amber-500/50 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between pb-3 border-b border-gray-800">
+        <div>
+          <h3 class="text-lg font-bold text-white flex items-center gap-2">
+            🎵 AI 自适应 BGM 音乐与审查工作台
+          </h3>
+          <p class="text-xs text-amber-300/80 mt-0.5">
+            AI 台词情绪弧度分析 · 本地授权音轨管理 · 自动人声避让 (Ducking) · 同步 Remotion 渲染
+          </p>
+        </div>
+        <button type="button" onclick="toggleBgmModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800/80 transition duration-150 text-xl font-bold cursor-pointer shrink-0 border border-transparent hover:border-gray-700" title="关闭退出 (Esc)">✕</button>
+      </div>
+
+      <div class="space-y-4">
+        <!-- 顶部调度模型 + 启用开关 -->
+        <div class="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
+          <div class="flex items-center gap-3 flex-wrap">
+            <span>🧠 当前调度模型：<b id="bgmModelActiveDisplay" class="font-mono text-white">加载中...</b></span>
+            <button type="button" onclick="toggleBgmModal(); toggleVisualModelModal('bgm');" class="text-purple-400 hover:underline font-bold text-[11px] cursor-pointer">
+              ⚙️ 切换模型 ↗
+            </button>
+          </div>
+          <label class="flex items-center gap-2 cursor-pointer select-none px-2.5 py-1 rounded-lg bg-gray-900/80 border border-amber-500/40">
+            <input type="checkbox" id="bgmEnabledToggle" onchange="onBgmSettingsInput()" class="accent-amber-400 w-4 h-4 cursor-pointer" />
+            <span class="text-xs font-bold text-white">启用 BGM 音轨（挂载至成片）</span>
+          </label>
+        </div>
+
+        <!-- 步骤 1：台词情绪起伏与节奏曲线 -->
+        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span class="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+                <span>📈 步骤一：全片台词情绪起伏与分段电平曲线</span>
+              </span>
+              <span id="bgmAnalyzeStatus" class="text-[11px] text-gray-400 block mt-0.5">读取当前工程镜头与台词时间轴...</span>
+            </div>
+            <button type="button" id="btnAnalyzeBgm" onclick="analyzeBgmWithAi()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-purple-600/30 hover:bg-purple-600/60 text-purple-100 border border-purple-400/50 transition cursor-pointer shrink-0">
+              🤖 AI 分析全片情绪弧度
+            </button>
+          </div>
+          <div id="bgmSegmentsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+            <div class="col-span-full p-3 rounded-xl bg-gray-900/70 border border-gray-800 text-gray-400 text-center">
+              正在加载当前工程情绪分段...
+            </div>
+          </div>
+        </div>
+
+        <!-- 步骤 2：本地授权 BGM 曲库与真实试听 -->
+        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2.5">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <span class="text-xs font-bold text-gray-200">🎼 步骤二：本地授权 BGM 音轨选择与真实试听</span>
+              <span class="text-[10px] text-gray-400 block mt-0.5">支持上传 .mp3 / .wav / .m4a / .ogg / .aac（或直接放入工程 <code class="text-amber-300">public/audio/bgm/</code>）</span>
+            </div>
+            <div>
+              <input type="file" id="bgmFileInput" accept=".mp3,.wav,.m4a,.ogg,.aac,audio/*" class="hidden" onchange="handleBgmFileUpload(this)" />
+              <button type="button" id="btnUploadBgm" onclick="document.getElementById('bgmFileInput').click()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-500/20 hover:bg-amber-500/40 text-amber-200 border border-amber-400/50 transition cursor-pointer">
+                📤 上传本地 BGM
+              </button>
+            </div>
+          </div>
+
+          <div id="bgmTracksList" class="space-y-2">
+            <div class="p-3 rounded-xl bg-gray-900/60 border border-gray-800 text-xs text-gray-400 text-center">
+              正在读取工程本地 BGM 音轨...
+            </div>
+          </div>
+
+          <div id="bgmAudioPlayerWrap" class="hidden p-3 rounded-xl bg-gray-900/90 border border-amber-500/30 space-y-1.5">
+            <div id="bgmNowPlayingLabel" class="text-[11px] text-amber-300 font-semibold">正在试听...</div>
+            <audio id="bgmPreviewAudio" controls class="w-full h-9"></audio>
+          </div>
+
+          <div id="bgmRecommendationsBox" class="hidden pt-1 space-y-1.5">
+            <div class="text-[11px] font-bold text-purple-300">💡 AI 配乐选曲方向参考（可按此关键词挑选本地授权配乐）：</div>
+            <div id="bgmRecommendationsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+          </div>
+        </div>
+
+        <!-- 步骤 3：混音与人声避让参数 + 实时审查报告 -->
+        <div class="p-3.5 rounded-xl bg-gradient-to-br from-gray-950 via-purple-950/20 to-gray-900 border border-purple-500/30 space-y-3">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-xs font-bold text-purple-200 flex items-center gap-1.5">
+              <span>🎛️ 步骤三：混音参数、自动人声避让 (Ducking) 与审查报告</span>
+            </span>
+            <span id="bgmAuditGradeBadge" class="px-2 py-0.5 rounded text-[10px] font-black bg-gray-800 text-gray-300 border border-gray-700">
+              待检测
+            </span>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-black/30 p-3 rounded-xl border border-gray-800/80">
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-gray-300 font-semibold">基准音量 (Base Gain)</label>
+                <span id="bgmBaseVolVal" class="font-mono text-amber-300 font-bold">-16 dB</span>
+              </div>
+              <input type="range" id="bgmBaseVolSlider" min="-30" max="-6" step="1" value="-16" oninput="onBgmSettingsInput()" class="w-full accent-amber-400 cursor-pointer" />
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="flex items-center gap-1.5 text-gray-300 font-semibold cursor-pointer">
+                  <input type="checkbox" id="bgmDuckingToggle" onchange="onBgmSettingsInput()" class="accent-emerald-400 cursor-pointer" checked />
+                  <span>人声避让深度 (Ducking)</span>
+                </label>
+                <span id="bgmDuckingDbVal" class="font-mono text-emerald-300 font-bold">-8 dB</span>
+              </div>
+              <input type="range" id="bgmDuckingDbSlider" min="-18" max="0" step="1" value="-8" oninput="onBgmSettingsInput()" class="w-full accent-emerald-400 cursor-pointer" />
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-gray-300 font-semibold">片头淡入 (Fade In)</label>
+                <span id="bgmFadeInVal" class="font-mono text-blue-300 font-bold">1.2s</span>
+              </div>
+              <input type="range" id="bgmFadeInSlider" min="0" max="5000" step="200" value="1200" oninput="onBgmSettingsInput()" class="w-full accent-blue-400 cursor-pointer" />
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-gray-300 font-semibold">片尾淡出 (Fade Out)</label>
+                <span id="bgmFadeOutVal" class="font-mono text-blue-300 font-bold">2.0s</span>
+              </div>
+              <input type="range" id="bgmFadeOutSlider" min="0" max="5000" step="200" value="2000" oninput="onBgmSettingsInput()" class="w-full accent-blue-400 cursor-pointer" />
+            </div>
+
+            <div class="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-gray-800/80 text-[11px]">
+              <label class="flex items-center gap-1.5 text-gray-300 cursor-pointer">
+                <input type="checkbox" id="bgmLoopToggle" onchange="onBgmSettingsInput()" class="accent-amber-400 cursor-pointer" checked />
+                <span>BGM 短于成片时自动循环播放 (Loop)</span>
+              </label>
+              <div class="flex items-center gap-3 text-gray-400">
+                <label class="flex items-center gap-1">起音(ms)
+                  <input type="number" id="bgmAttackMsInput" min="20" max="2000" step="20" value="180" oninput="onBgmSettingsInput()" class="w-16 px-1.5 py-0.5 rounded bg-gray-900 border border-gray-700 text-white font-mono text-[11px]" />
+                </label>
+                <label class="flex items-center gap-1">释放(ms)
+                  <input type="number" id="bgmReleaseMsInput" min="50" max="3000" step="20" value="420" oninput="onBgmSettingsInput()" class="w-16 px-1.5 py-0.5 rounded bg-gray-900 border border-gray-700 text-white font-mono text-[11px]" />
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div id="bgmAuditSummary" class="text-[11px] text-gray-300"></div>
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
+            <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
+              <div class="text-[10px] text-gray-400">人声避让 (Ducking)</div>
+              <div id="bgmAuditDucking" class="font-semibold text-emerald-300 mt-0.5">-</div>
+            </div>
+            <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
+              <div class="text-[10px] text-gray-400">节奏与分段曲线</div>
+              <div id="bgmAuditPacing" class="font-semibold text-blue-300 mt-0.5">-</div>
+            </div>
+            <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
+              <div class="text-[10px] text-gray-400">听觉疲劳度控制</div>
+              <div id="bgmAuditFatigue" class="font-semibold text-amber-300 mt-0.5">-</div>
+            </div>
+          </div>
+          <ul id="bgmAuditWarnings" class="hidden space-y-1 text-[11px] text-amber-300 bg-amber-950/30 border border-amber-500/30 rounded-lg p-2.5 list-disc list-inside"></ul>
+        </div>
+      </div>
+
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-800">
+        <span id="bgmFooterHint" class="text-[11px] text-gray-400">💡 保存后将自动编译至 Remotion <code class="text-amber-300">audio_track.bgm</code> 音轨</span>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="toggleBgmModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+            关闭
+          </button>
+          <button type="button" id="btnSaveBgm" onclick="applyBgmToProject()" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:brightness-110 text-gray-950 transition shadow-lg cursor-pointer">
+            💾 保存并同步至 Remotion
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 📝 文案导入与镜头切分工作台 Modal -->
+  <div id="importScriptModal" class="studio-modal fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-6 hidden">
+    <div class="card bg-gray-900 border border-violet-500/40 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
+      
+      <!-- Modal 头部 -->
+      <div class="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gradient-to-r from-violet-950/40 via-gray-900 to-gray-900">
+        <div>
+          <h2 class="text-lg font-black text-white flex items-center gap-2">
+            <span class="p-1.5 rounded-lg bg-violet-600/30 text-violet-400 border border-violet-500/30">📝</span>
+            导入定稿文案 · 自动切分镜头工作台
+          </h2>
+          <p class="text-xs text-gray-400 mt-0.5">
+            直接载入本地生成的文案或自由粘贴，智能按 4.0 ~ 8.0 秒标准节奏切分镜头与生成时间轴
+          </p>
+        </div>
+        <button type="button" onclick="toggleImportScriptModal()" class="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 text-lg transition">✕</button>
+      </div>
+
+      <!-- Modal 滚动主体 -->
+      <div class="studio-modal-content p-4 sm:p-6 overflow-y-auto space-y-5 flex-1 text-sm custom-scrollbar">
+        
+        <!-- 1. 工程基本设定 (项目ID 与 中文标题) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 bg-gray-950/60 p-4 rounded-xl border border-gray-800">
+          <div>
+            <label class="block text-xs font-bold text-gray-300 mb-1 flex items-center gap-1">
+              <span>🆔 项目唯一英文 ID</span>
+              <span class="text-[10px] text-gray-500 font-normal">(仅支持英文、数字、下划线)</span>
+            </label>
+            <input type="text" id="importProjectId" placeholder="例如: why_fujisan_symbol_001"
+              class="w-full bg-gray-900 text-white font-mono text-xs px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-violet-500" />
+          </div>
+          <div>
+            <label class="block text-xs font-bold text-gray-300 mb-1 flex items-center gap-1">
+              <span>🏷️ 视频中文标题</span>
+              <span class="text-[10px] text-gray-500 font-normal">(用于展示与分镜主题)</span>
+            </label>
+            <input type="text" id="importProjectTitle" placeholder="例如: 富士山，日本象征，富士山为什么如此出名"
+              class="w-full bg-gray-900 text-white font-bold text-xs px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-violet-500" />
+          </div>
+        </div>
+
+        <!-- 2. 文案载入模式切换 Tabs -->
+        <div class="space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-violet-300 flex items-center gap-1.5">
+              <span>📂 文案载入来源：</span>
+            </span>
+            <div class="inline-flex p-1 bg-gray-950 rounded-xl border border-gray-800 text-xs font-semibold">
+              <button type="button" id="tabBtnLocal" onclick="switchImportTab('local')" class="px-3 py-1 rounded-lg bg-violet-600 text-white shadow transition">
+                📁 本地导出库 (exports/)
+              </button>
+              <button type="button" id="tabBtnPaste" onclick="switchImportTab('paste')" class="px-3 py-1 rounded-lg text-gray-400 hover:text-white transition">
+                ✍️ 剪贴板快速粘贴
+              </button>
+              <button type="button" id="tabBtnUpload" onclick="switchImportTab('upload')" class="px-3 py-1 rounded-lg text-gray-400 hover:text-white transition">
+                📤 本地文件拖拽
+              </button>
+            </div>
+          </div>
+
+          <!-- Tab 1: 本地 exports 扫描库 -->
+          <div id="importTabLocal" class="space-y-2">
+            <div class="flex items-center justify-between text-xs text-gray-400 px-1">
+              <span>自动检索项目根目录下 <code class="text-violet-300 font-mono">exports/</code> 的文案文件：</span>
+              <button type="button" onclick="loadScannedScripts()" class="text-violet-400 hover:underline flex items-center gap-1">
+                🔄 刷新扫描
+              </button>
+            </div>
+            <div id="scannedScriptsList" class="grid grid-cols-1 gap-2.5 max-h-56 overflow-y-auto pr-1">
+              <div class="text-center py-6 text-gray-500 text-xs">正在扫描 exports/ 目录...</div>
+            </div>
+          </div>
+
+          <!-- Tab 2: 自由粘贴 -->
+          <div id="importTabPaste" class="space-y-2 hidden">
+            <textarea id="importRawText" rows="7" placeholder="在此粘贴已有完整文案（支持 TXT、Markdown、章节标题或 JSON 格式）..."
+              oninput="onScriptTextInput()"
+              class="w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-800 focus:outline-none focus:border-violet-500 font-mono leading-relaxed resize-y"></textarea>
+          </div>
+
+          <!-- Tab 3: 文件上传/拖拽 -->
+          <div id="importTabUpload" class="space-y-2 hidden">
+            <div id="importDropZone" ondragover="onImportDragOver(event)" ondragleave="onImportDragLeave(event)" ondrop="onImportDrop(event)"
+              class="border-2 border-dashed border-gray-700 hover:border-violet-500 rounded-xl p-6 text-center cursor-pointer transition bg-gray-950/40">
+              <div class="text-3xl mb-2">📄</div>
+              <div class="text-xs font-semibold text-gray-300">拖拽文案文件到此处，或点击浏览文件</div>
+              <div class="text-[11px] text-gray-500 mt-1">支持 .txt、.md、.json 格式的完整文案文件</div>
+              <input type="file" id="importFileInput" accept=".txt,.md,.json" onchange="onImportFileSelected(event)" class="hidden" />
+              <button type="button" onclick="document.getElementById('importFileInput').click()" class="mt-3 px-3 py-1.5 text-xs font-bold rounded-lg bg-gray-800 hover:bg-gray-700 text-violet-300 border border-gray-700">
+                选择本地文件
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. 切镜参数与实时统计 -->
+        <div class="bg-gray-950/70 p-4 rounded-xl border border-gray-800/80 space-y-3">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-amber-300">⏱️ 切镜节奏策略：</span>
+              <select id="importTargetDuration" onchange="triggerUpdatePreview()" class="bg-gray-900 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400">
+                <option value="5.5" selected>标准长视频节奏 (约 4.0 ~ 7.5 秒/镜 · 推荐)</option>
+                <option value="4.2">紧凑信息流节奏 (约 3.5 ~ 5.5 秒/镜)</option>
+                <option value="7.0">沉稳纪录片节奏 (约 5.5 ~ 9.0 秒/镜)</option>
+              </select>
+            </div>
+
+            <!-- 统计标签 -->
+            <div class="flex items-center gap-2 text-xs flex-wrap">
+              <span class="px-2 py-0.5 rounded bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                字数: <b id="statWordCount">0</b> 字
+              </span>
+              <span class="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                预估时长: <b id="statDurationMin">0.0</b> 分钟
+              </span>
+              <span class="px-2 py-0.5 rounded bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                预估镜头: <b id="statScenesCount">0</b> 镜
+              </span>
+            </div>
+          </div>
+
+          <!-- 分镜切片实时预览 -->
+          <div>
+            <div class="text-[11px] font-bold text-gray-400 mb-1.5 flex items-center justify-between">
+              <span>🔍 自动切片效果预览 (前 3 镜)：</span>
+              <span id="previewNotice" class="text-[10px] text-gray-500">载入或粘贴文案后自动计算</span>
+            </div>
+            <div id="segmentPreviewList" class="space-y-1.5 bg-gray-900/90 p-2.5 rounded-lg border border-gray-800 text-xs font-mono max-h-36 overflow-y-auto">
+              <div class="text-gray-500 text-center py-3 text-[11px]">暂无预览数据，请选择文案或粘贴内容</div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Modal 底部提交按钮 -->
+      <div class="px-6 py-3.5 border-t border-gray-800 bg-gray-950 flex items-center justify-between">
+        <span id="importStatusMessage" class="text-xs text-gray-400 font-medium"></span>
+        <div class="flex items-center gap-3">
+          <button type="button" onclick="toggleImportScriptModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300">
+            取消
+          </button>
+          <button type="button" id="confirmImportBtn" onclick="confirmImportScript()" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed">
+            🚀 确认导入并立即进入工程
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- 新建空白文案工程弹窗 -->
+  <div id="createBlankProjectModal" onclick="if(event.target===this) closeCreateBlankProjectModal()" class="studio-modal fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-md p-5 rounded-2xl border border-emerald-500/40 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-2.5 border-b border-gray-800">
+        <h3 class="text-base font-black text-white flex items-center gap-2">
+          <span>✨ 新建空白文案工程</span>
+        </h3>
+        <button type="button" onclick="closeCreateBlankProjectModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer">✕</button>
+      </div>
+      <p class="text-xs text-gray-400 leading-relaxed">
+        将创建一个全新的空白文案工程并立即切换过去（原工程的文案与分镜数据保持完好不受影响）。
+      </p>
+      <div class="space-y-3">
+        <div>
+          <label class="block text-xs font-bold text-gray-300 mb-1">🏷️ 新视频核心选题 / 标题（可先留空）</label>
+          <input type="text" id="newBlankProjTitleInput" placeholder="例如：为什么东京的地铁线路这么复杂却极少晚点？"
+            class="w-full bg-gray-950 text-white text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-emerald-500" />
+        </div>
+        <div>
+          <label class="block text-xs font-bold text-gray-300 mb-1">🆔 自定义工程 ID（可选，仅英文/数字/下划线）</label>
+          <input type="text" id="newBlankProjIdInput" placeholder="留空将自动生成，如 why_new_xxxxxx"
+            class="w-full bg-gray-950 text-white font-mono text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-emerald-500" />
+        </div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-gray-800">
+        <button type="button" onclick="closeCreateBlankProjectModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">取消</button>
+        <button type="button" id="btnConfirmCreateBlankProj" onclick="confirmCreateBlankProject()" class="px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white shadow cursor-pointer">
+          🚀 创建并从第 1 步开始
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 清零重做当前工程文案二次确认弹窗 -->
+  <div id="resetWriterConfirmModal" onclick="if(event.target===this) closeResetWriterConfirmModal()" class="studio-modal fixed inset-0 bg-black/75 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-md p-5 rounded-2xl border border-rose-500/50 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-2.5 border-b border-gray-800">
+        <h3 class="text-base font-black text-rose-300 flex items-center gap-2">
+          <span>⚠️ 确认清零重做当前工程文案？</span>
+        </h3>
+        <button type="button" onclick="closeResetWriterConfirmModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer">✕</button>
+      </div>
+      <div class="p-3 rounded-xl bg-rose-950/30 border border-rose-500/30 text-xs text-gray-200 leading-relaxed space-y-1.5">
+        <div>此操作将清空当前工程 <code id="resetTargetProjId" class="px-1.5 py-0.5 rounded bg-gray-900 text-amber-300 font-mono"></code> 的全部文案创作台草稿：</div>
+        <div class="text-rose-300 font-semibold">• Brief 立项、原始资料、证据卡、大纲、各章正文与定稿全文均将被重置为空。</div>
+        <div class="text-emerald-300">• 安全保障：右侧「视觉分镜制作台」已有的镜头表与上传素材不会被删除。</div>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-gray-800">
+        <button type="button" onclick="closeResetWriterConfirmModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">取消</button>
+        <button type="button" id="btnConfirmResetWriter" onclick="confirmResetWriterProject()" class="px-4 py-2 text-xs font-black rounded-xl bg-rose-600 hover:bg-rose-500 text-white shadow cursor-pointer">
+          🔄 确认清零并回到第 1 步
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 文案创作台提示词模板与风格预设弹窗 (对标 8080 端 · 仅对当前工程生效 · 全量可编辑) -->
+  <div id="writerPromptsModal" onclick="if(event.target===this) closeWriterPromptsModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 hidden">
+    <div class="card w-full max-w-5xl max-h-[92vh] p-5 rounded-2xl border border-teal-500/50 shadow-2xl flex flex-col gap-3.5 overflow-hidden bg-gray-950">
+      <!-- Header -->
+      <div class="flex items-center justify-between pb-3 border-b border-gray-800 shrink-0">
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <span class="text-base font-black text-white flex items-center gap-1.5">
+            <span>⚙️</span><span>文案创作台提示词设置（对应 5 步工作流）</span>
+          </span>
+          <span id="writerModalPromptBadge" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700">
+            出厂默认基线
+          </span>
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            仅对当前工程生效 · <code id="writerPromptsTargetProjId" class="font-mono"></code>
+          </span>
+        </div>
+        <button type="button" onclick="closeWriterPromptsModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer text-lg">✕</button>
+      </div>
+
+      <!-- 5-Step Tabs -->
+      <div id="writerPromptStageTabs" class="flex items-center gap-1.5 overflow-x-auto pb-2 border-b border-gray-800/80 shrink-0">
+      </div>
+      <!-- Sub-stage Tabs (only shown when a step has multiple AI prompts, e.g. Step 1 / Step 5) -->
+      <div id="writerPromptSubTabs" class="hidden flex items-center gap-1.5 flex-wrap pb-1 shrink-0">
+      </div>
+
+      <!-- Main Full-Width Prompt Editor -->
+      <div class="studio-modal-content flex-1 min-h-0 flex flex-col gap-2 overflow-hidden">
+        <div class="flex items-center justify-between text-xs shrink-0">
+          <span id="writerPromptEditorTitle" class="font-bold text-teal-300">当前编辑：1. 立项与资料</span>
+          <span class="text-[11px] text-gray-400">支持全量编辑当前步骤的系统提示词</span>
+        </div>
+        <div id="writerPromptStageDesc" class="text-[11px] text-gray-400 shrink-0"></div>
+        <textarea id="writerPromptTextarea" spellcheck="false" oninput="onWriterPromptTextareaInput()" class="flex-1 min-h-[320px] w-full bg-[#030712] text-gray-100 font-mono text-xs leading-relaxed border border-gray-700 focus:border-teal-400 focus:outline-none rounded-xl p-3.5 resize-none"></textarea>
+        <div id="writerQuickChipsEditor" class="hidden flex-1 min-h-[320px] flex flex-col gap-2 overflow-hidden">
+          <div class="flex items-center justify-between gap-2 shrink-0">
+            <span class="text-[11px] text-gray-300">点击第 5 步快捷按钮时，会将下方对应的 Prompt 填入审稿意见框（支持自由修改、增删）：</span>
+            <button type="button" onclick="addWriterQuickChipRow()" class="px-2.5 py-1 rounded-lg bg-teal-600/25 hover:bg-teal-600/40 border border-teal-500/40 text-teal-200 text-[11px] font-bold shrink-0 cursor-pointer">
+              ➕ 新增快捷指令
+            </button>
+          </div>
+          <div id="writerQuickChipsList" class="flex-1 min-h-0 overflow-y-auto space-y-2 pr-1"></div>
+        </div>
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-400 shrink-0">
+          <div id="writerPromptEditorStatus">
+            提示：当前工程修改只保存在本工程目录，新建或切换其他工程默认沿用出厂基线。
+          </div>
+          <span class="text-[10px] text-gray-500">🛡️ 保存至 <code class="text-teal-300">data/writer-prompts.json</code>（仅对当前工程生效）</span>
+        </div>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-800 shrink-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" onclick="resetWriterPromptsFromModal(true)" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-500/40 transition cursor-pointer">
+            ↺ 重置本阶段为出厂默认
+          </button>
+          <button type="button" onclick="resetWriterPromptsFromModal(false)" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-500/40 transition cursor-pointer">
+            ↺ 全部恢复出厂基线
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="closeWriterPromptsModal()" class="px-4 py-1.5 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+            取消
+          </button>
+          <button type="button" id="btnSaveWriterPrompts" onclick="saveWriterPromptsFromModal()" class="px-4 py-1.5 text-xs font-black rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:brightness-110 text-gray-950 shadow-lg cursor-pointer">
+            💾 保存并应用到当前工程
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 视觉分镜台提示词模板与视觉风格预设弹窗 (与文案创作台保持一致 · 仅对当前工程生效 · 全量可编辑) -->
+  <div id="producerPromptsModal" onclick="if(event.target===this) closeProducerPromptsModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 hidden">
+    <div class="card w-full max-w-5xl max-h-[92vh] p-5 rounded-2xl border border-teal-500/50 shadow-2xl flex flex-col gap-3.5 overflow-hidden bg-gray-950">
+      <!-- Header -->
+      <div class="flex items-center justify-between pb-3 border-b border-gray-800 shrink-0">
+        <div class="flex items-center gap-2.5 flex-wrap">
+          <span class="text-base font-black text-white flex items-center gap-1.5">
+            <span>⚙️</span><span>视觉分镜台提示词设置</span>
+          </span>
+          <span id="producerModalPromptBadge" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700">
+            出厂默认基线
+          </span>
+          <span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+            仅对当前工程生效 · <code id="producerPromptsTargetProjId" class="font-mono"></code>
+          </span>
+        </div>
+        <button type="button" onclick="closeProducerPromptsModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer text-lg">✕</button>
+      </div>
+
+      <!-- Stage Selector Tabs -->
+      <div id="producerPromptStageTabs" class="flex items-center gap-1.5 overflow-x-auto pb-2 border-b border-gray-800/80 shrink-0">
+      </div>
+
+      <!-- Main Full-Width Prompt Editor -->
+      <div class="studio-modal-content flex-1 min-h-0 flex flex-col gap-2 overflow-hidden">
+        <div class="flex items-center justify-between text-xs shrink-0">
+          <span id="producerPromptEditorTitle" class="font-bold text-teal-300">当前编辑：1. 搜索关键词</span>
+          <span class="text-[11px] text-gray-400">支持全量编辑当前阶段的系统提示词</span>
+        </div>
+        <div id="producerPromptStageDesc" class="text-[11px] text-gray-400 shrink-0"></div>
+        <textarea id="producerPromptTextarea" spellcheck="false" oninput="onProducerPromptTextareaInput()" class="flex-1 min-h-[320px] w-full bg-[#030712] text-gray-100 font-mono text-xs leading-relaxed border border-gray-700 focus:border-teal-400 focus:outline-none rounded-xl p-3.5 resize-none"></textarea>
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-gray-400 shrink-0">
+          <div id="producerPromptEditorStatus">
+            提示：当前工程修改只保存在本工程目录，新建或切换其他工程默认沿用出厂基线。
+          </div>
+          <span class="text-[10px] text-gray-500">🛡️ 保存至 <code class="text-teal-300">data/producer-prompts.json</code>（仅对当前工程生效）</span>
+        </div>
+      </div>
+
+      <!-- Footer Actions -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-800 shrink-0">
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" onclick="resetProducerPromptsFromModal(true)" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-500/40 transition cursor-pointer">
+            ↺ 重置本阶段为出厂默认
+          </button>
+          <button type="button" onclick="resetProducerPromptsFromModal(false)" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-rose-950/50 hover:bg-rose-900/70 text-rose-300 border border-rose-500/40 transition cursor-pointer">
+            ↺ 全部恢复出厂基线
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="closeProducerPromptsModal()" class="px-4 py-1.5 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+            取消
+          </button>
+          <button type="button" id="btnSaveProducerPrompts" onclick="saveProducerPromptsFromModal()" class="px-4 py-1.5 text-xs font-black rounded-xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:brightness-110 text-gray-950 shadow-lg cursor-pointer">
+            💾 保存并应用到当前工程
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 总编审稿与定向改稿台独立弹窗（三步切换：1. 审稿意见 -> 2. 改稿方案 -> 3. GitHub 风格左右对比） -->
+  <div id="editorialRevisionModal" onclick="if(event.target===this) closeEditorialRevisionModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-sm z-40 flex items-center justify-center p-2 sm:p-4 hidden" role="dialog" aria-modal="true" aria-labelledby="editorialRevisionModalTitle">
+    <div class="card w-full max-w-7xl h-[90vh] p-4 sm:p-5 rounded-2xl border border-amber-500/50 shadow-2xl flex flex-col gap-3 overflow-hidden bg-gray-950">
+      <!-- Header -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-gray-800 shrink-0">
+        <div class="flex flex-wrap items-center gap-3">
+          <h3 id="editorialRevisionModalTitle" class="text-base font-black text-amber-300 flex items-center gap-1.5">
+            <span>🧭</span><span>总编审稿与定向改稿台</span>
+          </h3>
+          <div class="inline-flex items-center gap-1 bg-gray-900/90 p-1 rounded-xl border border-gray-800">
+            <button type="button" id="btnRevModalStepInput" onclick="switchEditorialRevisionModalStep('input')" class="px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer bg-amber-500 text-gray-950">
+              1. 审稿意见
+            </button>
+            <button type="button" id="btnRevModalStepPlan" onclick="switchEditorialRevisionModalStep('plan')" disabled class="px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed">
+              2. 改稿方案
+            </button>
+            <button type="button" id="btnRevModalStepDiff" onclick="switchEditorialRevisionModalStep('diff')" disabled class="px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed">
+              3. 左右对比
+            </button>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <select id="wRevisionSnapshotSelect" style="color-scheme: dark;" class="max-w-[230px] bg-gray-900 text-gray-200 text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400">
+            <option value="">暂无历史版本快照</option>
+          </select>
+          <button type="button" id="btnRestoreSnapshot" onclick="restoreSelectedScriptSnapshot()" disabled class="px-2.5 py-1.5 rounded-lg bg-gray-900 hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed border border-amber-500/40 text-amber-300 text-xs font-bold transition cursor-pointer">
+            ↩️ 还原版本
+          </button>
+          <button type="button" onclick="closeEditorialRevisionModal()" class="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-300 hover:text-white bg-gray-900 hover:bg-gray-800 border border-gray-700 transition cursor-pointer">
+            ✕ 关闭
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 1：审稿意见与作用域设置 -->
+      <div id="wRevisionInputBox" class="studio-modal-content flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
+        <div class="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+          <div class="p-3 rounded-xl bg-amber-950/25 border border-amber-500/30 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div class="text-gray-300">
+              <span class="font-bold text-amber-300">先出方案 · 按章改写 · 自动留快照：</span>
+              告诉 AI 哪里需要修改、增加观点或调整结构；系统先规划受影响章节，确认后再精准改写而不乱动其他好章节。
+            </div>
+            <button type="button" onclick="openWriterPromptsModal('revision_quick_chips')" class="text-xs text-teal-300 hover:text-teal-200 underline shrink-0 cursor-pointer" title="查看并自定义改稿系统提示词与全部快捷指令 Prompt">
+              ⚙️ 查看/编辑改稿与快捷指令提示词
+            </button>
+          </div>
+
+          <!-- 快捷意图标签（从当前工程提示词配置动态渲染） -->
+          <div id="wRevisionQuickChipsBar" class="flex items-center gap-2 flex-wrap text-xs"></div>
+
+          <!-- 审稿意见输入框 -->
+          <div class="space-y-1.5">
+            <label for="wRevisionInstructionInput" class="block text-xs font-bold text-gray-300">📝 总编审稿与定向改稿意见：</label>
+            <textarea id="wRevisionInstructionInput" rows="6" placeholder="写下你的审稿与改稿意见：哪里不好、要怎么改、想调整哪部分切入点或补充什么论据与案例，以及哪些章节希望保留原样..."
+              class="w-full bg-gray-900/80 text-gray-100 text-sm p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 leading-relaxed resize-y"></textarea>
+          </div>
+
+          <!-- 作用域与联网开关 -->
+          <div class="p-3 rounded-xl bg-gray-900/60 border border-gray-800 flex flex-wrap items-center gap-4 text-xs">
+            <div class="flex items-center gap-2">
+              <span class="text-gray-400 font-bold">作用范围：</span>
+              <select id="wRevisionScopeSelect" onchange="onRevisionScopeChange()" style="color-scheme: dark;" class="bg-gray-950 text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400">
+                <option value="full">🌐 全篇统筹改稿（AI 自动识别受影响章节）</option>
+                <option value="opening">🪝 仅改开篇部分</option>
+                <option value="ending">🏁 仅改结尾部分</option>
+                <option value="selected">📑 手选指定章节</option>
+              </select>
+            </div>
+            <label class="inline-flex items-center gap-2 text-gray-200 cursor-pointer select-none">
+              <input type="checkbox" id="wRevisionUseWebSearch" checked class="accent-amber-500" />
+              <span>🌐 联网查证新事件/新闻 (Tavily)</span>
+            </label>
+          </div>
+
+          <!-- 手选章节容器（仅 scope=selected 时显示） -->
+          <div id="wRevisionChapterPicker" class="hidden p-3 rounded-xl bg-gray-900/70 border border-gray-800 space-y-2">
+            <div class="text-xs font-bold text-gray-300">勾选本次允许改写的章节：</div>
+            <div id="wRevisionChapterCheckboxes" class="flex flex-wrap gap-2 text-xs"></div>
+          </div>
+        </div>
+
+        <!-- 底部操作栏 -->
+        <div class="shrink-0 pt-3 border-t border-gray-800 flex flex-wrap items-center justify-between gap-2">
+          <button type="button" onclick="closeEditorialRevisionModal()" class="px-4 py-1.5 rounded-xl border border-gray-700 text-gray-300 hover:text-white text-xs font-bold transition cursor-pointer">
+            关闭
+          </button>
+          <button type="button" id="btnPlanRevision" onclick="generateEditorialRevisionPlan()" class="px-5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:brightness-110 text-gray-950 text-xs font-black transition shadow-lg flex items-center gap-1.5 cursor-pointer">
+            <span>📋 生成改稿影响方案</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2：改稿影响方案确认 -->
+      <div id="wRevisionPlanBox" class="studio-modal-content hidden flex-1 min-h-0 flex flex-col gap-3 overflow-hidden">
+        <div class="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
+          <div class="p-3 rounded-xl bg-gray-900/75 border border-amber-500/35 space-y-1.5">
+            <div class="text-xs font-black text-amber-300">📐 改稿影响方案（可调整每章策略后再执行）</div>
+            <div id="wRevisionPlanStrategy" class="text-xs text-gray-200 leading-relaxed"></div>
+            <div id="wRevisionPlanThread" class="text-xs text-purple-300 hidden"></div>
+          </div>
+
+          <!-- 联网查证来源 -->
+          <div id="wRevisionFactsBox" class="hidden p-3 rounded-xl bg-gray-900/80 border border-cyan-500/30 space-y-2 text-xs">
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <span class="font-bold text-cyan-300">🌐 联网查证到的参考来源（改写时将严格依托以下事实）：</span>
+              <label class="inline-flex items-center gap-1.5 text-gray-300 cursor-pointer select-none">
+                <input type="checkbox" id="wRevisionSaveEvidenceCheckbox" checked class="accent-cyan-500" />
+                <span>采纳时自动沉淀为证据卡</span>
+              </label>
+            </div>
+            <div id="wRevisionFactsList" class="space-y-1.5 text-gray-300"></div>
+          </div>
+          <div id="wRevisionSearchWarning" class="hidden text-xs text-amber-300 bg-amber-950/30 border border-amber-500/30 rounded-xl px-3 py-2"></div>
+
+          <!-- 分章改稿策略列表 -->
+          <div id="wRevisionPlanRows" class="space-y-2"></div>
+        </div>
+
+        <div class="shrink-0 pt-3 border-t border-gray-800 flex flex-wrap items-center justify-between gap-2">
+          <button type="button" onclick="cancelEditorialRevisionPlan()" class="px-3.5 py-1.5 rounded-xl border border-gray-700 text-gray-300 hover:text-white text-xs font-bold transition cursor-pointer">
+            取消方案
+          </button>
+          <button type="button" id="btnExecuteRevision" onclick="executeEditorialRevisionUI()" class="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-lg transition cursor-pointer">
+            <span>🚀 按此方案执行定向改稿</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Step 2：GitHub 风格左右对比 Diff 审阅 -->
+      <div id="wRevisionDiffBox" class="studio-modal-content hidden flex-1 min-h-0 flex flex-col gap-2.5 overflow-hidden">
+        <div class="shrink-0 flex flex-wrap items-center justify-between gap-2">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-xs font-black text-emerald-400">🔍 定向改稿对比审阅</span>
+            <span id="wRevisionDiffSummary" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30"></span>
+          </div>
+        </div>
+
+        <!-- 追评输入框 -->
+        <div id="wRevisionFollowUpBox" class="hidden shrink-0 flex flex-col sm:flex-row gap-2 p-2.5 rounded-xl bg-gray-900 border border-purple-500/40">
+          <input type="text" id="wRevisionFollowUpInput" placeholder="输入补充修改意见（如：加强过渡衔接、调整篇幅节奏或补充论据）..." class="flex-1 bg-gray-950 text-white text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-400" />
+          <button type="button" id="btnSubmitRevisionFollowUp" onclick="submitRevisionFollowUp()" class="px-3.5 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shrink-0 cursor-pointer">重新生成方案</button>
+        </div>
+
+        <!-- Diff 主视图 -->
+        <div class="flex-1 min-h-0 flex flex-col rounded-xl border border-gray-800 bg-[#0d1117] overflow-hidden">
+          <div class="shrink-0 px-3 py-2 bg-[#161b22] border-b border-gray-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div class="flex items-center gap-3 font-mono">
+              <span class="font-bold text-gray-200">GitHub 风格改稿对比</span>
+              <span class="text-emerald-400 font-bold">+<span id="wRevisionAddedCount">0</span> 新增/改写</span>
+              <span class="text-rose-400 font-bold">-<span id="wRevisionRemovedCount">0</span> 原文删改</span>
+            </div>
+            <div class="flex items-center gap-3">
+              <label class="inline-flex items-center gap-1.5 text-gray-300 cursor-pointer select-none">
+                <input type="checkbox" id="wRevisionChangesOnly" onchange="renderRevisionDiffView()" class="accent-amber-500" />
+                <span>仅看改动</span>
+              </label>
+              <div class="inline-flex p-0.5 bg-gray-900 rounded-lg border border-gray-700">
+                <button type="button" id="btnRevDiffSplit" onclick="setRevisionDiffMode('split')" class="px-2.5 py-0.5 rounded bg-amber-600 text-white font-bold cursor-pointer">左右并排</button>
+                <button type="button" id="btnRevDiffUnified" onclick="setRevisionDiffMode('unified')" class="px-2.5 py-0.5 rounded text-gray-400 hover:text-white font-bold cursor-pointer">红绿混合</button>
+              </div>
+            </div>
+          </div>
+          <div id="wRevisionDiffBody" class="flex-1 min-h-0 overflow-y-auto font-mono text-xs leading-relaxed divide-y divide-gray-800/50"></div>
+        </div>
+
+        <!-- 底部固定决策栏 -->
+        <div class="shrink-0 pt-3 border-t border-gray-800 flex flex-wrap items-center justify-between gap-2">
+          <span class="text-xs text-gray-300">❓ 是否保留本次改稿？点击「保留并替换定稿」将自动备份原稿快照。</span>
+          <div class="flex items-center gap-2 flex-wrap">
+            <button type="button" onclick="discardEditorialRevisionResult()" class="px-3 py-1.5 rounded-xl bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-rose-300 text-xs font-bold transition cursor-pointer">
+              ↩️ 放弃改动，保留原稿
+            </button>
+            <button type="button" onclick="openRevisionFollowUp()" class="px-3 py-1.5 rounded-xl bg-purple-600/25 hover:bg-purple-600/45 border border-purple-500/40 text-purple-200 text-xs font-bold transition cursor-pointer">
+              💬 基于此版继续追评
+            </button>
+            <button type="button" id="btnApplyRevision" onclick="applyEditorialRevisionUI()" class="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow-lg transition cursor-pointer">
+              ✅ 保留并替换定稿
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ✨ 全篇文案 AI 修复器独立弹窗 (De-AI Humanizer) -->
+  <div id="humanizeWorkbenchModal" onclick="if(event.target===this) closeHumanizeWorkbenchModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-sm z-40 flex items-center justify-center p-3 sm:p-5 hidden" role="dialog" aria-modal="true" aria-labelledby="humanizeWorkbenchModalTitle">
+    <div class="card w-full max-w-2xl p-5 rounded-2xl border border-violet-500/50 shadow-2xl flex flex-col gap-4 bg-gray-950">
+      <!-- Header -->
+      <div class="flex items-center justify-between gap-2 pb-3 border-b border-gray-800">
+        <div class="flex items-center gap-2 flex-wrap">
+          <h3 id="humanizeWorkbenchModalTitle" class="text-base font-black text-violet-300 flex items-center gap-1.5">
+            <span>✨ 全篇文案 AI 修复器 (De-AI Humanizer)</span>
+          </h3>
+          <span id="wHumanizeVersionBadge" class="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-gray-800 text-gray-400 border border-gray-700">
+            📄 原稿未修复 (v1.0)
+          </span>
+        </div>
+        <button type="button" onclick="closeHumanizeWorkbenchModal()" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer text-base">✕</button>
+      </div>
+
+      <!-- Body -->
+      <div class="space-y-4 text-xs">
+        <p class="text-gray-300 leading-relaxed">
+          物理斩断 AI 八股套话，打碎长难句建立呼吸感，注入生动生活类比与幽默感；修复完成后会在主区展示 GitHub 风格对比，确认前不会覆盖原定稿。
+        </p>
+
+        <!-- 人设语态选择 -->
+        <div class="p-3 rounded-xl bg-gray-900/70 border border-gray-800 space-y-2.5">
+          <div class="font-bold text-gray-200">🎭 选择修复人设语态：</div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button type="button" id="btnStyleHumor" onclick="selectHumanizeStyle('humorous')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-violet-600 text-white transition shadow cursor-pointer">
+              🎭 幽默风趣主播型 (推荐)
+            </button>
+            <button type="button" id="btnStyleSuspense" onclick="selectHumanizeStyle('suspense')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 transition cursor-pointer">
+              💡 睿智悬疑反转型
+            </button>
+            <button type="button" id="btnStyleColloquial" onclick="selectHumanizeStyle('colloquial')" class="px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 transition cursor-pointer">
+              ☕ 亲切老友大白话
+            </button>
+          </div>
+        </div>
+
+        <!-- 清洗准则指示徽章 -->
+        <div class="flex items-center gap-2 text-[11px] text-gray-400 flex-wrap">
+          <span class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-800 text-rose-300">🚫 严禁“不可否认/总而言之”</span>
+          <span class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-800 text-blue-300">✂️ 18字长句碎化</span>
+          <span class="px-2 py-1 rounded-lg bg-gray-900 border border-gray-800 text-amber-300">💡 注入生活幽默比喻</span>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-800">
+        <div class="flex items-center gap-2">
+          <button type="button" onclick="closeHumanizeWorkbenchModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl border border-gray-700 text-gray-300 hover:text-white transition cursor-pointer">
+            关闭
+          </button>
+          <button type="button" onclick="saveFinalScriptOnlyUI()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 transition shadow cursor-pointer" title="启动修复前先将当前文本框原稿保存到本地 final-script.json">
+            <span>💾 先存原稿</span>
+          </button>
+        </div>
+        <button type="button" onclick="executeFullScriptHumanize()" id="btnExecuteHumanize" class="px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
+          <span>🪄 启动全篇 AI 真人化修复</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 统一操作完成提示弹窗 (Producer & Writer 通用) -->
+  <div id="studioCompletionModal" onclick="if(event.target===this) closeCompletionModal()" role="dialog" aria-modal="true" aria-labelledby="completionModalTitle" class="studio-modal fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-md p-5 rounded-2xl border border-emerald-500/40 bg-gray-950 shadow-2xl space-y-4">
+      <div class="flex items-start justify-between gap-3 pb-3 border-b border-gray-800">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <span id="completionModalIcon" class="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/35 flex items-center justify-center text-lg shrink-0">✅</span>
+          <div class="min-w-0">
+            <h3 id="completionModalTitle" class="text-base font-black text-white truncate">已完成</h3>
+            <p id="completionModalTime" class="text-[11px] font-mono text-gray-400 mt-0.5"></p>
+          </div>
+        </div>
+        <button type="button" onclick="closeCompletionModal()" aria-label="关闭完成提示" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer shrink-0">✕</button>
+      </div>
+      <div class="space-y-2.5">
+        <p id="completionModalMessage" class="text-sm font-semibold text-gray-100 leading-relaxed whitespace-pre-wrap"></p>
+        <div id="completionModalDetail" class="hidden p-3 rounded-xl bg-gray-900/90 border border-gray-800 text-xs text-gray-300 leading-relaxed whitespace-pre-wrap"></div>
+      </div>
+      <div class="flex justify-end pt-2 border-t border-gray-800">
+        <button type="button" id="completionModalConfirmBtn" onclick="closeCompletionModal()" class="px-5 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:brightness-110 text-gray-950 shadow-lg cursor-pointer transition">
+          知道了
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast 提示 -->
+  <div id="toast" class="fixed bottom-6 right-6 px-4 py-2.5 rounded-xl bg-amber-500 text-gray-950 font-extrabold text-xs shadow-2xl transition duration-300 hidden z-50">
+  </div>
+
+  <script src="/studio/js/app-core.js"></script>
+    <script src="/studio/js/writer-studio.js"></script>
+    <script src="/studio/js/audio-render.js"></script>
+    <script src="/studio/js/producer-studio.js"></script>
+    <script src="/studio/js/prompt-modals.js"></script>
+</body>
+</html>

@@ -7,7 +7,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { FONT_STACK, TimelineTrackProp } from "../types";
+import { TimelineTrackProp } from "../types";
 import { MissingAssetScene } from "./MissingAssetScene";
 import { TextOverlayLayer } from "./TextOverlayLayer";
 
@@ -22,8 +22,6 @@ export const PhotoMotionScene: React.FC<{ track: TimelineTrackProp }> = ({
   }
 
   const modifiers = track.media_modifiers;
-  const isLowConf =
-    track.confidence_score > 0 && track.confidence_score < 0.7;
 
   // 1. 动态运镜配置计算 (默认或 AI 指定的动效)
   const motion = modifiers?.motion;
@@ -103,36 +101,6 @@ export const PhotoMotionScene: React.FC<{ track: TimelineTrackProp }> = ({
 
       {/* 顶层动效艺术字贴层 */}
       <TextOverlayLayer track={track} />
-
-      {isLowConf && (
-        <div
-          style={{
-            position: "absolute",
-            top: 195,
-            left: 140,
-            right: 140,
-            backgroundColor: "rgba(15, 20, 25, 0.88)",
-            border: "2px solid #EF4444",
-            borderRadius: 14,
-            padding: "24px 32px",
-            fontFamily: FONT_STACK,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 22,
-              color: "#F87171",
-              fontWeight: 800,
-            }}
-          >
-            ⚠️ PHOTO_MOTION · 低置信度素材需确认
-          </div>
-          <div style={{ marginTop: 10, fontSize: 18, color: "#FECACA" }}>
-            <strong>提示：</strong>
-            {track.review_reason || "该镜头画面建议核验"}
-          </div>
-        </div>
-      )}
     </AbsoluteFill>
   );
 };

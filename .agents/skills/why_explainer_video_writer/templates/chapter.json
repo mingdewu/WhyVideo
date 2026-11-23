@@ -31,6 +31,10 @@
       "type": "string",
       "description": "本章回答的唯一子问题"
     },
+    "direct_reason_to_title": {
+      "type": "string",
+      "description": "本章对全片总标题‘为什么’所贡献的直接原因（因为……）"
+    },
     "revision_count": {
       "type": "integer",
       "minimum": 0,

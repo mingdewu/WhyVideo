@@ -55,6 +55,7 @@
           "chapter_number",
           "chapter_title",
           "sub_question",
+          "direct_reason_to_title",
           "mechanism_or_background_summary",
           "planned_examples",
           "supporting_evidence_ids",
@@ -73,6 +74,10 @@
           "sub_question": {
             "type": "string",
             "description": "本章唯一要回答的子问题"
+          },
+          "direct_reason_to_title": {
+            "type": "string",
+            "description": "本章对总标题‘为什么’的直接原因回答（必须以‘因为……’一句话写明本章贡献了哪一层直接原因；写不出直接原因的跑题章节不得立项）"
           },
           "mechanism_or_background_summary": {
             "type": "string",

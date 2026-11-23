@@ -1,0 +1,134 @@
+    body { background-color: #0B0F17; color: #E2E8F0; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .card { background-color: #151D2A; border: 1px solid #233044; }
+    .db-table th { background-color: #1A2436; border-bottom: 2px solid #2E3D52; border-right: 1px solid #233044; position: sticky; top: 0; z-index: 10; }
+    .db-table td { border-bottom: 1px solid #233044; border-right: 1px solid #233044; vertical-align: top; }
+    .db-table tr:hover td { background-color: #192334; }
+    .badge-gold { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .badge-warn { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .badge-danger { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5); }
+    .dropzone-hover { border-color: #38bdf8 !important; background-color: rgba(56, 189, 248, 0.25) !important; transform: scale(1.02); }
+    .scene-field-label { display: none; }
+
+    @media (max-width: 1023px) {
+      body.studio-page { padding: 0.75rem; overflow-wrap: anywhere; }
+      #appRootShell input:not([type="checkbox"], [type="radio"], [type="file"]),
+      #appRootShell select, #appRootShell textarea,
+      .studio-modal input:not([type="checkbox"], [type="radio"], [type="file"]),
+      .studio-modal select, .studio-modal textarea {
+        min-width: 0;
+        max-width: 100%;
+        font-size: 1rem;
+      }
+      #appRootShell :is(button, a, label:has(input[type="radio"])),
+      #appRootShell :is(input[type="text"], input[type="number"], select),
+      .studio-modal :is(input[type="text"], input[type="password"], select),
+      .studio-modal button { min-height: 44px; }
+      #appRootShell :is(button, a), .studio-modal button { white-space: normal; }
+      #appHeader .project-picker {
+        width: 100%;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto auto;
+      }
+      .project-picker label { grid-column: 1 / -1; }
+      .project-picker select { width: 100%; }
+      .workspace-tabs { width: 100%; }
+      .workspace-tabs button { flex: 1; justify-content: center; min-width: 0; }
+      #projectHeaderTitle { white-space: normal; }
+      #producerHeaderActions:not(.hidden), #writerHeaderActions:not(.hidden) {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 0.5rem;
+      }
+      #producerHeaderActions > *, #writerHeaderActions > * {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding-inline: 0.5rem;
+        text-align: center;
+      }
+      #producerHeaderActions > :last-child:nth-child(odd),
+      #writerHeaderActions > :last-child:nth-child(odd) {
+        grid-column: 1 / -1;
+      }
+      #writerMainGrid > *, .writer-step-panel { min-width: 0; }
+      #writerMainGrid, .writer-step-panel { scroll-margin-block-start: 0.75rem; }
+      #writerSteps button > div { white-space: normal; }
+      #wStep1ImportDuration, #importTargetDuration { flex: 1; }
+
+      #producerSceneList { max-height: none; min-height: 0; overflow: visible; }
+      .scene-list .db-table { display: block; }
+      .scene-list thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+      }
+      .scene-list tbody { display: grid; gap: 0.75rem; background: #0b0f17; }
+      .scene-list tbody tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        background: #151d2a;
+        border: 1px solid #233044;
+        border-radius: 0.75rem;
+      }
+      .scene-list .db-table td {
+        display: block;
+        border: 0;
+        padding: 0.75rem;
+        text-align: left;
+        min-width: 0;
+        max-width: 100%;
+      }
+      .scene-list td:first-child {
+        background: #1a2436;
+        border-radius: 0.75rem 0.75rem 0 0;
+      }
+      .scene-list td:nth-child(2) textarea { min-height: 6rem; }
+      .scene-list td:has(.inactive-visual-editor) { display: none; }
+      .scene-list .db-table td + td { border-top: 1px solid #233044; }
+      .scene-field-label {
+        display: block;
+        margin-bottom: 0.5rem;
+        color: #cbd5e1;
+        font-size: 0.8125rem;
+        font-weight: 700;
+      }
+      .scene-save-bar { flex-wrap: wrap; gap: 0.75rem; }
+      .scene-save-bar button { width: 100%; }
+      .scene-asset-actions { flex-wrap: wrap; gap: 0.5rem; }
+
+      .studio-modal.fixed { padding: 0.75rem; }
+      .studio-modal > .card {
+        max-height: calc(100dvh - 1.5rem);
+        min-width: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        padding: 0.875rem;
+      }
+      .studio-modal .studio-modal-content {
+        flex: none;
+        overflow: visible;
+      }
+      .studio-modal button:is(.w-8, .w-9) { min-width: 44px; flex-shrink: 0; }
+      #writerPromptStageTabs { flex-wrap: wrap; }
+      #toast { inset-inline: 0.75rem; bottom: 0.75rem; }
+    }
+
+    @media (min-width: 1024px) {
+      body.writer-compact-mode { height: 100vh; min-height: 0; overflow: hidden; padding: 0.75rem 1.25rem; }
+      body.writer-compact-mode #appRootShell { height: 100%; display: flex; flex-direction: column; gap: 0.625rem; }
+      body.writer-compact-mode #appRootShell > * { margin-top: 0 !important; }
+      body.writer-compact-mode #appHeader { padding-bottom: 0.5rem; gap: 0.5rem 1rem; flex-shrink: 0; }
+      body.writer-compact-mode #viewWriterContainer:not(.hidden) { flex: 1 1 0%; min-height: 0; display: flex; flex-direction: column; gap: 0.625rem; }
+      body.writer-compact-mode #viewWriterContainer > * { margin-top: 0 !important; }
+      body.writer-compact-mode .writer-step-panel:not(.hidden) { height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+    }
+
+    @keyframes voicePulseRing {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.55); }
+      50% { box-shadow: 0 0 0 4px rgba(244, 63, 94, 0.15); }
+    }
+    .voice-recording-pulse {
+      animation: voicePulseRing 1.4s ease-in-out infinite;
+    }

@@ -1,5 +1,5 @@
 import React from "react";
-import { AbsoluteFill, Audio, Sequence, staticFile } from "remotion";
+import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
 import { CaptionLayer } from "./CaptionLayer";
 import { ReviewHud } from "./ReviewHud";
 import { BrollScene } from "./scenes/BrollScene";
@@ -10,7 +10,7 @@ import { PhotoMotionScene } from "./scenes/PhotoMotionScene";
 import { TimelineScene } from "./scenes/TimelineScene";
 import { VersusDualScene } from "./scenes/VersusDualScene";
 import { DocumentHighlightScene } from "./scenes/DocumentHighlightScene";
-import { BgmTrackProp, RenderPropsType, TimelineTrackProp } from "./types";
+import { BgmTrackProp, RenderPropsType, SceneTransitionProp, TimelineTrackProp } from "./types";
 
 function dbToGain(db: number): number {
   if (!Number.isFinite(db)) return 0.15;
@@ -99,30 +99,68 @@ function computeBgmVolume(
   return Math.min(1, Math.max(0, gain));
 }
 
+function computeSceneTransitionOpacity(
+  frame: number,
+  totalFrames: number,
+  transition?: SceneTransitionProp
+): number {
+  const inType = transition?.in ?? "fade";
+  const outType = transition?.out ?? "fade";
+  const rawDuration = transition?.duration_frames ?? 12;
+
+  const safeTotal = Math.max(1, totalFrames);
+  const maxPerSide = Math.floor(safeTotal / 2);
+  const fadeInFrames = inType === "fade" ? Math.min(Math.max(0, rawDuration), maxPerSide) : 0;
+  const fadeOutFrames = outType === "fade" ? Math.min(Math.max(0, rawDuration), maxPerSide) : 0;
+
+  const smoothstep = (t: number) => t * t * (3 - 2 * t);
+
+  let opacity = 1;
+  if (fadeInFrames > 0 && frame < fadeInFrames) {
+    opacity = Math.min(opacity, smoothstep(Math.max(0, frame / fadeInFrames)));
+  }
+  if (fadeOutFrames > 0) {
+    const framesRemaining = safeTotal - 1 - frame;
+    if (framesRemaining < fadeOutFrames) {
+      opacity = Math.min(opacity, smoothstep(Math.max(0, framesRemaining / fadeOutFrames)));
+    }
+  }
+
+  return Math.min(1, Math.max(0, opacity));
+}
+
 const SceneDispatcher: React.FC<{ track: TimelineTrackProp; isFinalRender?: boolean }> = ({ track, isFinalRender }) => {
+  const frame = useCurrentFrame();
   const isMissing =
     track.status === "NEEDS_HUMAN_ASSET" ||
     track.render_mode === "placeholder_awaiting_human_asset";
+  const opacity = computeSceneTransitionOpacity(
+    frame,
+    track.duration_in_frames,
+    track.transition
+  );
 
   return (
     <AbsoluteFill>
-      {isMissing ? (
-        <MissingAssetScene track={track} />
-      ) : track.visual_type === "broll_video" ? (
-        <BrollScene track={track} />
-      ) : track.visual_type === "photo_motion" ? (
-        <PhotoMotionScene track={track} />
-      ) : track.visual_type === "kinetic_text" ? (
-        <KineticTextScene track={track} />
-      ) : track.visual_type === "timeline" ? (
-        <TimelineScene track={track} />
-      ) : track.visual_type === "versus_dual" ? (
-        <VersusDualScene track={track} />
-      ) : track.visual_type === "document_highlight" ? (
-        <DocumentHighlightScene track={track} />
-      ) : (
-        <DataCardScene track={track} />
-      )}
+      <AbsoluteFill style={{ opacity }}>
+        {isMissing ? (
+          <MissingAssetScene track={track} />
+        ) : track.visual_type === "broll_video" ? (
+          <BrollScene track={track} />
+        ) : track.visual_type === "photo_motion" ? (
+          <PhotoMotionScene track={track} />
+        ) : track.visual_type === "kinetic_text" ? (
+          <KineticTextScene track={track} />
+        ) : track.visual_type === "timeline" ? (
+          <TimelineScene track={track} />
+        ) : track.visual_type === "versus_dual" ? (
+          <VersusDualScene track={track} />
+        ) : track.visual_type === "document_highlight" ? (
+          <DocumentHighlightScene track={track} />
+        ) : (
+          <DataCardScene track={track} />
+        )}
+      </AbsoluteFill>
       {!isFinalRender && <ReviewHud track={track} />}
     </AbsoluteFill>
   );

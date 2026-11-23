@@ -7,7 +7,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { FONT_STACK, TimelineTrackProp } from "../types";
+import { TimelineTrackProp } from "../types";
 import { MissingAssetScene } from "./MissingAssetScene";
 import { TextOverlayLayer } from "./TextOverlayLayer";
 
@@ -114,44 +114,6 @@ export const BrollScene: React.FC<{ track: TimelineTrackProp }> = ({
 
       {/* 顶层动效艺术字贴层 */}
       <TextOverlayLayer track={track} />
-
-      <div
-        style={{
-          position: "absolute",
-          top: 230,
-          left: 160,
-          right: 160,
-          backgroundColor: "rgba(15, 20, 25, 0.86)",
-          border: "2px solid #F59E0B",
-          borderRadius: 14,
-          padding: "28px 36px",
-          fontFamily: FONT_STACK,
-        }}
-      >
-        <div style={{ fontSize: 22, color: "#38BDF8", fontWeight: 700 }}>
-          🎬 B-ROLL VIDEO · {track.approved_asset.asset_id} (
-          {track.approved_asset.license_status})
-          {trimStartSec > 0 || trimEndSec ? (
-            <span style={{ marginLeft: 12, color: "#34D399" }}>
-              ⏱️ 剪裁区间: {trimStartSec}s ~ {trimEndSec ?? "末尾"}s
-            </span>
-          ) : null}
-        </div>
-        <div
-          style={{
-            fontSize: 32,
-            color: "#F3F4F6",
-            fontWeight: 800,
-            marginTop: 10,
-            lineHeight: 1.4,
-          }}
-        >
-          {track.visual_purpose}
-        </div>
-        <div style={{ fontSize: 20, color: "#9CA3AF", marginTop: 12 }}>
-          Must Show: {track.must_show.join(" | ")}
-        </div>
-      </div>
     </AbsoluteFill>
   );
 };

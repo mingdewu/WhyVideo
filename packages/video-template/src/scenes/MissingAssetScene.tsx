@@ -54,7 +54,9 @@ export const MissingAssetScene: React.FC<{ track: TimelineTrackProp }> = ({
             }}
           >
             目标类型: {track.visual_type} → 降级预览:{" "}
-            {track.fallback.fallback_scene_type}
+            {track.fallback?.fallback_scene_type ||
+              track.procedural_props?.fallback_scene_type ||
+              "data_card"}
           </div>
         </div>
 

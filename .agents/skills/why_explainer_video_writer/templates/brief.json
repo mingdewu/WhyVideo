@@ -33,7 +33,23 @@
     },
     "short_answer": {
       "type": "string",
-      "description": "基于现有资料得出的暂定核心结论（供开篇简短给出答案使用，2-4句话）"
+      "description": "基于现有资料得出的暂定核心结论（供开篇简短给出答案使用，2-4句话，须同时点明内在驱动原因与外部成立条件）"
+    },
+    "causal_pillars": {
+      "type": "object",
+      "description": "对标题‘为什么’的双向直接原因拆解（防止写成历史流水账或外围八卦）",
+      "properties": {
+        "internal_drivers": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "内在驱动原因列表（主体自身为什么非要这样做：物理/技术/人性/效率/商业必然）"
+        },
+        "external_conditions_and_boundaries": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "外部成立条件与真实边界列表（外部环境/法律/制度/成本为什么允许或锁死它，以及成立的红线边界）"
+        }
+      }
     },
     "scope": {
       "type": "object",

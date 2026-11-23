@@ -355,7 +355,7 @@ for (const sec of sections) {
         narration_text: shText,
         visual_purpose: `解说镜头 ${shotIndex}：${shText.slice(0, 20)}`,
         visual_type: visualType,
-        source_mode: 'ai_ppt_slide',
+        source_mode: 'manual_upload',
         source_asset_id: `asset_${sceneId}`,
         ppt_slide_spec: pptSpec,
         procedural_props: {
