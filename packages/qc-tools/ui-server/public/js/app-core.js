@@ -82,12 +82,16 @@
       window.history.pushState({}, '', url);
 
       const isProducer = tab === 'producer';
-      document.body.classList.toggle('writer-compact-mode', !isProducer);
+      const isWriter = tab === 'writer';
+      const isPublish = tab === 'publish';
+      document.getElementById('viewPublishContainer').classList.toggle('hidden', !isPublish);
+      document.getElementById('navTabPublish').classList.toggle('bg-emerald-700', isPublish);
+      document.body.classList.toggle('writer-compact-mode', isWriter);
       document.getElementById('viewProducerContainer').classList.toggle('hidden', !isProducer);
-      document.getElementById('viewWriterContainer').classList.toggle('hidden', isProducer);
+      document.getElementById('viewWriterContainer').classList.toggle('hidden', !isWriter);
 
       document.getElementById('producerHeaderActions').classList.toggle('hidden', !isProducer);
-      document.getElementById('writerHeaderActions').classList.toggle('hidden', isProducer);
+      document.getElementById('writerHeaderActions').classList.toggle('hidden', !isWriter);
 
       const navP = document.getElementById('navTabProducer');
       const navW = document.getElementById('navTabWriter');
@@ -107,6 +111,9 @@
         if (!manifestData || manifestData.project_id !== activeProjectId) {
           loadWorkflow();
         }
+      } else if (isPublish) {
+        document.getElementById('projectHeaderTitle').textContent = titleStr + ' · 发布台';
+        loadPublishProject();
       } else {
         document.getElementById('projectHeaderTitle').textContent = titleStr + ' · 知识长视频文案策划工坊';
         loadWriterProjectData(activeProjectId);
@@ -668,6 +675,8 @@
       updateVoiceboxStatus();
       if (currentWorkspaceTab === 'writer') {
         loadWriterProjectData(newId);
+      } else if (currentWorkspaceTab === 'publish') {
+        loadPublishProject();
       }
       showToast('🔀 已切换至工程：' + newId);
     }

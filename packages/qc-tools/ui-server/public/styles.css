@@ -6,7 +6,7 @@
     .badge-gold { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
     .badge-warn { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
     .badge-danger { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.5); }
-    .dropzone-hover { border-color: #38bdf8 !important; background-color: rgba(56, 189, 248, 0.25) !important; transform: scale(1.02); }
+    .dropzone-hover { border-color: #38bdf8 !important; background-color: rgba(56, 189, 248, 0.25) !important; }
     .scene-field-label { display: none; }
 
     @media (max-width: 1023px) {
@@ -132,3 +132,8 @@
     .voice-recording-pulse {
       animation: voicePulseRing 1.4s ease-in-out infinite;
     }
+
+/* Reserve the same space below narration before and after a media file is bound. */
+.scene-media-dropzone { aspect-ratio: 16 / 9; width: 100%; height: auto; box-sizing: border-box; overflow-y: auto; margin-top: 0.75rem; }
+.scene-media-dropzone-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.scene-media-preview { width: 100%; aspect-ratio: 16 / 9; background: #000; overflow: hidden; }

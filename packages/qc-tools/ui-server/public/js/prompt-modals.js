@@ -731,8 +731,8 @@
       refreshProducerPromptsStatus();
       updateRenderStatus();
       updateVoiceboxStatus();
-      if (currentWorkspaceTab === 'writer') {
-        switchWorkspaceTab('writer');
+      if (currentWorkspaceTab === 'writer' || currentWorkspaceTab === 'publish') {
+        switchWorkspaceTab(currentWorkspaceTab);
       }
     });
     setInterval(updateRenderStatus, 5000);

@@ -1,5 +1,5 @@
 // producer-table.js — shared classic-script scope; loaded before studio initialization.
-const SCENE_FIELD_LABELS = ['', '旁白', '画面方式', '画面内容（素材上传 / AI 生成）', '节拍调整'];
+const SCENE_FIELD_LABELS = ['', '旁白与素材预览', '画面方式', '素材下载 / AI 生成与剪辑', '节拍调整'];
 
     // 连用镜头仍保留独立旁白片段，但共享一个连续画面的时间范围。
     function getSharedVisualTiming(idx) {
@@ -528,7 +528,7 @@ const SCENE_FIELD_LABELS = ['', '旁白', '画面方式', '画面内容（素材
               ${aiInputHtml}
               ${urlDownloadBarHtml}
               <div id="dropzone_${idx}"
-                   class="border ${shortInfo.isTooShort ? 'border-rose-500/80 bg-rose-950/35' : 'border-sky-500/40 bg-sky-950/30'} rounded-xl p-2.5 text-left space-y-1.5 transition"
+                   class="scene-media-dropzone border ${shortInfo.isTooShort ? 'border-rose-500/80 bg-rose-950/35' : 'border-sky-500/40 bg-sky-950/30'} rounded-xl p-2.5 text-left space-y-1.5 transition"
                    ondragover="onFileDragOver(event, ${idx})"
                    ondragleave="onFileDragLeave(event, ${idx})"
                    ondrop="onFileDrop(event, ${idx})">
@@ -547,12 +547,12 @@ const SCENE_FIELD_LABELS = ['', '旁白', '画面方式', '画面内容（素材
                     <div id="videoShortWarn_${idx}" class="${shortInfo.isTooShort ? '' : 'hidden '}px-2.5 py-1.5 rounded-lg bg-rose-600/25 border border-rose-500 text-rose-200 text-[11px] font-bold flex items-center gap-1.5 shadow-sm">
                       ${shortInfo.isTooShort ? buildVideoShortWarnText(shortInfo, durSec) : ''}
                     </div>
-                    <div class="rounded-lg overflow-hidden bg-black border border-gray-800 aspect-video flex items-center justify-center">
-                      <video src="${videoSrc}" controls playsinline preload="metadata" onloadedmetadata="checkVideoElementDuration(this, ${idx})" class="w-full h-full object-contain"></video>
+                    <div class="scene-media-preview rounded-lg border border-gray-800 flex items-center justify-center">
+                      <video src="${videoSrc}" controls playsinline preload="auto" onloadedmetadata="checkVideoElementDuration(this, ${idx}); if (this.paused && this.duration > 0.1) this.currentTime = 0.1" class="w-full h-full object-contain"></video>
                     </div>
                   `
                     : `
-                    <div class="rounded-lg overflow-hidden bg-black border border-gray-800 aspect-video flex items-center justify-center">
+                    <div class="scene-media-preview rounded-lg border border-gray-800 flex items-center justify-center">
                       <img src="${videoSrc}" class="w-full h-full object-cover" />
                     </div>
                   `
@@ -611,7 +611,7 @@ const SCENE_FIELD_LABELS = ['', '旁白', '画面方式', '画面内容（素材
               ${aiInputHtml}
               ${urlDownloadBarHtml}
               <button type="button" id="dropzone_${idx}"
-                   class="w-full border-2 border-dashed border-sky-500/40 hover:border-sky-300 bg-sky-950/25 hover:bg-sky-900/35 rounded-xl p-2.5 text-center transition cursor-pointer group"
+                   class="scene-media-dropzone scene-media-dropzone-empty w-full border-2 border-dashed border-sky-500/40 hover:border-sky-300 bg-black rounded-xl p-2.5 text-center transition cursor-pointer group"
                    ondragover="onFileDragOver(event, ${idx})"
                    ondragleave="onFileDragLeave(event, ${idx})"
                    ondrop="onFileDrop(event, ${idx})"
@@ -631,6 +631,16 @@ const SCENE_FIELD_LABELS = ['', '旁白', '画面方式', '画面内容（素材
         hiddenFile.accept = 'video/*,image/*';
         hiddenFile.onchange = (e) => uploadFileForRow(idx, e.target.files[0]);
         td6.appendChild(hiddenFile);
+
+        // Keep the manual media slot under its narration, independent of the editing controls in column four.
+        if (!isAi) {
+          const mediaSlot = td6.querySelector('#dropzone_' + idx);
+          if (mediaSlot) {
+            mediaSlot.remove();
+            const cutPicker = td2.querySelector('#charCutPicker_' + idx);
+            td2.insertBefore(mediaSlot, cutPicker);
+          }
+        }
 
         // 7. 镜头节拍操作列 (加切点 / 挪切点 / 删切点)
         const td7 = document.createElement('td');

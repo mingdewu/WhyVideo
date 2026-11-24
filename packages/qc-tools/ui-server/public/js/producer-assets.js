@@ -23,6 +23,22 @@ function onFileDragOver(e, idx) {
         const file = e.dataTransfer.files[0];
         manifestData.scenes[idx].source_mode = 'manual_upload';
         uploadFileForRow(idx, file);
+        return;
+      }
+      const transfer = e.dataTransfer;
+      const raw = transfer?.getData('text/uri-list') || transfer?.getData('text/plain') || '';
+      const candidate = raw.split(/\r?\n/).map(line => line.trim()).find(line => line && !line.startsWith('#')) || '';
+      try {
+        const url = new URL(candidate);
+        if (!['http:', 'https:'].includes(url.protocol)) throw new Error('Unsupported URL');
+        const input = document.getElementById('urlDownloadInput_' + idx);
+        if (!input) throw new Error('Missing URL input');
+        input.value = candidate;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+        showToast('链接已填入当前镜头，请选择下载方式');
+      } catch {
+        showToast('请拖入视频链接或本地视频、图片文件');
       }
     }
 

@@ -39,6 +39,7 @@
             <button id="navTabProducer" type="button" onclick="switchWorkspaceTab('producer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow cursor-pointer">
               🎬 视觉分镜台 (Producer)
             </button>
+            <button id="navTabPublish" type="button" onclick="switchWorkspaceTab('publish')" class="px-3.5 py-1.5 text-xs font-black rounded-lg text-gray-400 hover:text-white">🚀 发布台</button>
           </div>
 
           <h1 id="projectHeaderTitle" class="text-base sm:text-lg font-black text-white truncate min-w-0">
@@ -106,6 +107,8 @@
 
   <!--PARTIAL:writer-panel-->
 
+  <!--PARTIAL:publish-panel-->
+
   <!--PARTIAL:render-confirm-->
 
   <!--PARTIAL:model-settings-->
@@ -148,6 +151,7 @@
   <!--SERVER_DEFAULT_PROJECT-->
   <script src="/studio/js/shared/prompt-rules.cjs"></script>
   <script src="/studio/js/app-core.js"></script>
+  <script src="/studio/js/publish-studio.js"></script>
   <script src="/studio/js/writer-studio.js"></script>
   <script src="/studio/js/writer-views.js"></script>
   <script src="/studio/js/writer-persistence.js"></script>

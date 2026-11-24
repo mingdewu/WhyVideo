@@ -8,6 +8,7 @@ import { handleAudioRenderRoutes } from './ui-server/routes/audio-render-routes.
 import { handleWriterRoutes } from './ui-server/routes/writer-routes.mjs';
 import { handleProducerRoutes } from './ui-server/routes/producer-routes.mjs';
 import { handleProviderRoutes } from './ui-server/routes/provider-routes.mjs';
+import { handlePublishRoutes } from './ui-server/routes/publish-routes.mjs';
 import { handleMediaRoutes } from './ui-server/routes/media-routes.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -15,6 +16,7 @@ const __dirname = path.dirname(__filename);
 const studioPublicDir = path.join(__dirname, 'ui-server', 'public');
 
 const routeHandlers = [
+  handlePublishRoutes,
   handleAudioRenderRoutes,
   handleWriterRoutes,
   handleProducerRoutes,
