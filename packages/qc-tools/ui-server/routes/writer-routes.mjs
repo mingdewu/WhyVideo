@@ -306,7 +306,7 @@ export async function handleWriterRoutes(req, res, { url, pathname, queryProject
     }
     const brief = { ...stored.brief, ...body.brief, project_id: queryProject, title };
     const materials = body.materials?.trim() || stored.materials.trim();
-    const { evidenceCards, researchedMaterials, aiText, pendingEvidenceCount } = await extractWriterEvidence(
+    const { evidenceCards, researchedMaterials, aiText, pendingEvidenceCount, error } = await extractWriterEvidence(
       queryProject, stored, brief, materials, { model, apiKey, baseUrl }
     );
     if (Array.isArray(evidenceCards) && evidenceCards.length > 0) {
@@ -317,7 +317,7 @@ export async function handleWriterRoutes(req, res, { url, pathname, queryProject
       return res.end(JSON.stringify({ ok: true, evidenceCards, researchedMaterials, pendingEvidenceCount }));
     }
     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-    return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '大模型未返回证据卡 JSON 数组', rawAi: aiText }));
+    return res.end(JSON.stringify({ ok: false, error: error || '模型未返回有效证据卡，请补充资料后重试', rawAi: aiText }));
   }
 
   // 自动为待核查事实补找来源，并核对搜索结果中的原文摘录
@@ -376,7 +376,7 @@ export async function handleWriterRoutes(req, res, { url, pathname, queryProject
       const extracted = await extractWriterEvidence(queryProject, stored, brief, materials, { model, apiKey, baseUrl });
       if (!Array.isArray(extracted.evidenceCards) || extracted.evidenceCards.length === 0) {
         res.writeHead(502, { 'Content-Type': 'application/json; charset=utf-8' });
-        return res.end(JSON.stringify({ ok: false, error: globalThis.__lastWriterLlmError || '未能提取证据卡，请在第 2 步补充资料后重试' }));
+        return res.end(JSON.stringify({ ok: false, error: extracted.error || '未能提取证据卡，请在第 2 步补充资料后重试' }));
       }
       evidenceCards = extracted.evidenceCards;
       saveWriterProjectData(queryProject, 'evidenceCards', evidenceCards);

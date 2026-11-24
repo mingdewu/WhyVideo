@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { rootDir, getPaths } from './config.mjs';
-import { callOpenRouterText } from './llm-gateway.mjs';
+import { callOpenRouterText, extractJsonFromText } from './llm-gateway.mjs';
 import { renderProducerPrompt } from '../../producer-prompts.mjs';
 import { scenesText, sceneSpokenRanges, spokenIndex } from '../../narration-timing.mjs';
 
@@ -435,7 +435,7 @@ export async function callSearchKeywordExtractor(cfg, narrationText, projectCont
         { role: 'user', content: userMessage },
       ],
       temperature: excludeKeyword ? 0.55 : 0.25,
-      max_tokens: 120,
+      max_tokens: 512,
     }),
   });
 
@@ -445,16 +445,23 @@ export async function callSearchKeywordExtractor(cfg, narrationText, projectCont
   }
 
   const resJson = await response.json();
+  if (resJson.choices?.[0]?.finish_reason === 'length') {
+    throw new Error('模型输出被截断，未生成完整搜索词，请重试或更换关键词模型');
+  }
   const raw = resJson.choices?.[0]?.message?.content?.trim() || '';
   if (!raw) {
     throw new Error('模型未返回有效关键词内容');
   }
 
+  const keyword = parseSearchKeyword(raw);
+  return { keyword, keywords: [keyword], usedModel: model };
+}
+
+export function parseSearchKeyword(raw) {
   let candidates = [];
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
-  try {
-    const objOrArrMatch = cleaned.match(/[\[{][\s\S]*[\]}]/);
-    const jsonVal = JSON.parse(objOrArrMatch ? objOrArrMatch[0] : cleaned);
+  const jsonVal = extractJsonFromText(cleaned);
+  if (jsonVal !== null) {
     if (typeof jsonVal === 'string') {
       candidates = [jsonVal];
     } else if (jsonVal && typeof jsonVal.keyword === 'string') {
@@ -464,15 +471,18 @@ export async function callSearchKeywordExtractor(cfg, narrationText, projectCont
     } else if (Array.isArray(jsonVal?.keywords)) {
       candidates = jsonVal.keywords;
     }
-  } catch (e) {
+  } else if (!/[{}\[\]:：`]/.test(cleaned)) {
     candidates = cleaned.split(/[\n,，、；;]+/);
   }
 
   const cleanList = Array.from(
     new Set(
       candidates
-        .map((item) => String(item || '').replace(/^[\s\-*•\d.、"'「」【】\[\]{}:：]+|[\s"'「」【】\[\]{}，。！？,.!?]+$/g, '').trim())
-        .filter((kw) => kw.length >= 2 && kw.length <= 24)
+        .filter((item) => typeof item === 'string')
+        .map((item) => item.replace(/^[\s\-*•\d.、"'「」【】]+|[\s"'「」【】\[\]{}，。！？,.!?]+$/g, '').trim())
+        .filter((kw) => kw.length >= 2 && kw.length <= 24
+          && /\p{Script=Han}/u.test(kw) && !/[a-zA-Z{}\[\]:：`]/.test(kw)
+          && !['唯一最佳中文搜索词', '唯一最佳纯中文搜索词', '中文搜索词', '搜索词', '关键词'].includes(kw))
     )
   );
 
@@ -481,7 +491,7 @@ export async function callSearchKeywordExtractor(cfg, narrationText, projectCont
     throw new Error('未能从模型输出中解析出有效中文搜索词');
   }
 
-  return { keyword, keywords: [keyword], usedModel: model };
+  return keyword;
 }
 
 

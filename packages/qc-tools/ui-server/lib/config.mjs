@@ -71,7 +71,7 @@ export function normalizePromptConfig(cfg = {}) {
     keywordModel: cfg.keywordModel || cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
     videoModel: vModel,
     imageModel: iModel,
-    bgmModel: cfg.bgmModel || 'deepseek/deepseek-chat',
+    bgmModel: cfg.bgmModel || 'google/gemini-2.5-flash',
     model: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
     global_ai_visual_prompt: cfg.global_ai_visual_prompt || cfg.global_ppt_prompt || '作为 16:9 纪录片视觉总监，结合旁白片段与关键词提炼震撼的真实画面。',
     updated_at: cfg.updated_at || new Date().toISOString()

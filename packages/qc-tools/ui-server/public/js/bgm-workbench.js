@@ -71,7 +71,7 @@ let bgmWorkbenchState = {
       else if (baseUrl) {
         try { gw = new URL(baseUrl).hostname; } catch (e) {}
       }
-      const modelSlug = visualConfig.bgmModel || bgmWorkbenchState.modelInfo?.bgmModel || 'deepseek/deepseek-chat';
+      const modelSlug = visualConfig.bgmModel || bgmWorkbenchState.modelInfo?.bgmModel || 'google/gemini-2.5-flash';
       d.textContent = gw + ' / ' + modelSlug;
     }
 
@@ -110,6 +110,20 @@ let bgmWorkbenchState = {
         statusEl.textContent = bgmWorkbenchState.scenesCount > 0
           ? ('当前工程共 ' + bgmWorkbenchState.scenesCount + ' 个镜头（总时长 ' + durSec + 's），' + (segCount > 0 ? ('已规划 ' + segCount + ' 个情绪分段') : '尚未运行 AI 情绪分段'))
           : '当前工程尚无镜头清单，请先完成切分镜头后再分析情绪弧度。';
+      }
+
+      const tracks = cfg.tracks || [];
+      const taggedCount = tracks.filter((t) => Boolean(t.analysis)).length;
+      const untaggedCount = tracks.length - taggedCount;
+      const autoStatusEl = document.getElementById('bgmAutoStatus');
+      if (autoStatusEl) {
+        if (tracks.length === 0) {
+          autoStatusEl.textContent = '上传音乐后点击按钮；已上传的音乐可以直接使用。';
+        } else if (untaggedCount === 0) {
+          autoStatusEl.textContent = '曲库共 ' + tracks.length + ' 首：全部已打标签（本次将直接复用，零音频 Token 重听）。';
+        } else {
+          autoStatusEl.textContent = '曲库共 ' + tracks.length + ' 首：' + taggedCount + ' 首已打标签（直接复用不重听），' + untaggedCount + ' 首待首次听歌标记。';
+        }
       }
 
       const autoSummary = document.getElementById('bgmAutoSummary');
@@ -201,6 +215,23 @@ let bgmWorkbenchState = {
           : 'bg-gray-900/60 border-gray-800 hover:border-gray-700';
         const durLabel = tr.duration_ms ? formatBgmTime(tr.duration_ms) : '未知时长';
         const safeId = escapeHtml(tr.track_id);
+        let tagHtml = '<div class="mt-1 text-[10px] text-gray-500"><span class="px-1.5 py-0.2 rounded bg-gray-800/80 text-gray-400 border border-gray-700">未标记（首次配乐时分析一次）</span></div>';
+        if (tr.analysis) {
+          const energyText = tr.analysis.energy === 'high' ? '高能量' : (tr.analysis.energy === 'low' ? '低能量' : '中能量');
+          const energyBadgeCls = tr.analysis.energy === 'high'
+            ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
+            : (tr.analysis.energy === 'low' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-blue-500/15 text-blue-300 border-blue-500/30');
+          const metaParts = [
+            tr.analysis.suitable ? ('适合：' + tr.analysis.suitable) : '',
+            tr.analysis.instruments ? ('乐器：' + tr.analysis.instruments) : '',
+          ].filter(Boolean);
+          tagHtml = '<div class="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">' +
+            '<span class="px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shrink-0">🏷️ 已标记</span>' +
+            '<span class="px-1.5 py-0.2 rounded border shrink-0 ' + energyBadgeCls + '">' + energyText + '</span>' +
+            '<span class="text-amber-200/90 truncate">' + escapeHtml(tr.analysis.mood || '') + '</span>' +
+          '</div>' +
+          (metaParts.length ? '<div class="text-[10px] text-gray-400/90 mt-0.5 line-clamp-1">' + escapeHtml(metaParts.join(' · ')) + '</div>' : '');
+        }
         return '<div data-track-id="' + safeId + '" ' + (!bgmWorkbenchState.config?.multi_track ? 'onclick="selectBgmTrack(this.dataset.trackId)"' : '') + ' class="flex items-center justify-between gap-3 p-3 rounded-xl border transition ' + cardCls + '">' +
           '<div class="flex items-center gap-2.5 min-w-0">' +
             (!bgmWorkbenchState.config?.multi_track ? '<input type="radio" name="bgmTrackRadio" data-track-id="' + safeId + '" ' + (isSelected ? 'checked' : '') + ' onclick="event.stopPropagation(); selectBgmTrack(this.dataset.trackId)" class="accent-amber-400 w-4 h-4 shrink-0 cursor-pointer" />' : '') +
@@ -210,10 +241,12 @@ let bgmWorkbenchState = {
                 (isSelected ? '<span class="px-1.5 py-0.2 rounded text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">当前选中</span>' : '') +
               '</div>' +
               '<div class="text-[10px] text-gray-400 font-mono mt-0.5 truncate">' + escapeHtml(tr.file_name) + ' · ' + durLabel + ' · ' + formatFileSize(tr.size_bytes) + '</div>' +
+              tagHtml +
             '</div>' +
           '</div>' +
           '<div class="flex items-center gap-1.5 shrink-0">' +
             '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); previewBgmTrack(this.dataset.trackId)" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-gray-800 hover:bg-gray-700 text-amber-300 border border-gray-700 transition cursor-pointer">▶ 试听</button>' +
+            (tr.analysis ? '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); clearBgmTrackAnalysis(this.dataset.trackId)" class="px-2 py-1 text-xs font-semibold rounded-lg bg-gray-800 hover:bg-purple-900/60 text-purple-300 border border-gray-700 hover:border-purple-500/50 transition cursor-pointer" title="清除标签，下次自动配乐时重新听歌分析">🔄</button>' : '') +
             '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); deleteBgmTrack(this.dataset.trackId)" class="px-2 py-1 text-xs font-semibold rounded-lg bg-gray-800 hover:bg-rose-900/60 text-rose-300 border border-gray-700 hover:border-rose-500/50 transition cursor-pointer" title="从当前工程删除该 BGM">🗑</button>' +
           '</div>' +
         '</div>';
@@ -401,46 +434,68 @@ let bgmWorkbenchState = {
     }
 
     async function handleBgmFileUpload(input) {
-      const file = input?.files?.[0];
-      if (!file) return;
+      const files = Array.from(input?.files || []);
+      if (files.length === 0) return;
       const btn = document.getElementById('btnUploadBgm');
       if (btn) {
         btn.disabled = true;
-        btn.textContent = '⏳ 上传解析中...';
       }
+      let uploadedCount = 0;
+      const failures = [];
       try {
-        const dataUrl = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = () => reject(new Error('读取本地文件失败'));
-          reader.readAsDataURL(file);
-        });
-        const res = await fetch('/api/bgm/upload?project=' + encodeURIComponent(activeProjectId), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            projectId: activeProjectId,
-            fileName: file.name,
-            dataUrl,
-          }),
-        });
-        const data = await res.json();
-        if (!res.ok || !data.ok) {
-          showToast('❌ 上传失败: ' + (data.error || res.status));
-          return;
+        for (let i = 0; i < files.length; i++) {
+          const file = files[i];
+          if (btn) {
+            btn.textContent = files.length > 1
+              ? ('⏳ 上传中 (' + (i + 1) + '/' + files.length + ')...')
+              : '⏳ 上传解析中...';
+          }
+          try {
+            const dataUrl = await new Promise((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => resolve(reader.result);
+              reader.onerror = () => reject(new Error('读取本地文件失败'));
+              reader.readAsDataURL(file);
+            });
+            const res = await fetch('/api/bgm/upload?project=' + encodeURIComponent(activeProjectId), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                projectId: activeProjectId,
+                fileName: file.name,
+                dataUrl,
+              }),
+            });
+            const data = await res.json();
+            if (!res.ok || !data.ok) {
+              failures.push(file.name + ': ' + (data.error || res.status));
+              continue;
+            }
+            bgmWorkbenchState = {
+              config: data.config,
+              modelInfo: data.modelInfo,
+              totalDurationMs: data.totalDurationMs || 0,
+              scenesCount: data.scenesCount || 0,
+            };
+            uploadedCount++;
+          } catch (err) {
+            failures.push(file.name + ': ' + err.message);
+          }
         }
-        bgmWorkbenchState = {
-          config: data.config,
-          modelInfo: data.modelInfo,
-          totalDurationMs: data.totalDurationMs || 0,
-          scenesCount: data.scenesCount || 0,
-        };
-        renderBgmModal();
-        showToast('✅ 已上传并选中 BGM：' + file.name);
-      } catch (err) {
-        showToast('❌ 上传异常: ' + err.message);
+        if (uploadedCount > 0) {
+          renderBgmModal();
+        }
+        if (failures.length === 0) {
+          showToast(files.length === 1
+            ? ('✅ 已上传并选中 BGM：' + files[0].name)
+            : ('✅ 已批量上传 ' + uploadedCount + ' 首 BGM 到全局共享曲库'));
+        } else if (uploadedCount > 0) {
+          showToast('⚠️ 成功上传 ' + uploadedCount + ' 首，失败 ' + failures.length + ' 首：' + failures[0]);
+        } else {
+          showToast('❌ 上传失败: ' + failures[0]);
+        }
       } finally {
-        input.value = '';
+        if (input) input.value = '';
         if (btn) {
           btn.disabled = false;
           btn.textContent = '📤 上传本地 BGM';
@@ -449,7 +504,7 @@ let bgmWorkbenchState = {
     }
 
     async function deleteBgmTrack(trackId) {
-      if (!window.confirm('确定从当前工程删除这首 BGM 音频文件吗？')) return;
+      if (!window.confirm('确定删除这首 BGM 音频文件吗？删除后全局曲库及其他工程也将不再显示该曲目。')) return;
       try {
         stopBgmPreviewAudio();
         const res = await fetch('/api/bgm/delete-track?project=' + encodeURIComponent(activeProjectId), {
@@ -475,6 +530,31 @@ let bgmWorkbenchState = {
       }
     }
 
+    async function clearBgmTrackAnalysis(trackId) {
+      try {
+        const res = await fetch('/api/bgm/clear-track-analysis?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: activeProjectId, trackId }),
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          showToast('❌ 清除标签失败: ' + (data.error || res.status));
+          return;
+        }
+        bgmWorkbenchState = {
+          config: data.config,
+          modelInfo: data.modelInfo,
+          totalDurationMs: data.totalDurationMs || 0,
+          scenesCount: data.scenesCount || 0,
+        };
+        renderBgmModal();
+        showToast('🔄 已清除该曲目标签，下次自动配乐时将重新听歌分析');
+      } catch (err) {
+        showToast('❌ 清除标签异常: ' + err.message);
+      }
+    }
+
     let bgmAutoPollToken = 0;
     async function pollAutoBgm(projectId) {
       const token = ++bgmAutoPollToken;
@@ -486,12 +566,21 @@ let bgmWorkbenchState = {
           const data = await r.json();
           const job = data.job || {};
           if (activeProjectId !== projectId) break;
-          if (status) status.textContent = job.error || job.progress || '上传音乐后点击按钮。';
+          if (status && (job.status === 'running' || job.status === 'error')) {
+            status.textContent = job.error || job.progress || '正在配乐中…';
+          }
           if (button) { button.disabled = job.status === 'running'; button.textContent = job.status === 'running' ? '⏳ AI 配乐中…' : '✨ AI 自动配乐'; }
           if (job.status !== 'running') {
             if (job.status === 'complete') {
               await loadBgmState();
-              if (status) status.textContent = job.compiledToRenderProps ? 'AI 配乐已应用到成片。请试听后再导出。' : '方案已保存，但尚未生成渲染配置，请检查工程素材。';
+              const reuseNote = (typeof job.cachedCount === 'number' || typeof job.analyzedCount === 'number')
+                ? ('（复用 ' + (job.cachedCount || 0) + ' 首已有标签，新听 ' + (job.analyzedCount || 0) + ' 首）')
+                : '';
+              if (status) {
+                status.textContent = (job.compiledToRenderProps
+                  ? 'AI 配乐已应用到成片。请试听后再导出。'
+                  : '方案已保存，但尚未生成渲染配置，请检查工程素材。') + reuseNote;
+              }
             }
             break;
           }

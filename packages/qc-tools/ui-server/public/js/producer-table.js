@@ -1,6 +1,38 @@
 // producer-table.js — shared classic-script scope; loaded before studio initialization.
 const SCENE_FIELD_LABELS = ['', '旁白与素材预览', '画面方式', '素材下载 / AI 生成与剪辑', '节拍调整'];
 
+let sceneVideoObserver = null;
+let sceneVideoObserverRoot = null;
+
+function observeLazySceneVideos(containerEl) {
+  if (!containerEl) return;
+  const listEl = document.getElementById('producerSceneList') || null;
+  if (!sceneVideoObserver || sceneVideoObserverRoot !== listEl) {
+    if (sceneVideoObserver) sceneVideoObserver.disconnect();
+    sceneVideoObserverRoot = listEl;
+    sceneVideoObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        const video = entry.target;
+        const lazySrc = video.dataset.lazySrc;
+        if (!lazySrc) continue;
+        if (entry.isIntersecting) {
+          if (video.getAttribute('src') !== lazySrc) {
+            video.preload = 'metadata';
+            video.src = lazySrc;
+          }
+        } else if (video.paused && video.hasAttribute('src')) {
+          video.removeAttribute('src');
+          video.load();
+        }
+      }
+    }, { root: listEl, rootMargin: '350px 0px' });
+  }
+  containerEl.querySelectorAll('video[data-lazy-src]').forEach((v) => {
+    sceneVideoObserver.observe(v);
+  });
+}
+window.observeLazySceneVideos = observeLazySceneVideos;
+
     // 连用镜头仍保留独立旁白片段，但共享一个连续画面的时间范围。
     function getSharedVisualTiming(idx) {
       const scenes = manifestData.scenes;
@@ -165,7 +197,7 @@ const SCENE_FIELD_LABELS = ['', '旁白与素材预览', '画面方式', '素材
             <!-- 实体视频行内真实播放器或预览占位 -->
             ${hasGeneratedVideo ? `
               <div class="rounded-xl border border-emerald-500/60 bg-black aspect-[16/9] relative overflow-hidden group shadow-lg">
-                <video src="${generatedVideoSrc}" controls playsinline preload="metadata" onloadedmetadata="checkVideoElementDuration(this, ${idx})" class="w-full h-full object-cover"></video>
+                <video data-lazy-src="${generatedVideoSrc}#t=1" controls playsinline preload="none" onloadedmetadata="checkVideoElementDuration(this, ${idx})" class="w-full h-full object-cover"></video>
                 <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-emerald-400 border border-emerald-500/40 flex items-center gap-1 pointer-events-none">
                   <span>✅ 实体 MP4 视频就绪 (时长: ${durSec}s)</span>
                 </div>
@@ -494,7 +526,7 @@ const SCENE_FIELD_LABELS = ['', '旁白与素材预览', '画面方式', '素材
                 从该秒下载
               </button>
             </div>
-            <div id="urlDownloadProgressWrap_${idx}" class="hidden space-y-0.5 pt-0.5">
+            <div id="urlDownloadProgressWrap_${idx}" class="invisible space-y-0.5 pt-0.5">
               <div class="w-full h-1.5 rounded-full bg-gray-800 overflow-hidden">
                 <div id="urlDownloadProgressBar_${idx}" class="h-full bg-gradient-to-r from-teal-400 to-emerald-400 rounded-full transition-all duration-200" style="width: 0%;"></div>
               </div>
@@ -528,27 +560,32 @@ const SCENE_FIELD_LABELS = ['', '旁白与素材预览', '画面方式', '素材
               ${aiInputHtml}
               ${urlDownloadBarHtml}
               <div id="dropzone_${idx}"
-                   class="scene-media-dropzone border ${shortInfo.isTooShort ? 'border-rose-500/80 bg-rose-950/35' : 'border-sky-500/40 bg-sky-950/30'} rounded-xl p-2.5 text-left space-y-1.5 transition"
+                   class="scene-media-dropzone border ${shortInfo.isTooShort ? 'border-rose-500/80 bg-rose-950/35' : 'border-sky-500/40 bg-sky-950/30'} rounded-xl p-2 text-left gap-1.5"
                    ondragover="onFileDragOver(event, ${idx})"
                    ondragleave="onFileDragLeave(event, ${idx})"
                    ondrop="onFileDrop(event, ${idx})">
-                <div class="flex items-center justify-between gap-1">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-sky-500/20 text-sky-300 truncate max-w-[165px]" title="${asset.file_name || asset.asset_id} (${asset.file_path || asset.path})">
+                <div class="flex items-center justify-between gap-1.5 shrink-0">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-sky-500/20 text-sky-300 truncate min-w-0 flex-1" title="${asset.file_name || asset.asset_id} (${asset.file_path || asset.path})">
                     ${asset.file_name || asset.asset_id}
                   </span>
-                  <span id="videoDurBadge_${idx}" class="${durBadgeClass}">
-                    ${durBadgeText}
-                  </span>
+                  <div class="flex items-center gap-2 shrink-0">
+                    <span id="videoDurBadge_${idx}" class="${durBadgeClass}">
+                      ${durBadgeText}
+                    </span>
+                    <button type="button" onclick="clearAsset(${idx})" class="text-[10px] font-bold text-rose-400 hover:underline cursor-pointer shrink-0">
+                      清除绑定
+                    </button>
+                  </div>
                 </div>
 
                 ${
                   isVideo
                     ? `
-                    <div id="videoShortWarn_${idx}" class="${shortInfo.isTooShort ? '' : 'hidden '}px-2.5 py-1.5 rounded-lg bg-rose-600/25 border border-rose-500 text-rose-200 text-[11px] font-bold flex items-center gap-1.5 shadow-sm">
+                    <div id="videoShortWarn_${idx}" class="${shortInfo.isTooShort ? '' : 'hidden '}px-2 py-1 rounded-lg bg-rose-600/25 border border-rose-500 text-rose-200 text-[10px] font-bold flex items-center gap-1.5 shrink-0">
                       ${shortInfo.isTooShort ? buildVideoShortWarnText(shortInfo, durSec) : ''}
                     </div>
                     <div class="scene-media-preview rounded-lg border border-gray-800 flex items-center justify-center">
-                      <video src="${videoSrc}" controls playsinline preload="auto" onloadedmetadata="checkVideoElementDuration(this, ${idx}); if (this.paused && this.duration > 0.1) this.currentTime = 0.1" class="w-full h-full object-contain"></video>
+                      <video data-lazy-src="${videoSrc}#t=1" controls playsinline preload="none" onloadedmetadata="checkVideoElementDuration(this, ${idx}); if (this.paused && this.duration > 0 && this.duration < 1) this.currentTime = 0.1" class="w-full h-full object-contain"></video>
                     </div>
                   `
                     : `
@@ -558,23 +595,19 @@ const SCENE_FIELD_LABELS = ['', '旁白与素材预览', '画面方式', '素材
                   `
                 }
 
-                <div class="text-[9px] text-gray-400 font-mono truncate" title="projects/${activeProjectId}/public/${asset.path}">
-                  📍 工程路径: projects/${activeProjectId}/public/${asset.path}
-                </div>
-
                 ${isVideo ? (() => {
                   const hasAudioTrack = asset.has_audio !== false;
                   const keepAudio = Boolean(scene.media_modifiers && scene.media_modifiers.keep_original_audio);
                   const audioVolPct = Math.round(((scene.media_modifiers && scene.media_modifiers.original_audio_volume !== undefined) ? scene.media_modifiers.original_audio_volume : 0.3) * 100);
                   if (!hasAudioTrack) {
                     return `
-                      <div class="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-gray-900/70 border border-gray-800 text-[10px] text-gray-500">
+                      <div class="flex items-center justify-between gap-2 px-2 py-0.5 rounded-lg bg-gray-900/70 border border-gray-800 text-[10px] text-gray-500 shrink-0">
                         <span>🔇 该素材无音轨</span>
                       </div>
                     `;
                   }
                   return `
-                    <div class="flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-gray-900/90 border border-sky-500/30 text-[10px]">
+                    <div class="flex items-center justify-between gap-2 px-2 py-0.5 rounded-lg bg-gray-900/90 border border-sky-500/30 text-[10px] shrink-0">
                       <label class="flex items-center gap-1.5 text-sky-200 font-semibold cursor-pointer select-none shrink-0">
                         <input type="checkbox" id="keepAudioCheck_${idx}" ${keepAudio ? 'checked' : ''}
                                onchange="updateSceneAudioOption(${idx})"
@@ -591,15 +624,6 @@ const SCENE_FIELD_LABELS = ['', '旁白与素材预览', '画面方式', '素材
                     </div>
                   `;
                 })() : ''}
-
-                <div class="scene-asset-actions flex items-center justify-between pt-1 border-t border-gray-800/80 text-[10px]">
-                  <button onclick="document.getElementById('fileInput_${idx}').click()" class="text-sky-400 hover:underline cursor-pointer">
-                    选择替换本地文件
-                  </button>
-                  <button onclick="clearAsset(${idx})" class="text-rose-400 hover:underline cursor-pointer">
-                    清除绑定
-                  </button>
-                </div>
               </div>
             </div>
           `;
@@ -616,7 +640,7 @@ const SCENE_FIELD_LABELS = ['', '旁白与素材预览', '画面方式', '素材
                    ondragleave="onFileDragLeave(event, ${idx})"
                    ondrop="onFileDrop(event, ${idx})"
                    onclick="document.getElementById('fileInput_${idx}').click()">
-                <span class="block text-sky-300 text-lg mb-0.5 group-hover:scale-110 transition">📥</span>
+                <span class="block text-sky-300 text-lg mb-0.5">📥</span>
                 <span class="block text-[11px] font-bold text-sky-200">选择或拖入视频 / 图片</span>
                 <span class="block text-[9px] text-gray-400 mt-0.5">或先在上方口令框指定秒数 ➔ 编译 ➔ 填 URL 下载</span>
               </button>
@@ -706,12 +730,19 @@ const SCENE_FIELD_LABELS = ['', '旁白与素材预览', '画面方式', '素材
       const savedScrollLeft = listEl ? listEl.scrollLeft : 0;
       const savedWinX = window.scrollX;
       const savedWinY = window.scrollY;
+      const oldRect = existingRow.getBoundingClientRect();
+      const listRect = listEl ? listEl.getBoundingClientRect() : null;
       const newRow = buildSceneRow(scene, idx);
       existingRow.replaceWith(newRow);
+      observeLazySceneVideos(newRow);
       updateCounters();
+      const heightDelta = newRow.getBoundingClientRect().height - oldRect.height;
+      const targetScrollTop = (listEl && listRect && oldRect.top < listRect.top)
+        ? savedScrollTop + heightDelta
+        : savedScrollTop;
       const restoreScroll = () => {
         if (listEl) {
-          listEl.scrollTop = savedScrollTop;
+          listEl.scrollTop = targetScrollTop;
           listEl.scrollLeft = savedScrollLeft;
         }
         if (window.scrollX !== savedWinX || window.scrollY !== savedWinY) {
@@ -771,6 +802,7 @@ const SCENE_FIELD_LABELS = ['', '旁白与素材预览', '画面方式', '素材
         frag.appendChild(buildSceneRow(scene, idx));
       });
       tbody.replaceChildren(frag);
+      observeLazySceneVideos(tbody);
       const restoreScroll = () => {
         if (listEl) {
           listEl.scrollTop = savedScrollTop;

@@ -1,5 +1,17 @@
 // writer-persistence.js — shared classic-script scope; loaded before studio initialization.
 let pendingFinalizedScript = null;
+let savedFinalScriptText = '';
+
+    function resetFinalScriptSaveState() {
+      savedFinalScriptText = document.getElementById('wFinalScriptFullText').value;
+      updateFinalScriptSaveButton();
+    }
+
+    function updateFinalScriptSaveButton() {
+      const button = document.getElementById('btnSaveFinalScript');
+      const editor = document.getElementById('wFinalScriptFullText');
+      if (button && editor) button.classList.toggle('hidden', editor.value === savedFinalScriptText);
+    }
 
     function getFinalizedScriptText(script) {
       const seg = script?.script_segments;
@@ -38,7 +50,7 @@ let pendingFinalizedScript = null;
           detail: '请先审阅左右对比差异，确认后点击「✅ 确认替换并保存」。',
         });
       } catch (err) { alert('全文统稿失败: ' + err.message); }
-      finally { btn.disabled = false; btn.innerHTML = '<span>🤖 AI 全文统稿去重去伪结尾</span>'; }
+      finally { btn.disabled = false; btn.innerHTML = '<span>🤖 全文统稿</span>'; }
     }
 
     function renderFinalizeDiffView() {
@@ -223,6 +235,7 @@ let pendingFinalizedScript = null;
     }
 
     function updateFinalScriptLiveStats() {
+      updateFinalScriptSaveButton();
       const val = document.getElementById('wFinalScriptFullText').value || '';
       const words = val.replace(/s+/g, '').length;
       document.getElementById('wFinalScriptWords').textContent = words;

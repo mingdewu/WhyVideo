@@ -19,6 +19,7 @@
       document.getElementById('wOutlineOpeningAnswer').value = '';
       document.getElementById('wOutlineEndingTakeaway').value = '';
       document.getElementById('wFinalScriptFullText').value = '';
+      resetFinalScriptSaveState();
       document.getElementById('wFinalScriptWords').textContent = '0';
       document.getElementById('wFinalScriptMin').textContent = '0.0';
       document.getElementById('wEditorialLogDetails').innerHTML = '<div>- 暂无统稿清洗记录。</div>';
@@ -533,7 +534,7 @@
       const btn = document.getElementById('btnAiOutline');
 
       btn.disabled = true;
-      btn.innerHTML = '<span>⏳ 正在规划 5~7 章结构化大纲...</span>';
+      btn.innerHTML = '<span>⏳ 规划大纲</span>';
       try {
         const res = await fetch('/api/writer/ai/build-outline?project=' + activeProjectId, {
           method: 'POST',

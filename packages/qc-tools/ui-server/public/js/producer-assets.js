@@ -493,7 +493,7 @@ function onFileDragOver(e, idx) {
       const progPct = document.getElementById('urlDownloadProgressPct_' + idx);
       const setProgUi = (pct, msg) => {
         const safePct = Math.max(0, Math.min(100, Math.round(pct || 0)));
-        if (progWrap) progWrap.classList.remove('hidden');
+        if (progWrap) progWrap.classList.remove('invisible');
         if (progBar) progBar.style.width = safePct + '%';
         if (progPct) progPct.textContent = safePct + '%';
         if (progText && msg) progText.textContent = msg;
@@ -539,25 +539,35 @@ function onFileDragOver(e, idx) {
           manifestData = data.manifest;
           assetIndexData = data.assetIndex;
           const isCurrentRow = () => activeProjectId === projectId && manifestData?.scenes?.[idx]?.scene_id === scene.scene_id;
-          setTimeout(() => {
-            if (isCurrentRow()) rerenderSceneRow(idx);
-          }, 350);
-          showToast(data.message || '✅ 网络视频片段已下载到本工程 assets 目录并绑定至当前分镜！');
-          setTimeout(() => {
-            if (!isCurrentRow()) return;
+          if (isCurrentRow()) {
+            const freshRow = buildSceneRow(manifestData.scenes[idx], idx);
+            const newDropzone = freshRow.querySelector('#dropzone_' + idx);
+            const oldDropzone = document.getElementById('dropzone_' + idx);
+            if (newDropzone && oldDropzone) {
+              oldDropzone.replaceWith(newDropzone);
+              if (typeof observeLazySceneVideos === 'function') observeLazySceneVideos(newDropzone);
+              updateCounters();
+            } else {
+              rerenderSceneRow(idx);
+            }
+            const urlInp = document.getElementById('urlDownloadInput_' + idx);
+            if (urlInp) urlInp.value = '';
             const inp = document.getElementById('aiIntentInput_' + idx);
             if (inp) {
               inp.value = '';
-              inp.focus();
               inp.placeholder = '✅ 短视频已就绪！现在可输入口令对此片段加字幕/艺术字、调色或运镜...';
             }
-          }, 500);
+          }
+          setTimeout(() => {
+            if (progWrap) progWrap.classList.add('invisible');
+          }, 800);
+          showToast(data.message || '✅ 网络视频片段已下载到本工程 assets 目录并绑定至当前分镜！');
         } else {
-          if (progWrap) progWrap.classList.add('hidden');
+          if (progWrap) progWrap.classList.add('invisible');
           alert(data.error || '链接解析下载失败');
         }
       } catch (err) {
-        if (progWrap) progWrap.classList.add('hidden');
+        if (progWrap) progWrap.classList.add('invisible');
         alert('请求失败: ' + err.message);
       } finally {
         clearInterval(pollTimer);
@@ -688,34 +698,114 @@ function onFileDragOver(e, idx) {
     }
 
     async function saveAll() {
-      const globalPrompt = document.getElementById('globalPromptInput').value;
-      const res = await fetch('/api/workflow-save?project=' + activeProjectId, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          projectId: activeProjectId,
-          manifest: manifestData,
-          promptConfig: {
-            selected_visual_model: visualConfig.videoModel,
-            global_ai_visual_prompt: globalPrompt,
-            updated_at: new Date().toISOString(),
-          },
-        }),
-      });
-      const data = await res.json();
-      if (data.ok) {
-        manifestData = data.manifest;
-        if (data.timingSummary) {
-          window.timingSummaryData = data.timingSummary;
-          renderTimingSummaryBadge(data.timingSummary);
-        }
-        renderTable();
-        showToast('✅ 已保存镜头表格，并同步至 Remotion 视频引擎！');
-        showCompletionModal({
-          icon: '💾',
-          title: '保存并同步已完成',
-          message: '镜头表格修改已保存，并已同步至 Remotion 视频引擎！',
-          detail: '当前共 ' + (manifestData?.scenes?.length || 0) + ' 个镜头。',
+      const studioWin = window.open('about:blank', 'whyvideo_remotion_studio');
+      if (studioWin && !studioWin.closed) {
+        try {
+          studioWin.document.title = '正在同步并打开 Remotion Studio (:3100)...';
+          studioWin.document.body.innerHTML =
+            '<div style="font-family:sans-serif;background:#0f1419;color:#f3f4f6;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:18px;">💾 正在保存并同步工程「' +
+            escapeHtml(activeProjectId) +
+            '」到 Remotion (:3100)，请稍候...</div>';
+        } catch (e) {}
+      }
+      showToast('💾 正在保存并同步至 Remotion (:3100)...');
+
+      try {
+        const globalPrompt = document.getElementById('globalPromptInput').value;
+        const res = await fetch('/api/workflow-save?project=' + activeProjectId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: activeProjectId,
+            manifest: manifestData,
+            promptConfig: {
+              selected_visual_model: visualConfig.videoModel,
+              global_ai_visual_prompt: globalPrompt,
+              updated_at: new Date().toISOString(),
+            },
+          }),
         });
+        const data = await res.json();
+        if (data.ok) {
+          manifestData = data.manifest;
+          if (data.timingSummary) {
+            window.timingSummaryData = data.timingSummary;
+            renderTimingSummaryBadge(data.timingSummary);
+          }
+          renderTable();
+          const studioUrl = (data.remotionStudio && data.remotionStudio.url) || 'http://localhost:3100';
+          if (data.remotionStudio && data.remotionStudio.ok) {
+            if (studioWin && !studioWin.closed) {
+              studioWin.location.href = studioUrl;
+            } else {
+              window.open(studioUrl, 'whyvideo_remotion_studio');
+            }
+          } else if (studioWin && !studioWin.closed) {
+            studioWin.close();
+          }
+
+          showToast('✅ 已保存镜头表格，并同步至 Remotion 视频引擎！');
+          showCompletionModal({
+            icon: '💾',
+            title: '保存并同步已完成',
+            message: '镜头表格修改已保存，并已同步至 Remotion 视频引擎！',
+            detail:
+              '已同步工程：' +
+              activeProjectId +
+              '（共 ' +
+              (manifestData?.scenes?.length || 0) +
+              ' 个镜头）。' +
+              (data.remotionStudio?.ok
+                ? '\nRemotion (:3100) 已自动切换到当前工程。'
+                : data.remotionStudio?.error
+                ? '\nRemotion 自动切换提示：' + data.remotionStudio.error
+                : ''),
+            actionText: '🎬 打开 Remotion (:3100) ↗',
+            actionUrl: studioUrl,
+          });
+        } else {
+          if (studioWin && !studioWin.closed) studioWin.close();
+          showToast('❌ 保存失败: ' + (data.error || '未知错误'));
+        }
+      } catch (err) {
+        if (studioWin && !studioWin.closed) studioWin.close();
+        showToast('❌ 保存并同步失败: ' + err.message);
+      }
+    }
+
+    async function openRemotionStudioForCurrentProject() {
+      const win = window.open('about:blank', 'whyvideo_remotion_studio');
+      if (win && !win.closed) {
+        try {
+          win.document.title = '正在切换 Remotion Studio (:3100)...';
+          win.document.body.innerHTML =
+            '<div style="font-family:sans-serif;background:#0f1419;color:#f3f4f6;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:18px;">🎬 正在将 Remotion (:3100) 切换到工程「' +
+            escapeHtml(activeProjectId) +
+            '」，请稍候...</div>';
+        } catch (e) {}
+      }
+      showToast('🎬 正在切换 Remotion (:3100) 到当前工程...');
+      try {
+        const res = await fetch('/api/remotion-studio/open?project=' + encodeURIComponent(activeProjectId), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: activeProjectId }),
+        });
+        const data = await res.json();
+        const studioUrl = data.url || 'http://localhost:3100';
+        if (data.ok) {
+          if (win && !win.closed) {
+            win.location.href = studioUrl;
+          } else {
+            window.open(studioUrl, 'whyvideo_remotion_studio');
+          }
+          showToast('✅ Remotion (:3100) 已切换到 ' + activeProjectId);
+        } else {
+          if (win && !win.closed) win.close();
+          showToast('❌ 打开 Remotion 失败: ' + (data.error || '未知错误'));
+        }
+      } catch (err) {
+        if (win && !win.closed) win.close();
+        showToast('❌ 打开 Remotion 失败: ' + err.message);
       }
     }

@@ -16,6 +16,7 @@ coverage/
 # Real-world project data (projects are kept local only)
 projects/*
 !projects/.gitkeep
+/public/audio/bgm/
 
 # Local exported scripts and narration drafts
 /exports/

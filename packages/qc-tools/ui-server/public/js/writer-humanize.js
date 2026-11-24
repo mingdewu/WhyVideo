@@ -475,6 +475,7 @@ let selectedHumanizeStyle = 'humorous';
         return;
       }
       document.getElementById('wFinalScriptFullText').value = step1SelectedScriptText;
+      updateFinalScriptSaveButton();
       latestHumanizedText = '';
       pendingHumanizeMeta = null;
       updateHumanizeVersionUI(null, false);

@@ -3,6 +3,8 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { PORT, defaultProjectId, MIME_TYPES, rootDir, getPaths } from './ui-server/lib/config.mjs';
+import { PROJECTS_ROOT, SHARED_BGM_DIR } from './project-paths.mjs';
+import { syncExistingProjectsToSharedBgm } from './bgm-manager.mjs';
 import { listProjects } from './ui-server/lib/project-store.mjs';
 import { handleAudioRenderRoutes } from './ui-server/routes/audio-render-routes.mjs';
 import { handleWriterRoutes } from './ui-server/routes/writer-routes.mjs';
@@ -87,10 +89,26 @@ function serveProjectMedia(req, res, pathname, queryProject) {
 
   const baseDir = path.resolve(rootDir, 'projects', proj, parts[0]);
   const filePath = path.resolve(baseDir, relSubPath);
+  let targetFile = null;
   if (filePath.startsWith(baseDir + path.sep) && fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-    const ext = path.extname(filePath).toLowerCase();
+    targetFile = filePath;
+  } else if (parts[0] === 'public' && relSubPath.startsWith('audio/bgm/')) {
+    const sharedRoot = path.resolve(SHARED_BGM_DIR);
+    const sharedCandidate = path.resolve(sharedRoot, relSubPath.slice('audio/bgm/'.length));
+    if (
+      sharedCandidate.startsWith(sharedRoot + path.sep) &&
+      !path.basename(sharedCandidate).startsWith('.') &&
+      fs.existsSync(sharedCandidate) &&
+      fs.statSync(sharedCandidate).isFile()
+    ) {
+      targetFile = sharedCandidate;
+    }
+  }
+
+  if (targetFile) {
+    const ext = path.extname(targetFile).toLowerCase();
     const contentType = MIME_TYPES[ext] || 'application/octet-stream';
-    const stat = fs.statSync(filePath);
+    const stat = fs.statSync(targetFile);
 
     const range = req.headers.range;
     if (range) {
@@ -98,7 +116,7 @@ function serveProjectMedia(req, res, pathname, queryProject) {
       const start = parseInt(rParts[0], 10);
       const end = rParts[1] ? parseInt(rParts[1], 10) : stat.size - 1;
       const chunksize = end - start + 1;
-      const file = fs.createReadStream(filePath, { start, end });
+      const file = fs.createReadStream(targetFile, { start, end });
       res.writeHead(206, {
         'Content-Range': `bytes ${start}-${end}/${stat.size}`,
         'Accept-Ranges': 'bytes',
@@ -108,7 +126,7 @@ function serveProjectMedia(req, res, pathname, queryProject) {
       return file.pipe(res);
     }
     res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': contentType });
-    return fs.createReadStream(filePath).pipe(res);
+    return fs.createReadStream(targetFile).pipe(res);
   }
 
   res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -159,4 +177,5 @@ function startServer(portToTry) {
     console.log(`=============================================================\n`);
   });
 }
+syncExistingProjectsToSharedBgm(PROJECTS_ROOT, SHARED_BGM_DIR);
 startServer(Number(PORT));

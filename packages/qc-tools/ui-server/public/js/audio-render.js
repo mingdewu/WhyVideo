@@ -290,7 +290,7 @@
         box.textContent = '⚠️ 当前工程暂无分镜旁白，请先导入文案或创建分镜后再生成全片旁白';
         box.className = 'px-3 py-2 rounded-xl bg-amber-950/35 border border-amber-500/30 text-xs text-amber-200';
       } else {
-        box.textContent = '📄 当前工程全片旁白：共 ' + scenes.length + ' 镜 · 约 ' + fullText.length + ' 字（点右下角「✅ 确认保存设置」后，在主界面点击「🎙️ 一键生成全片旁白」即可生成整条成片音频并对齐时间轴）';
+        box.textContent = '📄 当前工程全片旁白：共 ' + scenes.length + ' 镜 · 约 ' + fullText.length + ' 字（点右下角「✅ 确认保存设置」后，在主界面点击「🎙️ 生成音频」即可生成整条成片音频并对齐时间轴）';
         box.className = 'px-3 py-2 rounded-xl bg-emerald-950/35 border border-emerald-500/30 text-xs text-emerald-200';
       }
     }
@@ -436,7 +436,7 @@
               ? '⏳ 正在对齐旁白时间轴...'
               : ('⏳ 正在生成全片旁白 (' + pLabel + ')...');
           } else {
-            fullBtn.textContent = '🎙️ 一键生成全片旁白';
+            fullBtn.textContent = '🎙️ 生成音频';
           }
         }
         if (cancelBtn) cancelBtn.classList.toggle('hidden', !isRunning);
@@ -454,7 +454,7 @@
           loadWorkflow();
           showCompletionModal({
             icon: '🎙️',
-            title: '一键生成全片旁白已完成',
+            title: '生成音频已完成',
             message: job.progressText || '全片旁白配音已生成，逐字时间轴已自动对齐！',
             detail: job.timingWarning
               ? ('时间轴提示：' + job.timingWarning)
@@ -530,7 +530,7 @@
       const modal = document.getElementById('audioModal');
       if (modal) modal.classList.add('hidden');
       const label = provider === 'elevenlabs' ? 'ElevenLabs 云端配音' : 'Voicebox 本地配音';
-      showToast('✅ 已确认保存配音设置（当前引擎：' + label + '），点击主界面「🎙️ 一键生成全片旁白」即可生成');
+      showToast('✅ 已确认保存配音设置（当前引擎：' + label + '），点击主界面「🎙️ 生成音频」即可生成');
     }
 
     async function synthesizeTestVoice() {
@@ -616,7 +616,7 @@
       } finally {
         if (fullBtn) fullBtn.disabled = false;
         if (btn) btn.disabled = false;
-        if (fullBtn) fullBtn.textContent = '🎙️ 一键生成全片旁白';
+        if (fullBtn) fullBtn.textContent = '🎙️ 生成音频';
         updateVoiceboxStatus();
       }
     }

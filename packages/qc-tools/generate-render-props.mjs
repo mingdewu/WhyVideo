@@ -29,10 +29,11 @@ const assetIndex = JSON.parse(
 const narrationFile = sceneManifest.audio_file ||
   (["audio/narration.wav", "audio/narration.mp3"].find((candidate) =>
     fs.existsSync(path.join(publicDir, candidate))) || null);
-const srtRaw = fs.readFileSync(
-  path.join(publicDir, sceneManifest.captions_file || "captions/captions.srt"),
-  "utf8"
+const srtPath = path.join(
+  publicDir,
+  sceneManifest.captions_file || "captions/captions.srt"
 );
+const srtRaw = fs.existsSync(srtPath) ? fs.readFileSync(srtPath, "utf8") : "";
 
 const assetMap = new Map();
 for (const asset of assetIndex.assets) {
@@ -46,6 +47,7 @@ function parseSrtTimeToMs(timeStr) {
 }
 
 function parseSrt(srtText) {
+  if (!srtText || !srtText.trim()) return [];
   const blocks = srtText.trim().split(/\n\s*\n/);
   return blocks
     .map((block) => {

@@ -1,13 +1,62 @@
 let publishRequest = 0;
+let publishCaptionRequest = 0;
+let publishCoverRequest = 0;
+let publishGeneratedCoverUrl = '';
+function showPublishCoverPreview(url, { isBlob = false, downloadName = 'cover.jpg' } = {}) {
+  const preview = document.getElementById('publishCoverPreview');
+  if (preview) {
+    if (!preview.dataset) preview.dataset = {};
+    if (preview.dataset.blobUrl) URL.revokeObjectURL(preview.dataset.blobUrl);
+    preview.dataset.blobUrl = isBlob ? url : '';
+    preview.src = url;
+    preview.classList.remove('hidden');
+  }
+  const dl = document.getElementById('publishCoverDownload');
+  if (dl) {
+    dl.href = url;
+    dl.download = downloadName;
+    dl.classList.remove('hidden');
+  }
+}
+function clearPublishCoverPreview() {
+  const preview = document.getElementById('publishCoverPreview');
+  if (preview) {
+    if (!preview.dataset) preview.dataset = {};
+    if (preview.dataset.blobUrl) URL.revokeObjectURL(preview.dataset.blobUrl);
+    preview.dataset.blobUrl = '';
+    preview.removeAttribute?.('src');
+    preview.classList.add('hidden');
+  }
+  const dl = document.getElementById('publishCoverDownload');
+  if (dl) {
+    dl.removeAttribute?.('href');
+    dl.classList.add('hidden');
+  }
+  publishGeneratedCoverUrl = '';
+}
+async function resolveSelectedPublishCover() {
+  const localFile = document.getElementById('publishCover')?.files?.[0] || null;
+  if (localFile) return localFile;
+  if (!publishGeneratedCoverUrl) return null;
+  const resp = await fetch(publishGeneratedCoverUrl, { cache: 'no-store' });
+  if (!resp.ok) throw new Error('无法读取已生成的封面图片，请重新生成或选择本地图片。');
+  const blob = await resp.blob();
+  if (!blob || !blob.size) throw new Error('已生成的封面图片为空，请重新生成。');
+  return blob;
+}
 async function loadPublishProject() {
   const project = activeProjectId;
   const request = ++publishRequest;
+  const captionRequest = ++publishCaptionRequest;
+  const coverRequest = ++publishCoverRequest;
   restoreYoutubeUpload(project);
   let draft = {};
   try { draft = JSON.parse(localStorage.getItem('whyvideo_publish_' + project) || '{}'); } catch {}
   document.getElementById('publishTitle').value = draft.title || '';
   document.getElementById('publishDescription').value = draft.description || '';
   document.getElementById('publishTags').value = draft.tags || '';
+  const kwInput = document.getElementById('publishCoverKeywords');
+  if (kwInput) kwInput.value = draft.coverKeywords || '';
   const video = document.getElementById('publishVideo');
   const status = document.getElementById('publishVideoStatus');
   video.src = '/output/' + encodeURIComponent(project) + '/final_video_1080p.mp4';
@@ -15,16 +64,41 @@ async function loadPublishProject() {
   video.onloadedmetadata = () => { status.textContent = '已载入当前工程的最终成片。'; };
   video.onerror = () => { status.textContent = '未找到可播放的最终成片，请先在视觉分镜台完成最终渲染。'; };
   document.getElementById('publishCover').value = '';
-  document.getElementById('publishCoverPreview').classList.add('hidden');
+  clearPublishCoverPreview();
+  const coverStatus = document.getElementById('publishCoverStatus');
+  if (coverStatus) coverStatus.textContent = '';
+  const captionFileInput = document.getElementById('publishCaptionFile');
+  if (captionFileInput) captionFileInput.value = '';
   const captions = document.getElementById('publishCaptions');
   captions.value = '';
-  try {
-    const response = await fetch('/public/' + encodeURIComponent(project) + '/captions/captions.srt');
-    if (response.ok) { const text = await response.text(); if (request === publishRequest) captions.value = text; }
-  } catch {}
+  const captionsPromise = (async () => {
+    try {
+      const response = await fetch('/public/' + encodeURIComponent(project) + '/captions/captions.srt', { cache: 'no-store' });
+      if (response.ok) { const text = await response.text(); if (request === publishRequest && captionRequest === publishCaptionRequest) captions.value = text; }
+    } catch {}
+  })();
+  const coverPromise = (async () => {
+    try {
+      const response = await fetch('/api/publish/cover?project=' + encodeURIComponent(project), { cache: 'no-store' });
+      if (response.ok) {
+        const data = await response.json();
+        if (request === publishRequest && coverRequest === publishCoverRequest && data?.coverUrl) {
+          publishGeneratedCoverUrl = data.coverUrl;
+          showPublishCoverPreview(data.coverUrl, { downloadName: data.fileName || 'cover.jpg' });
+          if (coverStatus) coverStatus.textContent = '已载入当前工程保存的 AI 封面。';
+        }
+      }
+    } catch {}
+  })();
+  await Promise.all([captionsPromise, coverPromise]);
 }
 function savePublishDraft() {
-  localStorage.setItem('whyvideo_publish_' + activeProjectId, JSON.stringify({title: document.getElementById('publishTitle').value, description: document.getElementById('publishDescription').value, tags: document.getElementById('publishTags').value}));
+  localStorage.setItem('whyvideo_publish_' + activeProjectId, JSON.stringify({
+    title: document.getElementById('publishTitle').value,
+    description: document.getElementById('publishDescription').value,
+    tags: document.getElementById('publishTags').value,
+    coverKeywords: document.getElementById('publishCoverKeywords')?.value || '',
+  }));
   showToast('发布资料已保存到此浏览器');
 }
 function downloadPublishCaptions() {
@@ -32,11 +106,65 @@ function downloadPublishCaptions() {
   const a = document.createElement('a'); a.href = url; a.download = 'captions.srt'; a.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 document.getElementById('publishCover').addEventListener('change', function () {
-  const preview = document.getElementById('publishCoverPreview');
-  if (preview.dataset.url) URL.revokeObjectURL(preview.dataset.url);
-  if (!this.files[0]) { preview.classList.add('hidden'); return; }
-  preview.dataset.url = URL.createObjectURL(this.files[0]); preview.src = preview.dataset.url; preview.classList.remove('hidden');
+  ++publishCoverRequest;
+  publishGeneratedCoverUrl = '';
+  const coverStatus = document.getElementById('publishCoverStatus');
+  if (!this.files[0]) {
+    clearPublishCoverPreview();
+    if (coverStatus) coverStatus.textContent = '';
+    return;
+  }
+  showPublishCoverPreview(URL.createObjectURL(this.files[0]), { isBlob: true, downloadName: this.files[0].name || 'cover.jpg' });
+  if (coverStatus) coverStatus.textContent = '已选择本地封面图片。';
 });
+async function generatePublishCover() {
+  const kwInput = document.getElementById('publishCoverKeywords');
+  const statusEl = document.getElementById('publishCoverStatus');
+  const btn = document.getElementById('publishCoverGenerateBtn');
+  const keywords = (kwInput?.value || '').trim();
+  if (!keywords) {
+    if (statusEl) statusEl.textContent = '请先输入封面关键词。';
+    kwInput?.focus?.();
+    return;
+  }
+  const project = activeProjectId;
+  const coverRequest = ++publishCoverRequest;
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '正在生成…';
+  }
+  if (statusEl) statusEl.textContent = '正在调用生图模型生成 16:9 封面…';
+  try {
+    const title = (document.getElementById('publishTitle')?.value || '').trim();
+    const response = await fetch('/api/publish/generate-cover?project=' + encodeURIComponent(project), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keywords, title }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || '生成封面失败');
+    if (project !== activeProjectId || coverRequest !== publishCoverRequest) {
+      showToast('工程已切换或封面已变更，生成结果未覆盖');
+      return;
+    }
+    const coverInput = document.getElementById('publishCover');
+    if (coverInput) coverInput.value = '';
+    publishGeneratedCoverUrl = data.coverUrl;
+    showPublishCoverPreview(data.coverUrl, { downloadName: data.fileName || 'cover.jpg' });
+    if (statusEl) {
+      statusEl.textContent = '已生成 AI 封面（模型：' + (data.model || '默认生图模型') + '），上传视频时会一并提交。';
+    }
+    showToast('AI 视频封面已生成');
+  } catch (err) {
+    if (statusEl) statusEl.textContent = '生成失败：' + err.message;
+    alert(err.message);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '✨ AI 生成封面';
+    }
+  }
+}
 
 async function generatePublishCopy() {
   const button = document.getElementById('publishGenerate');
@@ -57,8 +185,9 @@ async function generatePublishCopy() {
 document.getElementById('publishCaptionFile').addEventListener('change', async function() {
   const file = this.files[0]; if (!file) return;
   const project = activeProjectId;
+  const captionRequest = ++publishCaptionRequest;
   const text = await file.text();
-  if (project === activeProjectId) { document.getElementById('publishCaptions').value = text; showToast('已载入本地字幕，可编辑并下载'); }
+  if (project === activeProjectId && captionRequest === publishCaptionRequest) { document.getElementById('publishCaptions').value = text; showToast('已载入本地 SRT 字幕，可编辑、下载或在上传 YouTube 时一并提交'); }
 });
 const YOUTUBE_TOKEN_KEY = 'whyvideo_youtube_access_token';
 let youtubeAccessToken = '';
@@ -190,7 +319,7 @@ async function uploadYoutubeVideo() {
       file = await response.blob();
     }
     if (!file.size) throw new Error('视频文件为空。');
-    const cover = document.getElementById('publishCover').files[0] || null;
+    const cover = await resolveSelectedPublishCover();
     const captions = document.getElementById('publishCaptions').value.trim();
     const language = document.getElementById('youtubeCaptionLanguage').value.trim();
     if (captions && !language) throw new Error('请填写字幕语言代码。');
@@ -239,7 +368,12 @@ async function uploadYoutubeAssets() {
 async function retryYoutubeAssets() {
   if (youtubeUploadBusy || !youtubeAssetVideo || youtubeAssetVideo.project !== activeProjectId) return;
   if (!youtubeAccessToken) { uploadMessage('请先连接 YouTube 账号。'); return; }
-  youtubeAssetVideo.cover = document.getElementById('publishCover').files[0] || youtubeAssetVideo.cover;
+  try {
+    youtubeAssetVideo.cover = (await resolveSelectedPublishCover()) || youtubeAssetVideo.cover;
+  } catch (err) {
+    uploadMessage('获取封面失败：' + err.message);
+    return;
+  }
   youtubeAssetVideo.captions = document.getElementById('publishCaptions').value.trim() || youtubeAssetVideo.captions;
   youtubeAssetVideo.language = document.getElementById('youtubeCaptionLanguage').value.trim();
   if ((!youtubeAssetVideo.coverDone && !youtubeAssetVideo.cover) || (!youtubeAssetVideo.captionsDone && (!youtubeAssetVideo.captions || !youtubeAssetVideo.language))) { uploadMessage('请重新选择封面或填写字幕及语言，再重试。'); return; }

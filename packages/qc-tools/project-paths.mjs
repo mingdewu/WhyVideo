@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 export const ROOT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 export const PROJECTS_ROOT = path.join(ROOT_DIR, 'projects');
+export const SHARED_BGM_DIR = path.join(ROOT_DIR, 'public', 'audio', 'bgm');
 
 export function listProjectIds() {
   if (!fs.existsSync(PROJECTS_ROOT)) return [];

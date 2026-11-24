@@ -1,5 +1,6 @@
 export const ROOT_DIR: string;
 export const PROJECTS_ROOT: string;
+export const SHARED_BGM_DIR: string;
 export interface ProjectPaths {
   projectId: string;
   projectDir: string;

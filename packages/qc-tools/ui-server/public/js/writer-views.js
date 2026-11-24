@@ -376,6 +376,7 @@ function renderEvidenceCardsList() {
         document.getElementById('wFinalScriptWords').textContent = '0';
         document.getElementById('wFinalScriptMin').textContent = '0.0';
         document.getElementById('wFinalScriptFullText').value = '';
+        resetFinalScriptSaveState();
         if (typeof renderRevisionChapterPicker === 'function') renderRevisionChapterPicker();
         return;
       }
@@ -404,6 +405,7 @@ function renderEvidenceCardsList() {
 
       const combinedText = fullText.join('\n\n');
       document.getElementById('wFinalScriptFullText').value = combinedText;
+      resetFinalScriptSaveState();
 
       const calcWords = combinedText.replace(/\s+/g, '').length;
       const wordCount = script.total_word_count || calcWords;

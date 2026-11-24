@@ -166,3 +166,235 @@ test('HTTP entry serves assembled panels, every script and download validation',
     await exit;
   }
 });
+
+test('burned-in CaptionLayer is removed and publish-studio SRT upload avoids stale fetch races', async () => {
+  const templateSrcDir = path.join(ROOT_DIR, 'packages/video-template/src');
+  assert.equal(fs.existsSync(path.join(templateSrcDir, 'CaptionLayer.tsx')), false);
+  const compositionSrc = fs.readFileSync(path.join(templateSrcDir, 'WhyExplainerComposition.tsx'), 'utf8');
+  assert.equal(compositionSrc.includes('CaptionLayer'), false);
+
+  const elements = new Map();
+  const getElement = (id) => {
+    if (!elements.has(id)) {
+      const listeners = {};
+      elements.set(id, {
+        value: '',
+        textContent: '',
+        src: '',
+        files: [],
+        dataset: {},
+        listeners,
+        classList: { add() {}, remove() {}, toggle() {}, contains: () => true },
+        addEventListener(type, fn) { listeners[type] = fn; },
+      });
+    }
+    return elements.get(id);
+  };
+
+  let resolveFetch;
+  const fetchCalls = [];
+  const toasts = [];
+  const context = vm.createContext({
+    console, Promise, URL, Blob, encodeURIComponent,
+    activeProjectId: 'proj_a',
+    document: { getElementById: getElement },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {} },
+    showToast: (msg) => toasts.push(msg),
+    fetch: (url, opts) => {
+      fetchCalls.push({ url, opts });
+      if (url.includes('/api/publish/cover')) {
+        return Promise.resolve({ ok: true, json: async () => ({ coverUrl: null }) });
+      }
+      return new Promise((resolve) => { resolveFetch = resolve; });
+    },
+  });
+
+  vm.runInContext(fs.readFileSync(path.join(publicDir, 'js/publish-studio.js'), 'utf8'), context, {
+    filename: 'js/publish-studio.js',
+  });
+
+  const captionInput = getElement('publishCaptionFile');
+  const captionsArea = getElement('publishCaptions');
+  captionInput.value = 'C:\\fakepath\\stale.srt';
+
+  const loadPromise = context.loadPublishProject();
+  assert.equal(captionInput.value, '');
+  const srtFetch = fetchCalls.find((c) => c.url === '/public/proj_a/captions/captions.srt');
+  assert.ok(srtFetch);
+  assert.equal(srtFetch.opts?.cache, 'no-store');
+
+  const localSrt = '1\n00:00:00,000 --> 00:00:02,000\n用户上传的本地字幕\n';
+  captionInput.files = [{ text: async () => localSrt }];
+  await captionInput.listeners.change.call(captionInput);
+  assert.equal(captionsArea.value, localSrt);
+  assert.ok(toasts.length >= 1);
+
+  resolveFetch({ ok: true, text: async () => '1\n00:00:00,000 --> 00:00:02,000\n旧的工程字幕\n' });
+  await loadPromise;
+  assert.equal(captionsArea.value, localSrt);
+});
+
+test('publish routes and publish-studio generate, persist and resolve AI covers by keywords', async () => {
+  const { Readable } = await import('node:stream');
+  const { handlePublishRoutes } = await import('../packages/qc-tools/ui-server/routes/publish-routes.mjs');
+
+  const tmpProj = fs.mkdtempSync(path.join(os.tmpdir(), 'whyvideo-cover-'));
+  const previousFetch = globalThis.fetch;
+  try {
+    const dataDir = path.join(tmpProj, 'data');
+    const publicDirProj = path.join(tmpProj, 'public');
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(publicDirProj, { recursive: true });
+    fs.writeFileSync(
+      path.join(dataDir, 'prompt-config.json'),
+      JSON.stringify({
+        apiKey: 'test-openrouter-key',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        imageModel: 'black-forest-labs/flux-3-image',
+      })
+    );
+
+    const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    let imagePromptSeen = '';
+    globalThis.fetch = async (url, options) => {
+      assert.equal(url, 'https://openrouter.ai/api/v1/images');
+      const reqBody = JSON.parse(options.body);
+      imagePromptSeen = reqBody.prompt;
+      assert.equal(reqBody.aspect_ratio, '16:9');
+      return new Response(
+        JSON.stringify({ data: [{ b64_json: pngBase64, media_type: 'image/png' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    };
+
+    const callRoute = async (method, pathname, bodyObj = null) => {
+      const req = bodyObj
+        ? Readable.from([Buffer.from(JSON.stringify(bodyObj))])
+        : Readable.from([]);
+      req.method = method;
+      let resStatus = 0;
+      let resBody = '';
+      const res = {
+        writeHead(status) { resStatus = status; },
+        end(chunk) { resBody += chunk || ''; },
+      };
+      const handled = await handlePublishRoutes(req, res, {
+        pathname,
+        queryProject: 'demo_cover_proj',
+        paths: {
+          projectDir: tmpProj,
+          dataDir,
+          publicDir: publicDirProj,
+          promptConfigPath: path.join(dataDir, 'prompt-config.json'),
+          finalScriptPath: path.join(dataDir, 'final-script.json'),
+        },
+      });
+      return { handled, status: resStatus, body: JSON.parse(resBody) };
+    };
+
+    const postRes = await callRoute('POST', '/api/publish/generate-cover', {
+      keywords: '富士山、红叶、震撼特写',
+      title: '富士山为什么如此出名',
+    });
+    assert.equal(postRes.handled, true);
+    assert.equal(postRes.status, 200);
+    assert.equal(postRes.body.ok, true);
+    assert.equal(postRes.body.fileName, 'publish-cover.png');
+    assert.equal(postRes.body.mimeType, 'image/png');
+    assert.match(postRes.body.coverUrl, /^\/public\/demo_cover_proj\/publish-cover\.png\?t=\d+$/);
+    assert.match(imagePromptSeen, /富士山、红叶、震撼特写/);
+    assert.ok(fs.existsSync(path.join(publicDirProj, 'publish-cover.png')));
+
+    const getRes = await callRoute('GET', '/api/publish/cover');
+    assert.equal(getRes.handled, true);
+    assert.equal(getRes.status, 200);
+    assert.equal(getRes.body.fileName, 'publish-cover.png');
+    assert.match(getRes.body.coverUrl, /^\/public\/demo_cover_proj\/publish-cover\.png\?t=\d+$/);
+
+    const elements = new Map();
+    const getElement = (id) => {
+      if (!elements.has(id)) {
+        const classes = new Set(['hidden']);
+        elements.set(id, {
+          value: '',
+          textContent: '',
+          src: '',
+          href: '',
+          download: '',
+          disabled: false,
+          files: [],
+          dataset: {},
+          classList: {
+            add: (c) => classes.add(c),
+            remove: (c) => classes.delete(c),
+            toggle: (c, f) => (f ? classes.add(c) : classes.delete(c)),
+            contains: (c) => classes.has(c),
+          },
+          removeAttribute(attr) { delete this[attr]; },
+          addEventListener() {},
+          focus() {},
+        });
+      }
+      return elements.get(id);
+    };
+
+    const vmFetches = [];
+    const coverBlob = new Blob([Buffer.from(pngBase64, 'base64')], { type: 'image/png' });
+    const context = vm.createContext({
+      console, Promise, URL, Blob, encodeURIComponent,
+      activeProjectId: 'proj_a',
+      document: { getElementById: getElement },
+      localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+      sessionStorage: { getItem: () => null, setItem() {} },
+      showToast() {},
+      alert(msg) { throw new Error('Unexpected alert: ' + msg); },
+      fetch: async (url, opts) => {
+        vmFetches.push({ url, opts });
+        if (url.startsWith('/api/publish/generate-cover')) {
+          return {
+            ok: true,
+            json: async () => ({
+              ok: true,
+              coverUrl: '/public/proj_a/publish-cover.png?t=123',
+              fileName: 'publish-cover.png',
+              model: 'black-forest-labs/flux-3-image',
+            }),
+          };
+        }
+        if (url === '/public/proj_a/publish-cover.png?t=123') {
+          return { ok: true, blob: async () => coverBlob };
+        }
+        throw new Error('Unexpected fetch: ' + url);
+      },
+    });
+
+    vm.runInContext(fs.readFileSync(path.join(publicDir, 'js/publish-studio.js'), 'utf8'), context, {
+      filename: 'js/publish-studio.js',
+    });
+
+    await context.generatePublishCover();
+    assert.equal(vmFetches.length, 0);
+    assert.match(getElement('publishCoverStatus').textContent, /请先输入封面关键词/);
+
+    getElement('publishCoverKeywords').value = '富士山、红叶';
+    getElement('publishTitle').value = '富士山为什么如此出名';
+    getElement('publishCover').value = 'C:\\fakepath\\old.jpg';
+    await context.generatePublishCover();
+
+    assert.equal(vmFetches.length, 1);
+    assert.equal(vmFetches[0].url, '/api/publish/generate-cover?project=proj_a');
+    assert.equal(getElement('publishCover').value, '');
+    assert.equal(getElement('publishCoverPreview').src, '/public/proj_a/publish-cover.png?t=123');
+    assert.equal(getElement('publishCoverPreview').classList.contains('hidden'), false);
+    assert.equal(getElement('publishCoverDownload').href, '/public/proj_a/publish-cover.png?t=123');
+
+    const resolvedBlob = await context.resolveSelectedPublishCover();
+    assert.equal(resolvedBlob.size, coverBlob.size);
+    assert.equal(vmFetches[1].url, '/public/proj_a/publish-cover.png?t=123');
+    assert.equal(vmFetches[1].opts?.cache, 'no-store');
+  } finally {
+    globalThis.fetch = previousFetch;
+    fs.rmSync(tmpProj, { recursive: true, force: true });
+  }
+});

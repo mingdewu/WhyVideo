@@ -31,7 +31,7 @@
         <div class="p-4 rounded-xl border border-amber-500/40 bg-amber-950/20 space-y-2">
           <div class="flex flex-wrap items-center justify-between gap-3">
             <div><div class="text-sm font-bold text-white">让 AI 自动完成配乐</div>
-              <div class="text-xs text-gray-400 mt-1">分析音乐和文案 · 自动选曲 · 平滑切换 · 旁白避让</div></div>
+              <div class="text-xs text-gray-400 mt-1">每首歌仅首次听歌打标签并永久复用 · 换工程/换模型不重听 · 省 Token · 平滑切换 · 旁白避让</div></div>
             <button type="button" id="btnAutoBgm" onclick="startAutoBgm()" class="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-gray-950 text-xs font-black cursor-pointer">✨ AI 自动配乐</button>
           </div>
           <div id="bgmAutoStatus" class="text-xs text-amber-200">上传音乐后点击按钮；已上传的音乐可以直接使用。</div>
@@ -65,10 +65,10 @@
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
               <span class="text-xs font-bold text-gray-200">🎼 已上传音乐</span>
-              <span class="text-[10px] text-gray-400 block mt-0.5">支持上传 .mp3 / .wav / .m4a / .ogg / .aac（或直接放入工程 <code class="text-amber-300">public/audio/bgm/</code>）</span>
+              <span class="text-[10px] text-gray-400 block mt-0.5">全局曲库共享，上传一次后所有工程均可直接使用；支持一次选择多首 .mp3 / .wav / .m4a / .ogg / .aac（或直接放入 <code class="text-amber-300">public/audio/bgm/</code>）</span>
             </div>
             <div>
-              <input type="file" id="bgmFileInput" accept=".mp3,.wav,.m4a,.ogg,.aac,audio/*" class="hidden" onchange="handleBgmFileUpload(this)" />
+              <input type="file" id="bgmFileInput" accept=".mp3,.wav,.m4a,.ogg,.aac,audio/*" multiple class="hidden" onchange="handleBgmFileUpload(this)" />
               <button type="button" id="btnUploadBgm" onclick="document.getElementById('bgmFileInput').click()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-500/20 hover:bg-amber-500/40 text-amber-200 border border-amber-400/50 transition cursor-pointer">
                 📤 上传本地 BGM
               </button>

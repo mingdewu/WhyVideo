@@ -19,13 +19,10 @@
     <!-- 紧凑单行信息栏：当前指定模型 + 可折叠全局画面规则 + 节拍统计 -->
     <div class="card px-3.5 py-2 rounded-xl border border-gray-800/90 space-y-2">
       <div class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <!-- 左侧：全局画面规则与批量关键词工具 -->
+        <!-- 左侧：批量关键词主操作与全局画面规则 -->
         <div class="flex flex-wrap items-center gap-1.5 min-w-0">
           <button type="button" id="toggleGlobalPromptBtn" onclick="toggleGlobalPromptDrawer()" class="px-2 py-0.5 rounded text-[11px] font-semibold text-gray-300 hover:text-white bg-gray-900/90 hover:bg-gray-800 border border-gray-700/80 transition cursor-pointer" title="展开或收起 AI 全局画面生成规则">
             ✏️ 全局画面规则 <span id="globalPromptChevron">▸</span>
-          </button>
-          <button type="button" id="btnBatchExtractKeywords" onclick="batchExtractAllSearchKeywords()" class="px-2.5 py-0.5 rounded text-[11px] font-bold text-cyan-100 bg-cyan-700/70 hover:bg-cyan-600 border border-cyan-400/50 transition cursor-pointer shadow-sm" title="使用选定的关键词模型，为本工程全部镜头批量提炼纯中文素材搜索关键词">
-            ✨ 批量提炼全部镜头关键词
           </button>
         </div>
 
@@ -57,8 +54,11 @@
           </div>
         </div>
         <div class="flex flex-wrap items-center gap-2 shrink-0">
+          <button type="button" id="btnBatchExtractKeywords" onclick="batchExtractAllSearchKeywords()" class="px-2.5 py-1 rounded-lg text-[11px] font-bold text-white bg-cyan-600 hover:bg-cyan-500 border border-cyan-300/60 transition cursor-pointer shadow-sm" title="用当前关键词模型重新提炼全部镜头的最佳搜索词，自动保存；运行中可点击停止">
+            ✨ 一键 AI 提炼全部搜索词
+          </button>
           <button type="button" id="btnSynthFull" onclick="synthesizeFullNarration()" class="px-2.5 py-1 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white border border-emerald-400/40 font-extrabold transition cursor-pointer shadow-sm" title="使用已保存的配音引擎设置，自动合并全部分镜文案生成整部视频配音并对齐时间轴">
-            🎙️ 一键生成全片旁白
+            🎙️ 生成音频
           </button>
           <button type="button" id="btnCancelVoiceboxMain" onclick="cancelVoiceboxJob()" class="hidden px-2.5 py-1 rounded-lg bg-rose-950/80 hover:bg-rose-700 border border-rose-500/60 text-rose-200 font-bold transition cursor-pointer shadow-sm" title="取消当前正在运行的配音任务">
             🛑 取消配音

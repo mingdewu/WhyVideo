@@ -1,8 +1,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { probeDurationMs } from './narration-timing.mjs';
+import { SHARED_BGM_DIR } from './project-paths.mjs';
 
 export const BGM_CONFIG_FILENAME = 'bgm-config.json';
+export const BGM_ANALYSIS_FILENAME = '.bgm-audio-analysis.json';
+export const BGM_MIGRATED_MARKER = '.shared-bgm-migrated-v1';
 export const BGM_PUBLIC_SUBDIR = 'audio/bgm';
 export const ALLOWED_AUDIO_EXTS = new Set(['.mp3', '.wav', '.m4a', '.ogg', '.aac']);
 
@@ -106,9 +110,338 @@ function getBgmPublicDir(publicDir) {
   return path.join(publicDir, BGM_PUBLIC_SUBDIR);
 }
 
-function safeAudioTrackFromFile(publicDir, fileName, existingTrack = null) {
+function linkOrCopyFile(srcPath, destPath) {
+  fs.mkdirSync(path.dirname(destPath), { recursive: true });
+  try {
+    fs.linkSync(srcPath, destPath);
+  } catch {
+    fs.copyFileSync(srcPath, destPath);
+  }
+}
+
+function isRegularFile(filePath) {
+  try {
+    return fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function readJsonObject(filePath) {
+  if (!isRegularFile(filePath)) return {};
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeJsonObject(filePath, data) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+}
+
+export function trackAnalysisKey(fileName, sizeBytes) {
+  return `${path.basename(String(fileName || ''))}::${Number(sizeBytes) || 0}`;
+}
+
+export function legacyTrackAnalysisKey(src, sizeBytes, mtimeMs, model, baseUrl) {
+  return createHash('sha256')
+    .update(JSON.stringify([src, sizeBytes, mtimeMs, model, baseUrl, 'sample-v1']))
+    .digest('hex');
+}
+
+export function findTrackAnalysisInCache(cache, { fileName = '', src = '', size = 0, mtimeMs, model = '', baseUrl = '' } = {}) {
+  if (!cache || typeof cache !== 'object') return null;
+  const resolvedName = path.basename(String(fileName || src || ''));
+  if (resolvedName) {
+    const canonicalKey = trackAnalysisKey(resolvedName, size);
+    if (Object.prototype.hasOwnProperty.call(cache, canonicalKey) && cache[canonicalKey]) {
+      return { key: canonicalKey, analysis: cache[canonicalKey], isLegacy: false };
+    }
+  }
+  if (src && Number.isFinite(mtimeMs)) {
+    const candidates = [];
+    if (model) candidates.push([model, baseUrl]);
+    candidates.push(['google/gemini-2.5-flash', 'https://openrouter.ai/api/v1']);
+    for (const [m, u] of candidates) {
+      const legacyKey = legacyTrackAnalysisKey(src, size, mtimeMs, m, u);
+      if (Object.prototype.hasOwnProperty.call(cache, legacyKey) && cache[legacyKey]) {
+        return { key: legacyKey, analysis: cache[legacyKey], isLegacy: true };
+      }
+    }
+  }
+  return null;
+}
+
+export function loadBgmAnalysisCache(projectDir, sharedBgmDir = SHARED_BGM_DIR) {
+  const projCache = projectDir ? readJsonObject(path.join(projectDir, 'data', 'bgm-audio-analysis.json')) : {};
+  const sharedCache = sharedBgmDir ? readJsonObject(path.join(path.resolve(sharedBgmDir), BGM_ANALYSIS_FILENAME)) : {};
+  return { ...projCache, ...sharedCache };
+}
+
+export function saveBgmAnalysisCache(cache, projectDir, sharedBgmDir = SHARED_BGM_DIR) {
+  const targetPath = sharedBgmDir
+    ? path.join(path.resolve(sharedBgmDir), BGM_ANALYSIS_FILENAME)
+    : path.join(projectDir, 'data', 'bgm-audio-analysis.json');
+  writeJsonObject(targetPath, cache || {});
+  return targetPath;
+}
+
+export function deleteBgmTrackAnalysis(track, projectDir, sharedBgmDir = SHARED_BGM_DIR) {
+  if (!track) return false;
+  const fileName = path.basename(String(track.file_name || track.src || ''));
+  const relSrc = track.src || (fileName ? `${BGM_PUBLIC_SUBDIR}/${fileName}` : '');
+  const publicDir = projectDir ? path.join(projectDir, 'public') : null;
+  const diskPath = resolveBgmTrackDiskPath(publicDir, relSrc, sharedBgmDir);
+  let diskStat = null;
+  if (diskPath) {
+    try { diskStat = fs.statSync(diskPath); } catch {}
+  }
+
+  const keysToDelete = new Set();
+  if (fileName && Number.isFinite(Number(track.size_bytes))) {
+    keysToDelete.add(trackAnalysisKey(fileName, track.size_bytes));
+  }
+  if (fileName && diskStat) {
+    keysToDelete.add(trackAnalysisKey(fileName, diskStat.size));
+  }
+
+  const cachePaths = [
+    sharedBgmDir ? path.join(path.resolve(sharedBgmDir), BGM_ANALYSIS_FILENAME) : null,
+    projectDir ? path.join(projectDir, 'data', 'bgm-audio-analysis.json') : null,
+  ].filter(Boolean);
+
+  let removedAny = false;
+  for (const cachePath of cachePaths) {
+    if (!isRegularFile(cachePath)) continue;
+    const cache = readJsonObject(cachePath);
+    let modified = false;
+    for (const k of keysToDelete) {
+      if (Object.prototype.hasOwnProperty.call(cache, k)) {
+        delete cache[k];
+        modified = true;
+      }
+    }
+    if (relSrc && diskStat) {
+      const legacyHit = findTrackAnalysisInCache(cache, {
+        fileName,
+        src: relSrc,
+        size: diskStat.size,
+        mtimeMs: diskStat.mtimeMs,
+        model: cache[trackAnalysisKey(fileName, diskStat.size)]?.analyzed_model || '',
+        baseUrl: 'https://openrouter.ai/api/v1',
+      });
+      if (legacyHit && Object.prototype.hasOwnProperty.call(cache, legacyHit.key)) {
+        delete cache[legacyHit.key];
+        modified = true;
+      }
+    }
+    if (modified) {
+      writeJsonObject(cachePath, cache);
+      removedAny = true;
+    }
+  }
+  return removedAny;
+}
+
+/**
+ * Resolve a BGM track relative src (e.g. `audio/bgm/foo.mp3`) to an existing
+ * file on disk, checking the project's public BGM dir first and then `sharedBgmDir`.
+ */
+export function resolveBgmTrackDiskPath(publicDir, relSrc, sharedBgmDir = SHARED_BGM_DIR) {
+  if (!relSrc || typeof relSrc !== 'string') return null;
+
+  if (publicDir) {
+    const bgmDir = path.resolve(getBgmPublicDir(publicDir));
+    const localResolved = path.resolve(publicDir, relSrc);
+    if (localResolved.startsWith(bgmDir + path.sep) && isRegularFile(localResolved)) {
+      return localResolved;
+    }
+  }
+
+  if (sharedBgmDir) {
+    const sharedRoot = path.resolve(sharedBgmDir);
+    const fileName = path.basename(relSrc);
+    if (fileName) {
+      const sharedResolved = path.resolve(sharedRoot, fileName);
+      if (sharedResolved.startsWith(sharedRoot + path.sep) && isRegularFile(sharedResolved)) {
+        return sharedResolved;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Ensure a BGM track exists inside `publicDir/audio/bgm/` for Remotion staticFile().
+ * Hardlinks (falling back to copying) from `sharedBgmDir` when needed.
+ */
+export function ensureProjectBgmFile(publicDir, relSrc, sharedBgmDir = SHARED_BGM_DIR) {
+  if (!publicDir || !relSrc || typeof relSrc !== 'string') return null;
+  const bgmDir = path.resolve(getBgmPublicDir(publicDir));
+  const dest = path.resolve(publicDir, relSrc);
+  if (!dest.startsWith(bgmDir + path.sep)) return null;
+  if (isRegularFile(dest)) return dest;
+
+  if (!sharedBgmDir) return null;
+  const sharedRoot = path.resolve(sharedBgmDir);
+  const fileName = path.basename(relSrc);
+  if (!fileName) return null;
+  const srcInShared = path.resolve(sharedRoot, fileName);
+  if (!srcInShared.startsWith(sharedRoot + path.sep) || !isRegularFile(srcInShared)) {
+    return null;
+  }
+
+  linkOrCopyFile(srcInShared, dest);
+  return dest;
+}
+
+/**
+ * Return the filename of an existing file in `sharedBgmDir` with identical bytes
+ * to `buffer`, or `null` when no duplicate exists.
+ */
+export function findDuplicateSharedBgmFile(sharedBgmDir, buffer) {
+  if (!sharedBgmDir || !Buffer.isBuffer(buffer) || buffer.length === 0) return null;
+  const sharedRoot = path.resolve(sharedBgmDir);
+  if (!fs.existsSync(sharedRoot) || !fs.statSync(sharedRoot).isDirectory()) return null;
+
+  let uploadHash = null;
+  const entries = fs.readdirSync(sharedRoot, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+  for (const ent of entries) {
+    if (!ent.isFile() || ent.name.startsWith('.')) continue;
+    const ext = path.extname(ent.name).toLowerCase();
+    if (!ALLOWED_AUDIO_EXTS.has(ext)) continue;
+    const candidatePath = path.join(sharedRoot, ent.name);
+    try {
+      const stat = fs.statSync(candidatePath);
+      if (stat.size !== buffer.length) continue;
+      if (!uploadHash) {
+        uploadHash = createHash('sha256').update(buffer).digest('hex');
+      }
+      const candidateHash = createHash('sha256').update(fs.readFileSync(candidatePath)).digest('hex');
+      if (candidateHash === uploadHash) return ent.name;
+    } catch {}
+  }
+  return null;
+}
+
+/**
+ * One-time migration of legacy per-project BGM tracks and audio analysis caches
+ * into the shared BGM library directory, plus promotion of legacy hash keys.
+ */
+export function syncExistingProjectsToSharedBgm(projectsRoot, sharedBgmDir = SHARED_BGM_DIR) {
+  if (!projectsRoot || !sharedBgmDir || !fs.existsSync(projectsRoot)) {
+    return { linkedFiles: 0, mergedAnalyses: 0 };
+  }
+
+  const sharedRoot = path.resolve(sharedBgmDir);
+  const markerPath = path.join(sharedRoot, BGM_MIGRATED_MARKER);
+  const alreadyMigrated = fs.existsSync(markerPath);
+  const sharedCachePath = path.join(sharedRoot, BGM_ANALYSIS_FILENAME);
+  const sharedCache = readJsonObject(sharedCachePath);
+
+  let linkedFiles = 0;
+  let mergedAnalyses = 0;
+  let cacheDirty = false;
+
+  if (!alreadyMigrated) {
+    const normalizedSig = (fileName, size) =>
+      `${String(fileName || '').replace(/\.[^.]+$/, '').replace(/^bgm_\d+_/, '')}::${Number(size) || 0}`;
+    const seenSignatures = new Set();
+
+    if (fs.existsSync(sharedRoot) && fs.statSync(sharedRoot).isDirectory()) {
+      for (const ent of fs.readdirSync(sharedRoot, { withFileTypes: true })) {
+        if (!ent.isFile() || ent.name.startsWith('.')) continue;
+        const ext = path.extname(ent.name).toLowerCase();
+        if (!ALLOWED_AUDIO_EXTS.has(ext)) continue;
+        try {
+          const stat = fs.statSync(path.join(sharedRoot, ent.name));
+          seenSignatures.add(normalizedSig(ent.name, stat.size));
+        } catch {}
+      }
+    }
+
+    const projectEntries = fs.readdirSync(projectsRoot, { withFileTypes: true });
+    for (const projEnt of projectEntries) {
+      if (!projEnt.isDirectory() || projEnt.name.startsWith('.')) continue;
+      const projectDir = path.join(projectsRoot, projEnt.name);
+      const projBgmDir = path.join(projectDir, 'public', BGM_PUBLIC_SUBDIR);
+
+      if (fs.existsSync(projBgmDir) && fs.statSync(projBgmDir).isDirectory()) {
+        const audioEntries = fs.readdirSync(projBgmDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+        for (const ent of audioEntries) {
+          if (!ent.isFile() || ent.name.startsWith('.')) continue;
+          const ext = path.extname(ent.name).toLowerCase();
+          if (!ALLOWED_AUDIO_EXTS.has(ext)) continue;
+          const srcFile = path.join(projBgmDir, ent.name);
+          const stat = fs.statSync(srcFile);
+          const sig = normalizedSig(ent.name, stat.size);
+          if (seenSignatures.has(sig)) continue;
+          const dest = path.join(sharedRoot, ent.name);
+          if (!fs.existsSync(dest)) {
+            linkOrCopyFile(srcFile, dest);
+            linkedFiles++;
+          }
+          seenSignatures.add(sig);
+        }
+      }
+
+      const projAnalysisPath = path.join(projectDir, 'data', 'bgm-audio-analysis.json');
+      if (isRegularFile(projAnalysisPath)) {
+        const parsed = readJsonObject(projAnalysisPath);
+        for (const [key, val] of Object.entries(parsed)) {
+          if (!Object.prototype.hasOwnProperty.call(sharedCache, key)) {
+            sharedCache[key] = val;
+            mergedAnalyses++;
+            cacheDirty = true;
+          }
+        }
+      }
+    }
+
+    fs.mkdirSync(sharedRoot, { recursive: true });
+    fs.writeFileSync(markerPath, `${new Date().toISOString()}\n`, 'utf8');
+  }
+
+  // Promote any legacy model-scoped hash entries into canonical fileName::size keys
+  if (fs.existsSync(sharedRoot) && fs.statSync(sharedRoot).isDirectory()) {
+    const sharedEntries = fs.readdirSync(sharedRoot, { withFileTypes: true });
+    for (const ent of sharedEntries) {
+      if (!ent.isFile() || ent.name.startsWith('.')) continue;
+      const ext = path.extname(ent.name).toLowerCase();
+      if (!ALLOWED_AUDIO_EXTS.has(ext)) continue;
+      const filePath = path.join(sharedRoot, ent.name);
+      const stat = fs.statSync(filePath);
+      const canonicalKey = trackAnalysisKey(ent.name, stat.size);
+      if (Object.prototype.hasOwnProperty.call(sharedCache, canonicalKey) && sharedCache[canonicalKey]) {
+        continue;
+      }
+      const legacyHit = findTrackAnalysisInCache(sharedCache, {
+        fileName: ent.name,
+        src: `${BGM_PUBLIC_SUBDIR}/${ent.name}`,
+        size: stat.size,
+        mtimeMs: stat.mtimeMs,
+      });
+      if (legacyHit?.analysis) {
+        sharedCache[canonicalKey] = legacyHit.analysis;
+        mergedAnalyses++;
+        cacheDirty = true;
+      }
+    }
+  }
+
+  if (cacheDirty) {
+    writeJsonObject(sharedCachePath, sharedCache);
+  }
+
+  return { linkedFiles, mergedAnalyses };
+}
+
+function safeAudioTrackFromFile(diskPath, fileName, existingTrack = null, scope = 'shared') {
   const relPath = `${BGM_PUBLIC_SUBDIR}/${fileName}`;
-  const diskPath = path.join(publicDir, relPath);
   const stat = fs.statSync(diskPath);
   let durationMs = existingTrack?.duration_ms ?? null;
   if (!durationMs || durationMs <= 0) {
@@ -124,11 +457,26 @@ function safeAudioTrackFromFile(publicDir, fileName, existingTrack = null) {
     size_bytes: stat.size,
     source_type: existingTrack?.source_type || 'local_file',
     license_status: 'approved',
+    scope: scope || existingTrack?.scope || 'shared',
     added_at: existingTrack?.added_at || stat.mtime.toISOString(),
   };
 }
 
-export function loadBgmConfig(projectDir, publicDir) {
+function registerTracksFromDir(dirPath, scope, seenSrc, syncedTracks, existingBySrc) {
+  if (!dirPath || !fs.existsSync(dirPath) || !fs.statSync(dirPath).isDirectory()) return;
+  const entries = fs.readdirSync(dirPath, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name));
+  for (const ent of entries) {
+    if (!ent.isFile() || ent.name.startsWith('.')) continue;
+    const ext = path.extname(ent.name).toLowerCase();
+    if (!ALLOWED_AUDIO_EXTS.has(ext)) continue;
+    const rel = `${BGM_PUBLIC_SUBDIR}/${ent.name}`;
+    if (seenSrc.has(rel)) continue;
+    syncedTracks.push(safeAudioTrackFromFile(path.join(dirPath, ent.name), ent.name, existingBySrc.get(rel) || null, scope));
+    seenSrc.add(rel);
+  }
+}
+
+export function loadBgmConfig(projectDir, publicDir, { sharedBgmDir = SHARED_BGM_DIR } = {}) {
   const defaults = defaultBgmConfig();
   const cfgPath = getBgmConfigPath(projectDir);
   let raw = {};
@@ -151,34 +499,24 @@ export function loadBgmConfig(projectDir, publicDir) {
   const syncedTracks = [];
   const seenSrc = new Set();
 
-  // Preserve order of existing tracks that still exist on disk
+  // Preserve order of existing tracks that still exist on disk (project or shared library)
   if (Array.isArray(raw.tracks)) {
     for (const tr of raw.tracks) {
       if (!tr?.src) continue;
-      const resolved = path.resolve(publicDir, tr.src);
-      if (!resolved.startsWith(path.resolve(bgmDir) + path.sep)) continue;
-      if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) continue;
-      const ext = path.extname(resolved).toLowerCase();
+      const diskPath = resolveBgmTrackDiskPath(publicDir, tr.src, sharedBgmDir);
+      if (!diskPath) continue;
+      const ext = path.extname(diskPath).toLowerCase();
       if (!ALLOWED_AUDIO_EXTS.has(ext)) continue;
-      const fileName = path.basename(resolved);
-      syncedTracks.push(safeAudioTrackFromFile(publicDir, fileName, tr));
+      const fileName = path.basename(diskPath);
+      const inShared = Boolean(sharedBgmDir && isRegularFile(path.resolve(sharedBgmDir, fileName)));
+      syncedTracks.push(safeAudioTrackFromFile(diskPath, fileName, tr, inShared ? 'shared' : 'project'));
       seenSrc.add(tr.src);
     }
   }
 
-  // Auto-register any audio files dropped directly into public/audio/bgm/
-  if (fs.existsSync(bgmDir) && fs.statSync(bgmDir).isDirectory()) {
-    const entries = fs.readdirSync(bgmDir, { withFileTypes: true });
-    for (const ent of entries) {
-      if (!ent.isFile() || ent.name.startsWith('.')) continue;
-      const ext = path.extname(ent.name).toLowerCase();
-      if (!ALLOWED_AUDIO_EXTS.has(ext)) continue;
-      const rel = `${BGM_PUBLIC_SUBDIR}/${ent.name}`;
-      if (seenSrc.has(rel)) continue;
-      syncedTracks.push(safeAudioTrackFromFile(publicDir, ent.name, existingBySrc.get(rel) || null));
-      seenSrc.add(rel);
-    }
-  }
+  // Auto-register any audio files in the shared BGM library and project BGM folder
+  registerTracksFromDir(sharedBgmDir, 'shared', seenSrc, syncedTracks, existingBySrc);
+  registerTracksFromDir(bgmDir, 'project', seenSrc, syncedTracks, existingBySrc);
 
   let selectedTrackId = raw.selected_track_id || null;
   if (selectedTrackId && !syncedTracks.some((t) => t.track_id === selectedTrackId)) {
@@ -481,15 +819,15 @@ export function buildBgmPlaylist(tracks, segments, totalMs, fps = 30, aiOrder = 
   return result;
 }
 
-export function compileBgmRenderProp(projectDir, publicDir, manifest = {}, captions = [], fps = 30) {
-  const config = loadBgmConfig(projectDir, publicDir);
+export function compileBgmRenderProp(projectDir, publicDir, manifest = {}, captions = [], fps = 30, { sharedBgmDir = SHARED_BGM_DIR } = {}) {
+  const config = loadBgmConfig(projectDir, publicDir, { sharedBgmDir });
   if (!config.enabled || !config.selected_track_id) return null;
 
   const track = config.tracks.find((t) => t.track_id === config.selected_track_id);
   if (!track || !track.src) return null;
 
-  const diskPath = path.join(publicDir, track.src);
-  if (!fs.existsSync(diskPath)) return null;
+  const diskPath = ensureProjectBgmFile(publicDir, track.src, sharedBgmDir);
+  if (!diskPath) return null;
 
   const settings = normalizeBgmSettings(config.settings);
   const totalMs = Math.max(
@@ -512,6 +850,13 @@ export function compileBgmRenderProp(projectDir, publicDir, manifest = {}, capti
   });
 
   const speech_windows = mergeSpeechWindows(captions, fps, 250);
+  let playlist;
+  if (config.multi_track) {
+    playlist = buildBgmPlaylist(config.tracks, normalizedSegments, totalMs, fps, config.ai_plan?.track_order || []);
+    for (const clip of playlist) {
+      ensureProjectBgmFile(publicDir, clip.src, sharedBgmDir);
+    }
+  }
 
   return {
     src: track.src,
@@ -526,7 +871,7 @@ export function compileBgmRenderProp(projectDir, publicDir, manifest = {}, capti
     fade_out_ms: settings.fade_out_ms,
     segments,
     speech_windows,
-    ...(config.multi_track ? { playlist: buildBgmPlaylist(config.tracks, normalizedSegments, totalMs, fps, config.ai_plan?.track_order || []) } : {}),
+    ...(playlist ? { playlist } : {}),
   };
 }
 

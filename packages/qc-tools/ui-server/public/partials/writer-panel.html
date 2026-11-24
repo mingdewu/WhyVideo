@@ -569,6 +569,9 @@
               <p class="text-[11px] text-gray-400">跨章节去重 · 专有名词与年代统一 · 剔除中间伪结尾 · 唯一结尾回扣</p>
             </div>
             <div class="flex flex-wrap items-center gap-2 shrink-0">
+              <button type="button" onclick="aiFinalizeFullScript()" id="btnAiFinalize" class="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <span>🤖 全文统稿</span>
+              </button>
               <button type="button" id="btnOpenEditorialRevision" onclick="openEditorialRevisionWorkbench()" class="px-3 py-1.5 rounded-xl bg-amber-950/60 hover:bg-amber-900/70 border border-amber-500/50 text-amber-200 text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer" title="打开总编审稿与定向改稿窗口（查看历史快照、制定改稿方案、左右对比定稿）">
                 <span>🧭 总编审稿与定向改稿</span>
                 <span id="wRevisionPendingDot" class="hidden w-2 h-2 rounded-full bg-amber-400"></span>
@@ -576,11 +579,8 @@
               <button type="button" id="btnOpenHumanizeModal" onclick="openHumanizeWorkbenchModal()" class="px-3 py-1.5 rounded-xl bg-violet-950/60 hover:bg-violet-900/70 border border-violet-500/50 text-violet-200 text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer" title="打开全篇文案 AI 去AI味与真人化修复弹窗">
                 <span>✨ AI 去AI味修复</span>
               </button>
-              <button type="button" onclick="saveFinalScriptOnlyUI()" class="px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer" title="将当前全文文案立即持久化到本地 final-script.json（不改动制作台）">
+              <button type="button" id="btnSaveFinalScript" onclick="saveFinalScriptOnlyUI()" class="hidden px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition items-center gap-1 shadow cursor-pointer" title="保存修改后的全文文案">
                 <span>💾 保存文案底稿</span>
-              </button>
-              <button type="button" onclick="aiFinalizeFullScript()" id="btnAiFinalize" class="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
-                <span>🤖 AI 全文统稿去重去伪结尾</span>
               </button>
               <button type="button" onclick="syncWriterToProducerUI()" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 text-xs font-black transition flex items-center gap-1 shadow-lg cursor-pointer">
                 <span>🚀 保存并同步制作台</span>

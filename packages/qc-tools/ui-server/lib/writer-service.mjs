@@ -427,17 +427,40 @@ export async function extractWriterEvidence(projectId, stored, brief, materials,
   const briefJson = JSON.stringify(brief, null, 2);
   const sys = renderWriterPrompt(projectDir, 'W3_evidence', { title, materials, brief_json: briefJson });
   const user = `【视频题目】${title}\n【立项 Brief】\n${briefJson}\n\n【已有资料】\n${materials}\n\n【本次 Tavily 检索结果（摘要仍需原文核查）】\n${tavilyResults}\n\n只为可定位来源且输入内容直接支持的主张建卡。`;
-  const aiText = await callOpenRouterText(sys, user, { ...modelOptions, maxTokens: 3500 });
-  const parsedCards = extractJsonFromText(aiText);
-  if (!Array.isArray(parsedCards)) return { evidenceCards: parsedCards, researchedMaterials, aiText, pendingEvidenceCount: 0 };
+  // Keep the response bounded and repeat the format contract even for custom prompts.
+  const outputContract = '\n\n【输出格式】仅输出完整 JSON 数组，最多 12 张卡，每张 evidence_summary 不超过 120 字。每项必须包含 evidence_id、claim_type、evidence_summary、source_title、source_url、reliability。不要添加说明文字或外层对象；资料不足时返回 []，不得编造。';
+  let aiText;
+  let parsedCards = [];
+  let error = '';
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const retryInstruction = attempt ? '\n上一次返回未能解析为有效证据卡，请重新从输入资料提取，最多输出 6 张卡，确保数组和字符串完整闭合。' : '';
+    aiText = await callOpenRouterText(sys, user + outputContract + retryInstruction, { ...modelOptions, maxTokens: 6000 });
+    const llmError = globalThis.__lastWriterLlmError;
+    // Network/authentication failures must not be disguised as JSON errors.
+    if (aiText === null) {
+      error = llmError || '证据卡模型请求失败，请重试';
+      break;
+    }
+    const parsed = extractJsonFromText(aiText);
+    const cards = Array.isArray(parsed) ? parsed
+      : [parsed?.evidenceCards, parsed?.evidence_cards, parsed?.cards].find(Array.isArray);
+    parsedCards = (cards || []).filter((card) => card && typeof card === 'object' && !Array.isArray(card)
+      && typeof card.evidence_summary === 'string' && card.evidence_summary.trim());
+    if (parsedCards.length) break;
+    if (Array.isArray(cards) && cards.length === 0) {
+      error = '模型未从当前资料中提取到证据卡，请补充支持具体事实的来源资料后重试';
+      break;
+    }
+    error = llmError || '模型返回的证据卡格式无效，自动重试后仍无法解析，请重试或更换模型';
+  }
+  if (!parsedCards.length) return { evidenceCards: [], researchedMaterials, aiText, pendingEvidenceCount: 0, error };
   const suppliedText = `${briefJson}\n${materials}\n${tavilyResults}`;
   let pendingEvidenceCount = 0;
-  const evidenceCards = parsedCards.filter((card) => card && typeof card === 'object' && !Array.isArray(card))
-    .map((card, index) => {
-      const normalized = markWriterEvidencePending(card, suppliedText);
-      if (card.claim_type === 'verified_fact' && normalized.claim_type === 'unverified_fact') pendingEvidenceCount++;
-      return { ...normalized, evidence_id: `EV-${String(index + 1).padStart(3, '0')}` };
-    });
+  const evidenceCards = parsedCards.map((card, index) => {
+    const normalized = markWriterEvidencePending(card, suppliedText);
+    if (normalized.claim_type === 'unverified_fact') pendingEvidenceCount++;
+    return { ...normalized, evidence_id: `EV-${String(index + 1).padStart(3, '0')}` };
+  });
   return { evidenceCards, researchedMaterials, aiText, pendingEvidenceCount };
 }
 

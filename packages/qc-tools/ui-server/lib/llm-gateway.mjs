@@ -4,28 +4,44 @@ import { rootDir } from './config.mjs';
 import { renderWriterPrompt } from '../../writer-prompts.mjs';
 
 export function extractJsonFromText(text) {
-  if (!text) return null;
-  const match = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-  const jsonStr = match ? match[1] : text;
-  try {
-    return JSON.parse(jsonStr.trim());
-  } catch (e) {
-    const firstBrace = text.indexOf('{');
-    const lastBrace = text.lastIndexOf('}');
-    if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
-      try {
-        return JSON.parse(text.slice(firstBrace, lastBrace + 1));
-      } catch (err) {}
+  if (typeof text !== 'string' || !text.trim()) return null;
+  // Prefer fenced JSON, then scan complete outer containers in their original order.
+  // Parsing braces first turns a one-card array with a prose prefix into an object.
+  const candidates = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)\s*```/gi)].map((match) => match[1]);
+  candidates.push(text);
+  for (const candidate of candidates) {
+    try { return JSON.parse(candidate.trim()); } catch {}
+    let start = -1;
+    let quoted = false;
+    let escaped = false;
+    const stack = [];
+    for (let i = 0; i < candidate.length; i++) {
+      const char = candidate[i];
+      if (start === -1) {
+        if (char !== '{' && char !== '[') continue;
+        start = i;
+      }
+      if (quoted) {
+        if (escaped) escaped = false;
+        else if (char === '\\') escaped = true;
+        else if (char === '"') quoted = false;
+        continue;
+      }
+      if (char === '"') quoted = true;
+      else if (char === '{' || char === '[') stack.push(char);
+      else if (char === '}' || char === ']') {
+        const opening = stack.pop();
+        if ((char === '}' && opening !== '{') || (char === ']' && opening !== '[')) {
+          start = -1;
+          stack.length = 0;
+        } else if (!stack.length) {
+          try { return JSON.parse(candidate.slice(start, i + 1)); } catch {}
+          start = -1;
+        }
+      }
     }
-    const firstBracket = text.indexOf('[');
-    const lastBracket = text.lastIndexOf(']');
-    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-      try {
-        return JSON.parse(text.slice(firstBracket, lastBracket + 1));
-      } catch (err) {}
-    }
-    return null;
   }
+  return null;
 }
 
 export async function fetchWikipediaExtract(query) {
@@ -232,7 +248,18 @@ export async function callOpenRouterText(systemPrompt, userPrompt, { model, apiK
     }
 
     const json = await resp.json();
-    return json.choices?.[0]?.message?.content?.trim() || '';
+    const choice = json.choices?.[0];
+    const content = choice?.message?.content;
+    const text = typeof content === 'string' ? content.trim()
+      : Array.isArray(content) ? content.map((part) => typeof part?.text === 'string' ? part.text : '').join('\n').trim() : '';
+    if (choice?.finish_reason === 'length') {
+      globalThis.__lastWriterLlmError = '模型输出达到长度上限，JSON 可能被截断，请减少单次提取数量后重试';
+    } else if (!text) {
+      globalThis.__lastWriterLlmError = choice?.message?.refusal
+        ? '模型拒绝了本次请求，请调整资料或更换模型后重试'
+        : '模型返回了空内容，请重试或更换模型';
+    }
+    return text;
   } catch (err) {
     globalThis.__lastWriterLlmError = err.name === 'AbortError' ? '请求超时 (90s)' : err.message;
     console.error('[Writer Text Error]:', err);

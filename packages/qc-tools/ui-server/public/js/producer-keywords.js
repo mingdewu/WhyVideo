@@ -136,15 +136,7 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
         showToast('当前工程没有镜头');
         return;
       }
-      let targetIndices = scenes
-        .map((s, i) => ({ s, i }))
-        .filter(({ s }) => !Array.isArray(s.search_keyword_candidates) || s.search_keyword_candidates.length === 0)
-        .map(({ i }) => i);
-
-      if (targetIndices.length === 0) {
-        if (!confirm('全部 ' + scenes.length + ' 个镜头已有关键词，是否全部重新提炼？')) return;
-        targetIndices = scenes.map((_, i) => i);
-      }
+      const targetIndices = scenes.map((_, i) => i);
 
       _batchKeywordRunning = true;
       _batchKeywordAbort = false;
@@ -152,7 +144,9 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
       let okCount = 0;
       const total = targetIndices.length;
       const updateBtn = () => {
-        if (btn) btn.textContent = '⏹️ 停止提炼 (' + done + '/' + total + ')';
+        if (btn) btn.textContent = _batchKeywordAbort
+          ? '⏳ 正在停止 (' + done + '/' + total + ')'
+          : '⏹️ 停止提炼 (' + done + '/' + total + ')';
       };
       updateBtn();
 
@@ -173,7 +167,7 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
       const wasAborted = _batchKeywordAbort;
       _batchKeywordRunning = false;
       _batchKeywordAbort = false;
-      if (btn) btn.textContent = '✨ 批量提炼全部镜头关键词';
+      if (btn) btn.textContent = '✨ 一键 AI 提炼全部搜索词';
       showToast(wasAborted ? ('⏹️ 已停止，完成 ' + okCount + '/' + done + ' 个镜头') : ('🎉 批量提炼完成：成功 ' + okCount + '/' + total + ' 个镜头'));
       if (!wasAborted) {
         showCompletionModal({

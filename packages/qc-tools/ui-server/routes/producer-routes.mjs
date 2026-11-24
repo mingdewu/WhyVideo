@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { rootDir, defaultProjectId, getPaths, readBody, alignJobs } from '../lib/config.mjs';
+import { ensureRemotionStudio } from '../lib/remotion-studio-service.mjs';
 import {
   listProjects,
   getProjectTiming,
@@ -291,6 +292,12 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
       );
     }
     recompileProject(targetProject);
+    let remotionStudio = { ok: false, projectId: targetProject, url: 'http://localhost:3100' };
+    try {
+      remotionStudio = await ensureRemotionStudio(targetProject);
+    } catch (err) {
+      remotionStudio = { ok: false, projectId: targetProject, url: 'http://localhost:3100', error: err.message };
+    }
     const updatedManifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(
@@ -298,6 +305,7 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
         ok: true,
         manifest: updatedManifest,
         timingSummary: buildProjectTimingSummary(targetProject, updatedManifest),
+        remotionStudio,
       })
     );
   }
@@ -700,6 +708,20 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
         message: actionMsg,
       })
     );
+  }
+
+  // 10. 切换或启动当前工程对应的 Remotion Studio (:3100)
+  if (req.method === 'POST' && pathname === '/api/remotion-studio/open') {
+    const body = await readBody(req);
+    const targetProject = body.projectId || queryProject;
+    try {
+      const studio = await ensureRemotionStudio(targetProject);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: true, ...studio }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: err.message }));
+    }
   }
 
   return false;

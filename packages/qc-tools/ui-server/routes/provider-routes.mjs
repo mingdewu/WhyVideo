@@ -255,11 +255,19 @@ export async function handleProviderRoutes(req, res, { url, pathname, queryProje
           if (stripModelsPrefix && id.startsWith('models/')) id = id.slice('models/'.length);
           const rawName = String(m?.displayName || m?.name || id).trim();
           const desc = String(m?.description || '').trim().slice(0, 80);
+          const inputModalities = Array.isArray(m?.architecture?.input_modalities)
+            ? m.architecture.input_modalities
+            : [];
+          const supports_audio = inputModalities.length > 0
+            ? inputModalities.includes('audio')
+            : (stripModelsPrefix ? /^gemini-(1\.5|2\.|3\.)/i.test(id) && !/embedding|imagen|veo|aqa/i.test(id) : false);
           return {
             id,
             name: rawName || id,
             description: desc,
             context_length: m?.context_length || m?.inputTokenLimit || null,
+            input_modalities: inputModalities,
+            supports_audio,
           };
         })
         .filter((m) => m.id)
@@ -336,11 +344,13 @@ export async function handleProviderRoutes(req, res, { url, pathname, queryProje
     }
 
     const fallbackModels = [
-      { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat' },
-      { id: 'google/gemini-2.5-flash', name: 'Google Gemini 2.5 Flash' },
-      { id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic Claude Sonnet 4.5' },
-      { id: 'openai/gpt-4o-mini', name: 'OpenAI GPT-4o Mini' },
-      { id: 'google/gemini-2.5-flash-image', name: 'Gemini 2.5 Flash Image' },
+      { id: 'google/gemini-2.5-flash', name: 'Google Gemini 2.5 Flash', supports_audio: true, input_modalities: ['text', 'image', 'audio'] },
+      { id: 'google/gemini-2.5-pro', name: 'Google Gemini 2.5 Pro', supports_audio: true, input_modalities: ['text', 'image', 'audio'] },
+      { id: 'openai/gpt-4o-audio-preview', name: 'OpenAI GPT-4o Audio Preview', supports_audio: true, input_modalities: ['text', 'audio'] },
+      { id: 'deepseek/deepseek-chat', name: 'DeepSeek Chat', supports_audio: false, input_modalities: ['text'] },
+      { id: 'anthropic/claude-sonnet-4.5', name: 'Anthropic Claude Sonnet 4.5', supports_audio: false, input_modalities: ['text', 'image'] },
+      { id: 'openai/gpt-4o-mini', name: 'OpenAI GPT-4o Mini', supports_audio: false, input_modalities: ['text', 'image'] },
+      { id: 'google/gemini-2.5-flash-image', name: 'Gemini 2.5 Flash Image', supports_audio: false, input_modalities: ['text', 'image'] },
     ];
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({
@@ -481,7 +491,7 @@ export async function handleProviderRoutes(req, res, { url, pathname, queryProje
       keywordModel: body.keywordModel || existing.keywordModel || body.textModel || existing.textModel || 'deepseek/deepseek-chat',
       videoModel: body.videoModel || existing.videoModel || 'minimax/hailuo-3-max',
       imageModel: body.imageModel || existing.imageModel || 'black-forest-labs/flux-3-image',
-      bgmModel: body.bgmModel || existing.bgmModel || 'deepseek/deepseek-chat',
+      bgmModel: body.bgmModel || existing.bgmModel || 'google/gemini-2.5-flash',
       model: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
       selected_visual_model: 'openrouter',
       updated_at: new Date().toISOString()

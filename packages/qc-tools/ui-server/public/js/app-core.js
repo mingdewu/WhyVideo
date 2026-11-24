@@ -11,7 +11,7 @@
       videoModel: 'minimax/hailuo-3',
       textModel: 'deepseek/deepseek-chat',
       imageModel: 'black-forest-labs/flux-1-schnell',
-      bgmModel: 'deepseek/deepseek-chat'
+      bgmModel: 'google/gemini-2.5-flash'
     };
 
     function showToast(msg) {
@@ -27,6 +27,8 @@
       detail = '',
       icon = '✅',
       confirmText = '知道了',
+      actionText = '',
+      actionUrl = '',
     } = {}) {
       const modal = document.getElementById('studioCompletionModal');
       if (!modal) {
@@ -39,6 +41,7 @@
       const detailEl = document.getElementById('completionModalDetail');
       const timeEl = document.getElementById('completionModalTime');
       const btnEl = document.getElementById('completionModalConfirmBtn');
+      const actionLinkEl = document.getElementById('completionModalActionLink');
 
       if (iconEl) iconEl.textContent = icon || '✅';
       if (titleEl) titleEl.textContent = title || '已完成';
@@ -52,6 +55,17 @@
         timeEl.textContent = '完成时间：' + new Date().toLocaleTimeString('zh-CN', { hour12: false });
       }
       if (btnEl) btnEl.textContent = confirmText || '知道了';
+      if (actionLinkEl) {
+        const cleanActionText = String(actionText || '').trim();
+        const cleanActionUrl = String(actionUrl || '').trim();
+        if (cleanActionText && cleanActionUrl) {
+          actionLinkEl.textContent = cleanActionText;
+          actionLinkEl.href = cleanActionUrl;
+          actionLinkEl.classList.remove('hidden');
+        } else {
+          actionLinkEl.classList.add('hidden');
+        }
+      }
 
       modal.classList.remove('hidden');
       setTimeout(() => {
@@ -509,7 +523,7 @@
       const videoModel = document.getElementById('currentVideoModelInput').value.trim();
       const textModel = document.getElementById('currentTextModelInput').value.trim();
       const imageModel = document.getElementById('currentImageModelInput').value.trim();
-      const bgmModel = (document.getElementById('currentBgmModelInput')?.value || '').trim() || 'deepseek/deepseek-chat';
+      const bgmModel = (document.getElementById('currentBgmModelInput')?.value || '').trim() || 'google/gemini-2.5-flash';
       const keywordModel = (document.getElementById('currentKeywordModelInput')?.value || '').trim() || textModel || 'deepseek/deepseek-chat';
 
       visualConfig.apiKey = apiKey;
@@ -682,14 +696,14 @@
     }
 
 
-    const modelCatalogCache = { text: [], video: [], image: [] };
+    const modelCatalogCache = { text: [], video: [], image: [], audio: [] };
     const modelCatalogMeta = { text: null, video: null, image: null };
     const MODEL_SELECT_CONFIGS = {
       writer:  { catalog: 'text',  selectId: 'writerModelSelect',  inputId: 'currentWriterModelInput',  searchId: 'writerModelSearch',  placeholder: '🔽 选择文案大模型' },
       video:   { catalog: 'video', selectId: 'videoModelSelect',   inputId: 'currentVideoModelInput',   searchId: 'videoModelSearch',   placeholder: '🔽 选择视频生成模型' },
       text:    { catalog: 'text',  selectId: 'textModelSelect',    inputId: 'currentTextModelInput',    searchId: 'textModelSearch',    placeholder: '🔽 选择分镜提炼模型' },
       image:   { catalog: 'image', selectId: 'imageModelSelect',   inputId: 'currentImageModelInput',   searchId: 'imageModelSearch',   placeholder: '🔽 选择超清生图模型' },
-      bgm:     { catalog: 'text',  selectId: 'bgmModelSelect',     inputId: 'currentBgmModelInput',     searchId: 'bgmModelSearch',     placeholder: '🔽 选择 BGM 分析模型' },
+      bgm:     { catalog: 'audio', selectId: 'bgmModelSelect',     inputId: 'currentBgmModelInput',     searchId: 'bgmModelSearch',     placeholder: '🔽 选择支持音频输入的 BGM 模型' },
       keyword: { catalog: 'text',  selectId: 'keywordModelSelect', inputId: 'currentKeywordModelInput', searchId: 'keywordModelSearch', placeholder: '🔽 选择关键词提炼模型' },
     };
 
@@ -742,7 +756,7 @@
       if (!cfg) return;
       const allModels = modelCatalogCache[cfg.catalog] || [];
       const q = (document.getElementById(cfg.searchId)?.value || '').trim().toLowerCase();
-      const tokens = q ? q.split(/s+/).filter(Boolean) : [];
+      const tokens = q ? q.split(/\s+/).filter(Boolean) : [];
       const filtered = tokens.length === 0
         ? allModels
         : allModels.filter((m) => {
@@ -796,10 +810,24 @@
         const data = await res.json();
         if (data.ok && Array.isArray(data.models)) {
           modelCatalogCache.text = data.models;
+          const preferredAudio = ['google/gemini-2.5-flash', 'google/gemini-2.5-pro', 'openai/gpt-4o-audio-preview'];
+          const audioRank = (id) => {
+            const idx = preferredAudio.indexOf(id);
+            return idx === -1 ? 99 : idx;
+          };
+          const audioModels = data.models
+            .filter((m) => m.supports_audio)
+            .slice()
+            .sort((a, b) => audioRank(a.id) - audioRank(b.id));
+          modelCatalogCache.audio = audioModels.length > 0 ? audioModels : data.models;
           modelCatalogMeta.text = { source: data.source || 'live', gateway: data.gateway || 'openrouter', count: data.models.length, error: data.error || '' };
           const dl = document.getElementById('openrouterModelsList');
           if (dl) {
             dl.innerHTML = data.models.map(m => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.name || m.id) + '</option>').join('');
+          }
+          const audioDl = document.getElementById('openrouterAudioModelsList');
+          if (audioDl) {
+            audioDl.innerHTML = modelCatalogCache.audio.map(m => '<option value="' + escapeHtml(m.id) + '">' + escapeHtml(m.name || m.id) + '</option>').join('');
           }
           filterModelSelect('writer');
           filterModelSelect('text');
@@ -922,7 +950,7 @@
         if (vEl) vEl.value = 'minimax/hailuo-3-max';
         if (tEl) tEl.value = 'deepseek/deepseek-chat';
         if (iEl) iEl.value = 'black-forest-labs/flux-3-image';
-        if (bgmEl) bgmEl.value = 'deepseek/deepseek-chat';
+        if (bgmEl) bgmEl.value = 'google/gemini-2.5-flash';
         showToast('🚀 已载入【OpenRouter 混合高性价比】预设！');
       }
       updateModelHeaderBadges();
