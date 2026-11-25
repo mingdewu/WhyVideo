@@ -42,11 +42,47 @@ export function getProjectPaths(projectId = defaultProjectId()) {
       writerPromptsPath: 'writer-prompts.json', finalScriptPath: 'final-script.json',
       materialsPath: 'materials.txt',
     }).map(([key, file]) => [key, path.join(dataDir, file)])),
-    videoPath: path.join(outputDir, 'final_video_1080p.mp4'),
+    videoFileName: `${projectId}.mp4`,
+    videoPath: path.join(outputDir, `${projectId}.mp4`),
     audioDir: path.join(publicDir, 'audio'), bgmDir: path.join(publicDir, 'audio', 'bgm'),
     captionsPath: path.join(publicDir, 'captions', 'captions.srt'),
     propsPath: path.join(publicDir, 'render-props.json'),
   };
+}
+
+function isNonEmptyFile(filePath) {
+  const stat = fs.statSync(filePath, { throwIfNoEntry: false });
+  return Boolean(stat?.isFile() && stat.size > 0);
+}
+
+export function resolveProjectVideoPath(pathsOrProjectId) {
+  const paths = typeof pathsOrProjectId === 'string'
+    ? getProjectPaths(pathsOrProjectId)
+    : pathsOrProjectId;
+  if (!paths?.outputDir) return null;
+
+  const primaryPath = paths.videoPath || (paths.projectId ? path.join(paths.outputDir, `${paths.projectId}.mp4`) : null);
+  if (primaryPath && isNonEmptyFile(primaryPath)) return primaryPath;
+
+  const legacyPath = path.join(paths.outputDir, 'final_video_1080p.mp4');
+  if (isNonEmptyFile(legacyPath)) return legacyPath;
+
+  if (!fs.statSync(paths.outputDir, { throwIfNoEntry: false })?.isDirectory()) return null;
+
+  let latestPath = null;
+  let latestMtimeMs = -1;
+  for (const entry of fs.readdirSync(paths.outputDir, { withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    const name = entry.name;
+    if (name.startsWith('.') || name === 'preview.mp4' || !name.toLowerCase().endsWith('.mp4')) continue;
+    const candidate = path.join(paths.outputDir, name);
+    const stat = fs.statSync(candidate, { throwIfNoEntry: false });
+    if (stat?.isFile() && stat.size > 0 && stat.mtimeMs > latestMtimeMs) {
+      latestMtimeMs = stat.mtimeMs;
+      latestPath = candidate;
+    }
+  }
+  return latestPath;
 }
 
 export function resolveProject(argv = process.argv.slice(2)) {

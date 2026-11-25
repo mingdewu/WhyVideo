@@ -489,6 +489,8 @@ export async function handleProviderRoutes(req, res, { url, pathname, queryProje
       writerModel: body.writerModel || existing.writerModel || 'deepseek/deepseek-chat',
       textModel: body.textModel || body.model || existing.textModel || 'deepseek/deepseek-chat',
       keywordModel: body.keywordModel || existing.keywordModel || body.textModel || existing.textModel || 'deepseek/deepseek-chat',
+      translateModel: body.translateModel || existing.translateModel || body.textModel || existing.textModel || 'deepseek/deepseek-chat',
+      publishCoverModel: body.publishCoverModel !== undefined ? String(body.publishCoverModel || '').trim() : (existing.publishCoverModel || ''),
       videoModel: body.videoModel || existing.videoModel || 'minimax/hailuo-3-max',
       imageModel: body.imageModel || existing.imageModel || 'black-forest-labs/flux-3-image',
       bgmModel: body.bgmModel || existing.bgmModel || 'google/gemini-2.5-flash',

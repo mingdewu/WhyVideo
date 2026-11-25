@@ -27,6 +27,13 @@
             <span id="finalRenderSceneSummary" class="font-semibold text-ink">-</span>
           </div>
         </div>
+        <label for="finalRenderBurnCaptions" class="flex items-start gap-2.5 p-3 rounded-xl bg-subtle border border-line hover:border-accent-line transition cursor-pointer select-none">
+          <input id="finalRenderBurnCaptions" type="checkbox" checked class="mt-0.5 rounded border-line text-ok-solid focus:ring-ok-solid cursor-pointer" />
+          <span class="space-y-0.5">
+            <span class="block text-xs font-bold text-ink">烧录中文字幕到视频画面（原版底部字幕样式）</span>
+            <span class="block text-[11px] text-ink-muted leading-relaxed">勾选后将把工程中文字幕直接渲染进 MP4 画面；若取消勾选则输出无字幕纯净画面（适合仅使用 YouTube 多语言软字幕轨）。</span>
+          </span>
+        </label>
         <p class="text-[11px] text-ink-muted leading-relaxed">
           将使用当前已保存的镜头配置、配音及 BGM 进行 1080p 后台渲染。渲染期间切换工程或刷新页面不会中断任务。
         </p>

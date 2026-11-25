@@ -178,9 +178,9 @@
     }
 
 
-    // 🪗 模型配置 1~6 核心模型手风琴折叠控制 (单项展开，其余折叠)
+    // 🪗 模型配置 1~7 核心模型手风琴折叠控制 (单项展开，其余折叠)
     function toggleModelAccordion(idx, forceOpen = false) {
-      for (let i = 1; i <= 6; i++) {
+      for (let i = 1; i <= 7; i++) {
         const bodyEl = document.getElementById('accordionBodyModel' + i);
         const arrowEl = document.getElementById('accordionArrowModel' + i);
         const headerEl = document.getElementById('accordionHeaderModel' + i);
@@ -212,6 +212,7 @@
       const iEl = document.getElementById('currentImageModelInput');
       const bgmEl = document.getElementById('currentBgmModelInput');
       const kwEl = document.getElementById('currentKeywordModelInput');
+      const trEl = document.getElementById('currentTranslateModelInput');
 
       const bW = document.getElementById('modelHeaderBadgeWriter');
       const bV = document.getElementById('modelHeaderBadgeVideo');
@@ -219,6 +220,7 @@
       const bI = document.getElementById('modelHeaderBadgeImage');
       const bB = document.getElementById('modelHeaderBadgeBgm');
       const bK = document.getElementById('modelHeaderBadgeKeyword');
+      const bTr = document.getElementById('modelHeaderBadgeTranslate');
 
       if (bW && wEl) bW.textContent = (wEl.value || '').split('/').pop() || '未指定';
       if (bV && vEl) bV.textContent = (vEl.value || '').split('/').pop() || '未指定';
@@ -226,6 +228,7 @@
       if (bI && iEl) bI.textContent = (iEl.value || '').split('/').pop() || '未指定';
       if (bB && bgmEl) bB.textContent = (bgmEl.value || '').split('/').pop() || '未指定';
       if (bK && kwEl) bK.textContent = (kwEl.value || '').split('/').pop() || '未指定';
+      if (bTr && trEl) bTr.textContent = (trEl.value || '').split('/').pop() || '未指定';
     }
 
     function toggleVisualModelModal(focusSection) {
@@ -240,6 +243,7 @@
         else if (focusSection === 'image') targetIdx = 4;
         else if (focusSection === 'bgm') targetIdx = 5;
         else if (focusSection === 'keyword') targetIdx = 6;
+        else if (focusSection === 'translate') targetIdx = 7;
         else targetIdx = 1;
 
         toggleModelAccordion(targetIdx, true);
@@ -251,6 +255,7 @@
           else if (targetIdx === 4) inputId = 'currentImageModelInput';
           else if (targetIdx === 5) inputId = 'currentBgmModelInput';
           else if (targetIdx === 6) inputId = 'currentKeywordModelInput';
+          else if (targetIdx === 7) inputId = 'currentTranslateModelInput';
           if (inputId) {
             const inputEl = document.getElementById(inputId);
             if (inputEl) inputEl.focus();
@@ -346,6 +351,11 @@
 
     function selectKeywordModelSlug(slug) {
       document.getElementById('currentKeywordModelInput').value = slug;
+      updateModelHeaderBadges();
+    }
+
+    function selectTranslateModelSlug(slug) {
+      document.getElementById('currentTranslateModelInput').value = slug;
       updateModelHeaderBadges();
     }
 
@@ -465,6 +475,7 @@
       ['imageModel', 'currentImageModelInput'],
       ['bgmModel', 'currentBgmModelInput'],
       ['keywordModel', 'currentKeywordModelInput'],
+      ['translateModel', 'currentTranslateModelInput'],
     ];
 
     function saveModelPrefsToLocal() {
@@ -500,6 +511,7 @@
         if (prefs.imageModel) visualConfig.imageModel = prefs.imageModel;
         if (prefs.bgmModel) visualConfig.bgmModel = prefs.bgmModel;
         if (prefs.keywordModel) visualConfig.keywordModel = prefs.keywordModel;
+        if (prefs.translateModel) visualConfig.translateModel = prefs.translateModel;
 
         const syncSelect = (selId, val) => {
           const sel = document.getElementById(selId);
@@ -511,6 +523,7 @@
         syncSelect('imageModelSelect', visualConfig.imageModel);
         syncSelect('bgmModelSelect', visualConfig.bgmModel);
         syncSelect('keywordModelSelect', visualConfig.keywordModel);
+        syncSelect('translateModelSelect', visualConfig.translateModel);
         updateModelBadge();
         updateModelHeaderBadges();
       } catch (e) {}
@@ -525,7 +538,7 @@
           el.addEventListener('change', saveModelPrefsToLocal);
         }
       }
-      for (const selId of ['writerModelSelect', 'videoModelSelect', 'textModelSelect', 'imageModelSelect', 'bgmModelSelect', 'keywordModelSelect']) {
+      for (const selId of ['writerModelSelect', 'videoModelSelect', 'textModelSelect', 'imageModelSelect', 'bgmModelSelect', 'keywordModelSelect', 'translateModelSelect']) {
         const sel = document.getElementById(selId);
         if (sel && !sel.dataset.prefBound) {
           sel.dataset.prefBound = '1';
@@ -545,6 +558,7 @@
       const imageModel = document.getElementById('currentImageModelInput').value.trim();
       const bgmModel = (document.getElementById('currentBgmModelInput')?.value || '').trim() || 'google/gemini-2.5-flash';
       const keywordModel = (document.getElementById('currentKeywordModelInput')?.value || '').trim() || textModel || 'deepseek/deepseek-chat';
+      const translateModel = (document.getElementById('currentTranslateModelInput')?.value || '').trim() || textModel || 'deepseek/deepseek-chat';
 
       visualConfig.apiKey = apiKey;
       visualConfig.baseUrl = baseUrl;
@@ -554,6 +568,7 @@
       visualConfig.imageModel = imageModel;
       visualConfig.bgmModel = bgmModel;
       visualConfig.keywordModel = keywordModel;
+      visualConfig.translateModel = translateModel;
 
       try {
         const res = await fetch('/api/save-visual-config?project=' + activeProjectId, {
@@ -570,7 +585,8 @@
             textModel,
             imageModel,
             bgmModel,
-            keywordModel
+            keywordModel,
+            translateModel
           })
         });
         const data = await res.json();
@@ -732,8 +748,9 @@
       video:   { catalog: 'video', selectId: 'videoModelSelect',   inputId: 'currentVideoModelInput',   searchId: 'videoModelSearch',   placeholder: '🔽 选择视频生成模型' },
       text:    { catalog: 'text',  selectId: 'textModelSelect',    inputId: 'currentTextModelInput',    searchId: 'textModelSearch',    placeholder: '🔽 选择分镜提炼模型' },
       image:   { catalog: 'image', selectId: 'imageModelSelect',   inputId: 'currentImageModelInput',   searchId: 'imageModelSearch',   placeholder: '🔽 选择超清生图模型' },
-      bgm:     { catalog: 'audio', selectId: 'bgmModelSelect',     inputId: 'currentBgmModelInput',     searchId: 'bgmModelSearch',     placeholder: '🔽 选择支持音频输入的 BGM 模型' },
-      keyword: { catalog: 'text',  selectId: 'keywordModelSelect', inputId: 'currentKeywordModelInput', searchId: 'keywordModelSearch', placeholder: '🔽 选择关键词提炼模型' },
+      bgm:       { catalog: 'audio', selectId: 'bgmModelSelect',       inputId: 'currentBgmModelInput',       searchId: 'bgmModelSearch',       placeholder: '🔽 选择支持音频输入的 BGM 模型' },
+      keyword:   { catalog: 'text',  selectId: 'keywordModelSelect',   inputId: 'currentKeywordModelInput',   searchId: 'keywordModelSearch',   placeholder: '🔽 选择关键词提炼模型' },
+      translate: { catalog: 'text',  selectId: 'translateModelSelect', inputId: 'currentTranslateModelInput', searchId: 'translateModelSearch', placeholder: '🔽 选择发布资料与翻译模型' },
     };
 
     function populateModelSelect(selectId, inputId, models, placeholderLabel, totalCount) {
@@ -862,6 +879,7 @@
           filterModelSelect('text');
           filterModelSelect('bgm');
           filterModelSelect('keyword');
+          filterModelSelect('translate');
           populateWriterQuickSelect(data.models);
           updateModelCatalogStatusBadge();
         }

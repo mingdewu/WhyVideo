@@ -74,6 +74,8 @@ export function normalizePromptConfig(cfg = {}) {
     apiKey: cfg.apiKey || '',
     textModel: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
     keywordModel: cfg.keywordModel || cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
+    translateModel: cfg.translateModel || cfg.textModel || cfg.writerModel || cfg.model || 'deepseek/deepseek-chat',
+    publishCoverModel: cfg.publishCoverModel || '',
     videoModel: vModel,
     imageModel: iModel,
     bgmModel: cfg.bgmModel || 'google/gemini-2.5-flash',

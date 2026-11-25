@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, Audio, Sequence, staticFile, useCurrentFrame } from "remotion";
 import { TextOverlayLayer } from "./scenes/TextOverlayLayer";
+import { CaptionLayer } from "./CaptionLayer";
 import { ReviewHud } from "./ReviewHud";
 import { BrollScene } from "./scenes/BrollScene";
 import { DataCardScene } from "./scenes/DataCardScene";
@@ -216,6 +217,12 @@ export const WhyExplainerComposition: React.FC<RenderPropsType & { isFinalRender
           <SceneDispatcher track={track} isFinalRender={props.isFinalRender} />
         </Sequence>
       ))}
+      {Boolean(props.burn_in_captions ?? props.caption_track?.burn_in_captions) && (
+        <CaptionLayer
+          captions={props.caption_track?.captions || []}
+          safeBottomMarginPx={props.caption_track?.safe_bottom_margin_px ?? 96}
+        />
+      )}
     </AbsoluteFill>
   );
 };

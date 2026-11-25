@@ -124,12 +124,14 @@ function toggleGlobalPromptDrawer() {
     async function startFinalRender() {
       const projectId = activeProjectId;
       const buttonEl = document.getElementById('startFinalRenderBtn');
+      const burnCaptionsEl = document.getElementById('finalRenderBurnCaptions');
+      const burnCaptions = burnCaptionsEl ? Boolean(burnCaptionsEl.checked) : false;
       buttonEl.disabled = true;
       try {
         const response = await fetch('/api/render-project?project=' + encodeURIComponent(projectId), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId }),
+          body: JSON.stringify({ projectId, burnCaptions }),
         });
         const data = await response.json();
         if (!response.ok || !data.ok) throw new Error(data.error || '无法启动渲染');

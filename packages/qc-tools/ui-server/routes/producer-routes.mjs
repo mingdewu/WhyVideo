@@ -4,6 +4,7 @@ import { hasProjectEditLease } from '../lib/edit-service.mjs';
 import { sharedRuntimeConfig } from '../lib/shared-services.mjs';
 import path from 'path';
 import { rootDir, defaultProjectId, getPaths, readBody, alignJobs } from '../lib/config.mjs';
+import { resolveProjectVideoPath } from '../../project-paths.mjs';
 import { ensureRemotionStudio } from '../lib/remotion-studio-service.mjs';
 import {
   listProjects,
@@ -247,8 +248,9 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
       if (audios.length > 0) audioFile = `/public/${queryProject}/audio/${audios[0]}`;
     }
 
-    const hasVideo = fs.existsSync(paths.videoPath);
-    const videoUrl = hasVideo ? `/output/${queryProject}/final_video_1080p.mp4` : null;
+    const resolvedVideoPath = resolveProjectVideoPath(paths);
+    const hasVideo = Boolean(resolvedVideoPath);
+    const videoUrl = hasVideo ? `/output/${encodeURIComponent(queryProject)}/${encodeURIComponent(path.basename(resolvedVideoPath))}` : null;
     const bgmCfg = loadBgmConfig(paths.projectDir, paths.publicDir);
     const selectedBgmTrack = bgmCfg.tracks.find((t) => t.track_id === bgmCfg.selected_track_id) || null;
 

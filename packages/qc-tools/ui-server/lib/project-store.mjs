@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { rootDir, defaultProjectId, getPaths } from './config.mjs';
+import { resolveProjectVideoPath } from '../../project-paths.mjs';
 import {
   applyTimingToScenes,
   buildCaptionsFromTiming,
@@ -28,7 +29,7 @@ export function listProjects() {
     let title = pId;
     let stage = '新建工程';
     let scenesCount = 0;
-    let hasVideo = fs.existsSync(paths.videoPath);
+    let hasVideo = Boolean(resolveProjectVideoPath(paths));
     let hasScript = fs.existsSync(paths.finalScriptPath);
     let hasManifest = fs.existsSync(paths.manifestPath);
     let isBlankDraft = false;

@@ -1,28 +1,190 @@
 <section id="viewPublishContainer" class="hidden text-ink space-y-5 py-4">
-  <div class="flex flex-wrap justify-between gap-3"><div><h2 class="text-2xl font-black">🚀 视频发布台</h2><p class="text-sm text-ink-muted mt-1">检查成片，整理发布资料，为上传做好准备。</p></div><button id="youtubeSettingsButton" type="button" onclick="openYoutubeSettings()" class="px-4 py-2 rounded-lg bg-surface hover:bg-subtle border border-line-strong text-ink font-semibold">⚙️ YouTube · 未连接</button></div>
-  <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
-    <div class="space-y-5"><div class="bg-surface border border-line rounded-2xl p-5"><h3 class="font-bold mb-3">成片预览</h3><video id="publishVideo" controls class="w-full rounded-xl bg-media aspect-video"></video><p id="publishVideoStatus" class="text-sm text-ink-muted mt-3">正在查找当前工程的最终成片…</p></div>
-    <div class="bg-surface border border-line rounded-2xl p-5 space-y-3"><h3 class="font-bold">视频封面</h3><div class="flex flex-col sm:flex-row gap-2"><input id="publishCoverKeywords" type="text" maxlength="500" class="flex-1 p-2.5 bg-input border border-line rounded-lg text-sm focus:outline-none focus:border-ink" placeholder="输入封面关键词或画面描述，例如：富士山、红叶、震撼特写"><button id="publishCoverGenerateBtn" type="button" onclick="generatePublishCover()" class="bg-action hover:bg-action-hover text-ink-inverse px-4 py-2 rounded-lg font-bold text-sm shrink-0">✨ AI 生成封面</button></div><p id="publishCoverStatus" class="text-xs text-ink-muted" aria-live="polite"></p><label class="block text-xs text-ink-muted">或上传本地图片（PNG / JPG）<input id="publishCover" type="file" accept="image/png,image/jpeg" class="block mt-1 text-sm text-ink-secondary"></label><img id="publishCoverPreview" class="hidden mt-3 max-h-64 rounded-lg border border-line" alt="封面预览"><a id="publishCoverDownload" class="hidden inline-block mt-2 text-xs text-info underline" download="cover.jpg">下载当前封面</a><p class="text-xs text-ink-muted">支持输入关键词调用「全流程模型调度中心」的生图模型生成 16:9 封面，或上传本地图片；上传视频时会一并提交当前预览的封面。</p></div></div>
-    <div class="space-y-5"><div class="bg-surface border border-line rounded-2xl p-5 space-y-3"><div class="flex justify-between items-center gap-3"><h3 class="font-bold">发布资料</h3><div class="flex gap-2"><button type="button" onclick="openPublishPrompt()" class="bg-surface hover:bg-subtle border border-line-strong text-ink px-4 py-2 rounded-lg">⚙️ 提示词设置</button><button id="publishGenerate" type="button" onclick="generatePublishCopy()" class="bg-action hover:bg-action-hover text-ink-inverse px-4 py-2 rounded-lg font-bold">✨ AI 生成发布资料</button></div></div><p class="text-xs text-ink-muted">根据当前工程的文案终稿生成，使用文案创作台的模型配置。</p><label class="block text-sm">视频标题<input id="publishTitle" maxlength="100" class="block w-full mt-1 p-3 bg-input border border-line rounded-lg focus:outline-none focus:border-ink" placeholder="输入 YouTube 视频标题"></label><label class="block text-sm">视频简介<textarea id="publishDescription" rows="6" class="block w-full mt-1 p-3 bg-input border border-line rounded-lg focus:outline-none focus:border-ink" placeholder="介绍视频内容、章节和相关链接"></textarea></label><label class="block text-sm">视频标签<textarea id="publishTags" rows="3" class="block w-full mt-1 p-3 bg-input border border-line rounded-lg focus:outline-none focus:border-ink" placeholder="用逗号分隔，例如：日本旅行, 温泉, 文化"></textarea><span class="text-xs text-ink-muted">搜索标签，使用逗号分隔；上传时会一并提交。</span></label><button type="button" onclick="savePublishDraft()" class="bg-ok-solid hover:bg-ok-hover text-ink-inverse px-4 py-2 rounded-lg font-bold">保存草稿</button><span class="text-xs text-ink-muted ml-2">保存在当前浏览器，按工程区分</span></div>
-    <div class="bg-surface border border-line rounded-2xl p-5"><h3 class="font-bold mb-2">字幕</h3><p class="text-xs text-ink-muted mb-2">成片画面已移除硬字幕；默认载入当前工程生成的 SRT，也可选择本地 .srt 文件替换，内容可编辑、下载，并在上传 YouTube 时作为外挂字幕一并提交。</p><input type="file" id="publishCaptionFile" accept=".srt,text/plain" class="text-sm text-ink-secondary mb-2"><textarea id="publishCaptions" rows="8" class="w-full p-3 bg-input border border-line rounded-lg font-mono text-sm focus:outline-none focus:border-ink" placeholder="未找到字幕文件"></textarea><button type="button" onclick="downloadPublishCaptions()" class="mt-3 bg-surface hover:bg-subtle border border-line-strong text-ink px-4 py-2 rounded-lg">下载字幕 SRT</button></div>
-    <div class="bg-surface border border-line rounded-2xl p-5 space-y-3" id="localizationPanel">
-      <h3 class="font-bold">🌐 多语言资料</h3>
-      <p class="text-xs text-ink-muted">先校对上方原版字幕并冻结母版，再生成英文或日文。翻译需人工审核；字幕和标题简介在 YouTube 分别发布。切换工程或刷新前请先保存。</p>
-      <label class="block text-sm">原始口播语言 <select id="localizationSourceLanguage" class="p-2 bg-input border border-line rounded-lg"><option value="zh-Hans">中文（简体）</option><option value="zh-Hant">中文（繁体）</option><option value="en">英语</option><option value="ja">日语</option></select></label>
-      <div class="flex flex-wrap gap-2"><button type="button" onclick="freezeLocalizationMaster()" class="bg-surface hover:bg-subtle border border-line-strong text-ink px-3 py-2 rounded-lg">保存已校对字幕母版</button><span id="localizationMasterStatus" class="text-xs text-ink-muted self-center">尚未保存母版</span></div>
-      <div class="flex flex-wrap gap-2 items-center"><label for="localizationLanguage" class="text-sm">目标语言</label><select id="localizationLanguage" onchange="switchLocalizationLanguage()" class="p-2 bg-input border border-line rounded-lg"><option value="en">英语</option><option value="ja">日语</option></select><button id="localizationGenerateMeta" type="button" onclick="generateLocalization('metadata')" class="bg-action hover:bg-action-hover text-ink-inverse disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded-lg font-semibold">✨ 生成标题和简介</button><button id="localizationGenerateCaptions" type="button" onclick="generateLocalization('captions')" class="bg-action hover:bg-action-hover text-ink-inverse disabled:opacity-50 disabled:cursor-not-allowed px-3 py-2 rounded-lg font-semibold">✨ 翻译字幕</button></div>
-      <p id="localizationGenerateStatus" class="text-xs text-ink-muted" aria-live="polite"></p>
-      <label class="block text-sm">本地化标题<input id="localizationTitle" maxlength="100" class="block w-full mt-1 p-2 bg-input border border-line rounded-lg focus:outline-none focus:border-ink"></label>
-      <label class="block text-sm">本地化简介<textarea id="localizationDescription" rows="5" class="block w-full mt-1 p-2 bg-input border border-line rounded-lg focus:outline-none focus:border-ink"></textarea></label>
-      <label class="block text-sm">翻译字幕（SRT）<textarea id="localizationCaptions" rows="8" class="block w-full mt-1 p-2 bg-input border border-line rounded-lg font-mono text-sm focus:outline-none focus:border-ink"></textarea></label>
-      <div class="flex flex-wrap gap-2"><button type="button" onclick="checkLocalizationCaptions()" class="bg-surface hover:bg-subtle border border-line-strong text-ink px-3 py-2 rounded-lg">检查字幕</button><button type="button" onclick="downloadLocalizationCaptions()" class="bg-surface hover:bg-subtle border border-line-strong text-ink px-3 py-2 rounded-lg">下载 SRT</button><button type="button" onclick="saveLocalization()" class="bg-ok-solid hover:bg-ok-hover text-ink-inverse px-3 py-2 rounded-lg font-bold">保存多语言资料</button></div>
-      <div class="flex flex-wrap gap-3 text-sm"><label>标题和简介状态 <select id="localizationMetaStatus" class="p-2 bg-input border border-line rounded-lg"><option value="draft">草稿</option><option value="reviewed">已人工审核</option><option value="published">已在 YouTube 发布</option><option value="verified">已验收</option></select></label><label>字幕状态 <select id="localizationCaptionStatus" class="p-2 bg-input border border-line rounded-lg"><option value="draft">草稿</option><option value="reviewed">已人工审核</option><option value="published">已在 YouTube 发布</option><option value="verified">已验收</option></select></label></div>
-      <p id="localizationStatus" class="text-sm text-ink-muted" aria-live="polite">状态由你手动标记；此处不会自动发布多语言资料。</p>
+  <div class="flex flex-wrap justify-between items-center gap-3">
+    <div>
+      <h2 class="text-2xl font-black">🚀 视频发布台</h2>
+      <p class="text-sm text-ink-muted mt-1">顶部切换 中文 / English / 日本語 仅切换右侧编辑区；左侧只上传 1 次成片，自动打包中/英/日多语言资料和字幕。</p>
     </div>
-    <div class="bg-surface border border-line rounded-2xl p-5"><h3 class="font-bold">发布到 YouTube</h3><p id="youtubeConnectionStatus" class="text-sm text-ink-muted mt-2">尚未连接频道，请在右上角设置。</p><div class="mt-4 space-y-3"><label class="block text-sm">视频文件（可选，留空则使用当前工程成片）<input id="youtubeVideoFile" type="file" accept="video/*" class="block mt-1 text-sm text-ink-secondary"></label><label class="block text-sm">可见范围<select id="youtubePrivacy" class="block mt-1 p-2 bg-input border border-line rounded-lg"><option value="private">私密</option><option value="unlisted">不公开</option><option value="public">公开</option></select></label><label class="block text-sm">视频受众<select id="youtubeAudience" class="block mt-1 p-2 bg-input border border-line rounded-lg"><option value="">请选择</option><option value="yes">专为儿童制作</option><option value="no">不是专为儿童制作</option></select></label><label class="block text-sm">字幕语言代码 <input id="youtubeCaptionLanguage" value="zh-Hans" class="p-2 bg-input border border-line rounded-lg"></label><button id="youtubeUploadButton" type="button" onclick="uploadYoutubeVideo()" class="bg-danger-solid hover:bg-danger-hover text-ink-inverse px-4 py-2 rounded-lg font-bold">上传到 YouTube</button><button id="youtubeRetryAssets" type="button" onclick="retryYoutubeAssets()" class="hidden bg-surface hover:bg-subtle border border-line-strong text-ink px-4 py-2 rounded-lg">重试封面和字幕</button><p id="youtubeUploadStatus" class="text-sm text-ink-secondary" aria-live="polite"></p><a id="youtubeVideoLink" class="hidden text-info underline" target="_blank" rel="noopener noreferrer">打开 YouTube 视频</a></div></div></div>
+    <div class="flex flex-wrap items-center gap-2">
+      <div class="inline-flex rounded-xl bg-surface border border-line-strong p-1 gap-1" role="tablist" aria-label="发布资料语言切换">
+        <button id="publishLangTabZh" type="button" onclick="switchPublishLanguage('zh')" class="px-3.5 py-1.5 rounded-lg text-sm font-bold bg-action text-ink-inverse transition">🇨🇳 中文</button>
+        <button id="publishLangTabEn" type="button" onclick="switchPublishLanguage('en')" class="px-3.5 py-1.5 rounded-lg text-sm font-semibold text-ink hover:bg-subtle transition">🇺🇸 English</button>
+        <button id="publishLangTabJa" type="button" onclick="switchPublishLanguage('ja')" class="px-3.5 py-1.5 rounded-lg text-sm font-semibold text-ink hover:bg-subtle transition">🇯🇵 日本語</button>
+      </div>
+      <button type="button" onclick="openPublishAiSettings()" class="px-3.5 py-2 rounded-lg bg-surface hover:bg-subtle border border-line-strong text-ink font-semibold text-sm">⚙️ 发布台 AI 设置</button>
+      <button id="youtubeSettingsButton" type="button" onclick="openYoutubeSettings()" class="px-4 py-2 rounded-lg bg-surface hover:bg-subtle border border-line-strong text-ink font-semibold">⚙️ YouTube · 未连接</button>
+    </div>
+  </div>
+
+  <div id="publishTranslateBanner" class="hidden rounded-xl border border-line-strong bg-subtle px-4 py-3 text-sm font-medium text-ink" aria-live="polite"></div>
+
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-5">
+    <!-- 左列：上「成片预览」 + 下「发布到 YouTube」 -->
+    <div class="space-y-5">
+      <div class="bg-surface border border-line rounded-2xl p-5">
+        <h3 class="font-bold mb-3">成片预览</h3>
+        <video id="publishVideo" controls class="w-full rounded-xl bg-media aspect-video"></video>
+        <p id="publishVideoStatus" class="text-sm text-ink-muted mt-3">正在查找当前工程的最终成片…</p>
+      </div>
+
+      <div class="bg-surface border border-line rounded-2xl p-5">
+        <div class="flex flex-wrap justify-between items-center gap-2">
+          <h3 class="font-bold">发布到 YouTube</h3>
+          <span id="youtubeUploadLangHint" class="text-xs px-2.5 py-0.5 rounded-full bg-subtle border border-line text-ink-secondary">一次上传 · 自动打包中/英/日资料</span>
+        </div>
+        <p id="youtubeConnectionStatus" class="text-sm text-ink-muted mt-2">尚未连接频道，请在右上角设置。</p>
+        <div id="youtubeMultiLangSummary" class="mt-3 rounded-xl bg-subtle border border-line p-3 text-xs text-ink-secondary space-y-1"></div>
+        <div class="mt-4 space-y-3">
+          <label class="block text-sm">视频文件（可选，留空则使用当前工程成片）<input id="youtubeVideoFile" type="file" accept="video/*" class="block mt-1 text-sm text-ink-secondary"></label>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label class="block text-sm">主视频口播语言
+              <select id="youtubeSourceLanguage" class="block w-full mt-1 p-2 bg-input border border-line rounded-lg">
+                <option value="zh-Hans">中文（简体）</option>
+                <option value="zh-Hant">中文（繁体）</option>
+                <option value="en">英语</option>
+                <option value="ja">日语</option>
+              </select>
+            </label>
+            <label class="block text-sm">主字幕语言代码
+              <input id="youtubeCaptionLanguage" value="zh-Hans" class="block w-full mt-1 p-2 bg-input border border-line rounded-lg">
+            </label>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <label class="block text-sm">可见范围
+              <select id="youtubePrivacy" class="block w-full mt-1 p-2 bg-input border border-line rounded-lg">
+                <option value="private">私密</option>
+                <option value="unlisted">不公开</option>
+                <option value="public">公开</option>
+              </select>
+            </label>
+            <label class="block text-sm">视频受众
+              <select id="youtubeAudience" class="block w-full mt-1 p-2 bg-input border border-line rounded-lg">
+                <option value="">请选择</option>
+                <option value="yes">专为儿童制作</option>
+                <option value="no">不是专为儿童制作</option>
+              </select>
+            </label>
+          </div>
+          <div class="flex flex-wrap gap-2 pt-1">
+            <button id="youtubeUploadButton" type="button" onclick="uploadYoutubeVideo()" class="bg-danger-solid hover:bg-danger-hover text-ink-inverse px-4 py-2 rounded-lg font-bold">上传到 YouTube</button>
+            <button id="youtubeRetryAssets" type="button" onclick="retryYoutubeAssets()" class="hidden bg-surface hover:bg-subtle border border-line-strong text-ink px-4 py-2 rounded-lg">重试失败项（封面/多语言/字幕）</button>
+          </div>
+          <p id="youtubeUploadStatus" class="text-sm text-ink-secondary" aria-live="polite"></p>
+          <div class="flex flex-wrap items-center gap-3">
+            <a id="youtubeVideoLink" class="hidden text-info underline" target="_blank" rel="noopener noreferrer">打开 YouTube 视频</a>
+            <a id="youtubeStudioLanguagesLink" class="hidden text-xs text-info underline" target="_blank" rel="noopener noreferrer">前往 YouTube Studio 补充多语言音轨 / 封面 ↗</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 右列：当前语言的编辑工作区（视频封面 + 发布资料 + 字幕与配音） -->
+    <div class="space-y-5">
+      <!-- 1. 视频封面 -->
+      <div class="bg-surface border border-line rounded-2xl p-5 space-y-3">
+        <div class="flex flex-wrap justify-between items-center gap-2">
+          <h3 class="font-bold">视频封面</h3>
+          <span id="publishCoverLangBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-subtle border border-line text-ink-secondary">中文</span>
+        </div>
+        <div class="flex flex-col sm:flex-row gap-2">
+          <input id="publishCoverKeywords" type="text" maxlength="500" class="flex-1 p-2.5 bg-input border border-line rounded-lg text-sm focus:outline-none focus:border-ink" placeholder="输入封面关键词或画面描述，例如：富士山、红叶、震撼特写">
+          <button id="publishCoverGenerateBtn" type="button" onclick="generatePublishCover()" class="bg-action hover:bg-action-hover text-ink-inverse px-4 py-2 rounded-lg font-bold text-sm shrink-0">✨ AI 生成封面</button>
+        </div>
+        <p id="publishCoverStatus" class="text-xs text-ink-muted" aria-live="polite"></p>
+        <label class="block text-xs text-ink-muted">或上传本地图片（PNG / JPG）<input id="publishCover" type="file" accept="image/png,image/jpeg" class="block mt-1 text-sm text-ink-secondary"></label>
+        <img id="publishCoverPreview" class="hidden mt-3 max-h-64 rounded-lg border border-line" alt="封面预览">
+        <a id="publishCoverDownload" class="hidden inline-block mt-2 text-xs text-info underline" download="cover.jpg">下载当前封面</a>
+        <p class="text-xs text-ink-muted">支持按当前语言独立生成 16:9 封面或上传本地图片；英文/日文页未单独生成时自动复用中文封面。</p>
+      </div>
+
+      <!-- 2. 发布资料（标题、简介、标签 + 中文页一键跳转翻译按钮） -->
+      <div class="bg-surface border border-line rounded-2xl p-5 space-y-3">
+        <div class="flex flex-wrap justify-between items-center gap-3">
+          <div class="flex items-center gap-2">
+            <h3 class="font-bold">发布资料</h3>
+            <span id="publishCopyLangBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-subtle border border-line text-ink-secondary">中文</span>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" onclick="openPublishAiSettings()" class="bg-surface hover:bg-subtle border border-line-strong text-ink px-3 py-1.5 rounded-lg text-sm">⚙️ AI 设置</button>
+            <button id="publishGenerate" type="button" onclick="generatePublishCopy()" class="bg-action hover:bg-action-hover text-ink-inverse px-3.5 py-1.5 rounded-lg font-bold text-sm">✨ AI 生成发布资料</button>
+          </div>
+        </div>
+
+        <div id="publishZhTranslateRow" class="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-subtle border border-line p-3">
+          <span class="text-xs text-ink-secondary">中文资料准备好后，一键跳转并翻译目标语言的标题、简介和标签：</span>
+          <div class="flex flex-wrap gap-2">
+            <button id="publishTranslateToEnBtn" type="button" onclick="translatePublishToLanguage('en')" class="bg-action hover:bg-action-hover text-ink-inverse px-3 py-1.5 rounded-lg text-xs font-bold">→ 翻译成英语 (English)</button>
+            <button id="publishTranslateToJaBtn" type="button" onclick="translatePublishToLanguage('ja')" class="bg-action hover:bg-action-hover text-ink-inverse px-3 py-1.5 rounded-lg text-xs font-bold">→ 翻译成日语 (日本語)</button>
+          </div>
+        </div>
+
+        <p class="text-xs text-ink-muted">根据当前工程文案终稿生成或翻译；切换语言标签即可查看与编辑对应语言的标题、简介和标签。</p>
+        <label class="block text-sm">视频标题<input id="publishTitle" maxlength="100" class="block w-full mt-1 p-2.5 bg-input border border-line rounded-lg focus:outline-none focus:border-ink" placeholder="输入 YouTube 视频标题"></label>
+        <label class="block text-sm">视频简介<textarea id="publishDescription" rows="4" class="block w-full mt-1 p-2.5 bg-input border border-line rounded-lg focus:outline-none focus:border-ink" placeholder="介绍视频内容、章节和相关链接"></textarea></label>
+        <label class="block text-sm">视频标签<textarea id="publishTags" rows="2" class="block w-full mt-1 p-2.5 bg-input border border-line rounded-lg focus:outline-none focus:border-ink" placeholder="用逗号分隔，例如：日本旅行, 温泉, 文化"></textarea><span class="text-xs text-ink-muted">搜索标签，使用逗号分隔；上传时会合并多语言标签。</span></label>
+        <div class="flex flex-wrap items-center gap-2">
+          <button type="button" onclick="savePublishDraft()" class="bg-ok-solid hover:bg-ok-hover text-ink-inverse px-4 py-2 rounded-lg font-bold">保存当前语言资料</button>
+          <span id="publishCopyStatus" class="text-xs text-ink-muted">自动按语言保存在当前工程与浏览器</span>
+        </div>
+      </div>
+
+      <!-- 3. 字幕与配音（紧凑排版，支持一键翻译+配音+Whisper字幕） -->
+      <div class="bg-surface border border-line rounded-2xl p-5 space-y-3">
+        <div class="flex flex-wrap justify-between items-center gap-2">
+          <div class="flex items-center gap-2">
+            <h3 class="font-bold">字幕与配音</h3>
+            <span id="publishCaptionLangBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-subtle border border-line text-ink-secondary">中文</span>
+          </div>
+          <span id="publishCaptionSummary" class="text-xs text-ink-muted">正在检查字幕…</span>
+        </div>
+
+        <!-- 中文模式紧凑操作条 -->
+        <div id="publishZhCaptionBar" class="flex flex-wrap items-center justify-between gap-2">
+          <label class="text-xs text-ink-muted">替换本地 SRT：<input type="file" id="publishCaptionFile" accept=".srt,text/plain" class="ml-1 text-xs text-ink-secondary"></label>
+          <button type="button" onclick="downloadPublishCaptions()" class="bg-surface hover:bg-subtle border border-line-strong text-ink px-3 py-1.5 rounded-lg text-sm">下载字幕 (.srt)</button>
+        </div>
+
+        <!-- 外语模式（English / 日本語）一键：中文终稿大模型翻译 -> 本地配音 -> 本地 Whisper 字幕 -->
+        <div id="publishForeignDubBox" class="hidden space-y-2.5">
+          <p id="publishForeignDubTitle" class="text-xs text-ink-muted">一键自动完成：大模型翻译中文终稿 → 本地 Voicebox（或 ElevenLabs）配音 → 本地 Whisper 生成同步 SRT。</p>
+          <div class="flex flex-wrap gap-2 items-center text-sm">
+            <select id="englishDubEngine" onchange="onEnglishDubEngineChange()" class="p-2 bg-input border border-line rounded-lg text-sm">
+              <option value="voicebox">本地 Voicebox（免费）</option>
+              <option value="elevenlabs">ElevenLabs（积分）</option>
+            </select>
+            <div id="englishDubVoiceboxRow" class="flex flex-wrap gap-2 items-center">
+              <select id="englishDubVoiceboxProfile" class="p-2 bg-input border border-line rounded-lg text-sm">
+                <option value="">自动选择对应语言音色</option>
+              </select>
+              <button type="button" onclick="loadEnglishDubVoiceboxProfiles(true)" class="bg-surface hover:bg-subtle border border-line-strong text-ink px-2.5 py-1.5 rounded-lg text-xs">刷新音色</button>
+            </div>
+            <div id="englishDubElevenlabsRow" class="hidden flex flex-wrap gap-2 items-center">
+              <input id="englishDubElevenlabsVoiceId" type="text" class="p-2 bg-input border border-line rounded-lg text-sm" placeholder="Voice ID（留空用 Rachel）">
+            </div>
+          </div>
+          <div class="flex flex-wrap gap-2 items-center">
+            <button id="englishDubGenerateBtn" type="button" onclick="startEnglishDubGenerate()" class="bg-action hover:bg-action-hover text-ink-inverse disabled:opacity-50 disabled:cursor-not-allowed px-4 py-2 rounded-lg font-bold text-sm">🎙️ 一键翻译并生成配音 + 字幕</button>
+            <button id="englishDubCancelBtn" type="button" onclick="cancelEnglishDubGenerate()" class="hidden bg-surface hover:bg-subtle border border-line-strong text-ink px-3 py-2 rounded-lg text-sm">取消</button>
+            <button type="button" onclick="downloadPublishCaptions()" class="bg-surface hover:bg-subtle border border-line-strong text-ink px-3 py-2 rounded-lg text-sm">下载字幕 (.srt)</button>
+          </div>
+          <p id="englishDubStatus" class="text-xs text-ink-muted" aria-live="polite"></p>
+          <div class="flex flex-wrap items-center gap-3">
+            <audio id="englishDubAudio" controls class="hidden flex-1 min-w-[200px] h-9"></audio>
+            <a id="englishDubAudioDownload" class="hidden text-xs text-info underline shrink-0" download="dub.mp3">下载配音 (.mp3)</a>
+          </div>
+        </div>
+
+        <details id="publishSrtDetails" class="pt-1">
+          <summary class="text-xs text-ink-muted cursor-pointer select-none">查看字幕 / 外语译稿内容（可选）</summary>
+          <div class="mt-2 space-y-2">
+            <textarea id="publishCaptions" rows="5" class="w-full p-2.5 bg-input border border-line rounded-lg font-mono text-xs focus:outline-none focus:border-ink" placeholder="未找到字幕文件"></textarea>
+            <textarea id="englishDubScript" rows="4" class="hidden w-full p-2.5 bg-input border border-line rounded-lg text-xs focus:outline-none focus:border-ink" placeholder="留空点击生成时会自动翻译中文终稿；也可在此粘贴自定义外语旁白稿"></textarea>
+          </div>
+        </details>
+      </div>
+    </div>
   </div>
 </section>
 
 <div id="youtubeSettings" class="hidden fixed inset-0 z-[70] bg-backdrop flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="YouTube 连接设置"><div class="bg-surface border border-line rounded-2xl p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto space-y-4"><div class="flex justify-between items-center"><h2 class="font-bold text-lg">YouTube 连接设置</h2><button type="button" onclick="closeYoutubeSettings()" class="text-ink-muted hover:text-ink px-2 py-1">✕</button></div><div class="bg-subtle border border-ok-line rounded-xl p-4 space-y-3"><div class="flex items-center justify-between gap-2"><h3 class="font-bold text-sm text-ok">长期自动续期（推荐 · Google OAuth）</h3><span class="text-[11px] px-2 py-0.5 rounded bg-ok-soft text-ok border border-ok-line">授权一次长期有效</span></div><div class="text-xs text-ink-secondary space-y-1 leading-relaxed"><p>1. 在 Google Cloud Console 启用 <b>YouTube Data API v3</b>，创建 <b>Web 应用</b> 类型的 OAuth 2.0 客户端 ID。</p><p>2. 将下方回调地址填入「已获授权的重定向 URI」（若应用处于“测试”状态，令牌会在 7 天后过期；在 Google Cloud 将发布状态改为“生产”可避免 7 天过期）。</p><p>3. 填入 Client ID 与 Client Secret 并完成一次授权，后端会安全保存 Refresh Token 并自动续期。</p></div><label class="block text-xs text-ink-secondary">回调地址（Redirect URI，请复制到 Google Cloud）<div class="flex gap-2 mt-1"><input id="youtubeRedirectUri" type="text" readonly class="flex-1 p-2 bg-input border border-line rounded-lg text-xs font-mono text-info" value="" /><button type="button" onclick="copyYoutubeRedirectUri()" class="bg-surface hover:bg-muted border border-line-strong text-ink px-3 py-2 rounded-lg text-xs shrink-0">复制</button></div></label><label class="block text-sm">Google OAuth Client ID<input id="youtubeClientId" type="text" autocomplete="off" class="block w-full mt-1 p-2.5 bg-input border border-line rounded-lg text-sm" placeholder="例如：123456-xxxx.apps.googleusercontent.com"></label><label class="block text-sm">Google OAuth Client Secret<input id="youtubeClientSecret" type="password" autocomplete="off" class="block w-full mt-1 p-2.5 bg-input border border-line rounded-lg text-sm" placeholder="输入 Google OAuth Client Secret"></label><div class="flex flex-wrap gap-2 pt-1"><button id="youtubeOAuthStartButton" type="button" onclick="startYoutubeOAuth()" class="bg-danger-solid hover:bg-danger-hover text-ink-inverse px-4 py-2 rounded-lg font-bold text-sm">保存并前往 Google 授权</button><button type="button" onclick="disconnectYoutube()" class="bg-surface hover:bg-muted border border-line-strong text-ink px-4 py-2 rounded-lg text-sm">断开连接</button></div><a id="youtubeOAuthFallbackLink" href="#" target="_blank" rel="noopener noreferrer" class="hidden inline-block text-xs text-info underline">弹窗被拦截？点此手动打开 Google 授权页面 ↗</a></div><p id="youtubeSettingsStatus" class="text-sm text-ink-secondary" aria-live="polite"></p><details class="bg-subtle border border-line rounded-xl p-3"><summary class="text-xs text-ink-muted cursor-pointer select-none">备用：手动粘贴临时 Access Token（仅 1 小时有效）</summary><div class="mt-3 space-y-3"><p class="text-xs text-ink-muted">上传视频、封面和字幕需要 <code>youtube.force-ssl</code> 权限；此方式保存在当前浏览器本地存储中，约 1 小时后需要重新粘贴。</p><label class="block text-xs text-ink-secondary">OAuth 访问令牌<input id="youtubeToken" type="password" autocomplete="off" class="block w-full mt-1 p-2.5 bg-input border border-line rounded-lg text-sm" placeholder="输入临时访问令牌"></label><button id="youtubeConnect" type="button" onclick="connectYoutube()" class="bg-surface hover:bg-muted border border-line-strong text-ink px-4 py-2 rounded-lg text-sm">验证并连接</button></div></details></div></div>
 
-<div id="publishPromptModal" class="hidden fixed inset-0 z-[70] bg-backdrop flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="发布资料提示词设置"><div class="bg-surface border border-line rounded-2xl p-6 w-full max-w-2xl space-y-4"><div class="flex justify-between"><h2 class="font-bold text-lg">AI 发布资料提示词</h2><button type="button" onclick="closePublishPrompt()">✕</button></div><p class="text-sm text-ink-muted">针对当前工程设置标题、简介和标签的生成要求。系统会自动附加输出格式要求。</p><textarea id="publishPrompt" rows="10" maxlength="12000" class="w-full p-3 bg-input border border-line rounded-lg focus:outline-none focus:border-ink"></textarea><p id="publishPromptStatus" class="text-sm text-ink-muted" aria-live="polite"></p><div class="flex gap-2"><button type="button" onclick="savePublishPrompt(false)" class="bg-action hover:bg-action-hover text-ink-inverse px-4 py-2 rounded-lg font-bold">保存提示词</button><button type="button" onclick="savePublishPrompt(true)" class="bg-surface hover:bg-muted border border-line-strong text-ink px-4 py-2 rounded-lg">恢复默认</button></div></div></div>
+<div id="publishPromptModal" class="hidden fixed inset-0 z-[70] bg-backdrop flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="发布台 AI 调度与提示词设置"><div class="bg-surface border border-line rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto space-y-4"><div class="flex justify-between items-center"><h2 class="font-bold text-lg">⚙️ 发布台 AI 调度与提示词设置</h2><button type="button" onclick="closePublishPrompt()" class="px-2 py-1 text-ink-muted hover:text-ink">✕</button></div><p class="text-xs text-ink-muted">集中配置发布台的 AI 模型与提示词（留空模型则沿用「全流程模型调度中心」的默认设置；API Key 与网关共用全流程设置）。</p><div class="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-subtle border border-line rounded-xl p-3.5"><label class="block text-xs font-semibold text-ink">🌐 发布资料生成与翻译模型<input id="publishTranslateModelInput" type="text" list="openrouterModelsList" class="block w-full mt-1 p-2 bg-input border border-line rounded-lg text-xs font-mono focus:outline-none focus:border-ink" placeholder="留空则沿用调度中心第 7 项"></label><label class="block text-xs font-semibold text-ink">🎨 封面 AI 生图模型<input id="publishCoverModelInput" type="text" list="openrouterImageModelsList" class="block w-full mt-1 p-2 bg-input border border-line rounded-lg text-xs font-mono focus:outline-none focus:border-ink" placeholder="留空则沿用调度中心第 4 项"></label></div><label class="block text-sm font-semibold">📝 发布资料生成提示词<textarea id="publishPrompt" rows="5" maxlength="12000" class="w-full mt-1 p-3 bg-input border border-line rounded-lg text-sm font-normal focus:outline-none focus:border-ink"></textarea></label><label class="block text-sm font-semibold">🖼️ 视频封面生图提示词模板<span class="block text-xs font-normal text-ink-muted mt-0.5">支持占位符 <code>{keywords}</code>（封面关键词）和 <code>{titleHint}</code>（当前视频标题参考）</span><textarea id="publishCoverPrompt" rows="3" maxlength="4000" class="w-full mt-1 p-3 bg-input border border-line rounded-lg text-sm font-normal focus:outline-none focus:border-ink"></textarea></label><p id="publishPromptStatus" class="text-sm text-ink-muted" aria-live="polite"></p><div class="flex flex-wrap gap-2"><button type="button" onclick="savePublishAiSettings(false)" class="bg-action hover:bg-action-hover text-ink-inverse px-4 py-2 rounded-lg font-bold">💾 保存设置</button><button type="button" onclick="savePublishAiSettings(true)" class="bg-surface hover:bg-muted border border-line-strong text-ink px-4 py-2 rounded-lg">恢复默认提示词</button></div></div></div>

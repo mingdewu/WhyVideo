@@ -42,7 +42,8 @@
             textModel: cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
             imageModel: rawImageModel,
             bgmModel: cfg.bgmModel || 'deepseek/deepseek-chat',
-            keywordModel: cfg.keywordModel || cfg.textModel || cfg.model || 'deepseek/deepseek-chat'
+            keywordModel: cfg.keywordModel || cfg.textModel || cfg.model || 'deepseek/deepseek-chat',
+            translateModel: cfg.translateModel || cfg.textModel || cfg.model || 'deepseek/deepseek-chat'
           };
 
           const kEl = document.getElementById('currentApiKeyInput');
@@ -55,6 +56,7 @@
           const iEl = document.getElementById('currentImageModelInput');
           const bgmEl = document.getElementById('currentBgmModelInput');
           const kwEl = document.getElementById('currentKeywordModelInput');
+          const trEl = document.getElementById('currentTranslateModelInput');
 
           if (kEl && visualConfig.apiKey) kEl.value = visualConfig.apiKey;
           if (tavilyEl) {
@@ -69,6 +71,7 @@
           if (iEl && visualConfig.imageModel) iEl.value = visualConfig.imageModel;
           if (bgmEl && visualConfig.bgmModel) bgmEl.value = visualConfig.bgmModel;
           if (kwEl && visualConfig.keywordModel) kwEl.value = visualConfig.keywordModel;
+          if (trEl && visualConfig.translateModel) trEl.value = visualConfig.translateModel;
 
           if (visualConfig.writerModel) {
             selectWriterModelSlug(visualConfig.writerModel);

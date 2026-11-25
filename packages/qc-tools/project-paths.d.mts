@@ -19,6 +19,7 @@ export interface ProjectPaths {
   writerPromptsPath: string;
   finalScriptPath: string;
   materialsPath: string;
+  videoFileName: string;
   videoPath: string;
   audioDir: string;
   bgmDir: string;
@@ -28,4 +29,5 @@ export interface ProjectPaths {
 export function listProjectIds(): string[];
 export function defaultProjectId(): string;
 export function getProjectPaths(projectId?: string): ProjectPaths;
+export function resolveProjectVideoPath(pathsOrProjectId: string | Pick<ProjectPaths, 'projectId' | 'outputDir' | 'videoPath'>): string | null;
 export function resolveProject(argv?: string[]): ProjectPaths & { availableProjects: string[] };

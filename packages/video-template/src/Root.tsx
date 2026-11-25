@@ -76,7 +76,7 @@ function metadataFor(isFinalRender: boolean): CalculateMetadataFunction<StudioCo
 
 export const RemotionRoot: React.FC = () => (
   <>
-    {[false, true].map(isFinalRender => {
+    {[true, false].map(isFinalRender => {
       const defaultProps: StudioCompositionProps = { ...GENERIC_DEFAULT_PROPS, isFinalRender };
       return <Composition<CompositionSchema, StudioCompositionProps>
         key={String(isFinalRender)}

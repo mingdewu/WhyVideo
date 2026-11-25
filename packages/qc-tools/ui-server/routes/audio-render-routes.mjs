@@ -174,7 +174,8 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
     const job = {
       projectId,
       preview: Boolean(body.preview),
-      concurrency: 2,
+      burnCaptions: Boolean(body.burnCaptions),
+      concurrency: Number(body.concurrency) || 4,
       status: 'preparing',
       startedAt: new Date().toISOString(),
       log: '',

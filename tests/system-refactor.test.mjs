@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import os from 'node:os';
 import ts from 'typescript';
 import { continueMediaModifiers } from '../packages/qc-tools/media-continuity.mjs';
-import { ROOT_DIR, getProjectPaths, resolveProject, listProjectIds } from '../packages/qc-tools/project-paths.mjs';
+import { ROOT_DIR, getProjectPaths, resolveProject, listProjectIds, resolveProjectVideoPath } from '../packages/qc-tools/project-paths.mjs';
 import promptRules from '../packages/qc-tools/ui-server/public/js/shared/prompt-rules.cjs';
 import { downloadUrlAsset, getDownloadProgress } from '../packages/qc-tools/ui-server/lib/download-service.mjs';
 import { registerProjectAsset } from '../packages/qc-tools/ui-server/lib/media-gateway.mjs';
@@ -181,11 +181,11 @@ test('HTTP entry serves assembled panels, every script and download validation',
   }
 });
 
-test('burned-in CaptionLayer is removed and publish-studio SRT upload avoids stale fetch races', async () => {
+test('opt-in CaptionLayer is gated by burn_in_captions and publish-studio SRT upload avoids stale fetch races', async () => {
   const templateSrcDir = path.join(ROOT_DIR, 'packages/video-template/src');
-  assert.equal(fs.existsSync(path.join(templateSrcDir, 'CaptionLayer.tsx')), false);
+  assert.equal(fs.existsSync(path.join(templateSrcDir, 'CaptionLayer.tsx')), true);
   const compositionSrc = fs.readFileSync(path.join(templateSrcDir, 'WhyExplainerComposition.tsx'), 'utf8');
-  assert.equal(compositionSrc.includes('CaptionLayer'), false);
+  assert.match(compositionSrc, /burn_in_captions[\s\S]*CaptionLayer/);
 
   const elements = new Map();
   const getElement = (id) => {
@@ -220,6 +220,15 @@ test('burned-in CaptionLayer is removed and publish-studio SRT upload avoids sta
       if (url.startsWith('/api/') && !url.includes('/api/publish/cover')) return Promise.resolve({ ok: true, json: async () => ({}) });
       if (url.includes('/api/publish/cover')) {
         return Promise.resolve({ ok: true, json: async () => ({ coverUrl: null }) });
+      }
+      if (url.includes('/api/publish/video')) {
+        return Promise.resolve({ ok: true, json: async () => ({ hasVideo: false, videoUrl: null, fileName: null }) });
+      }
+      if (url.includes('/api/publish/english-dub')) {
+        return Promise.resolve({ ok: true, json: async () => ({ ok: true, scriptText: '', audioUrl: null, srtText: '', job: null }) });
+      }
+      if (url.includes('/api/voicebox/profiles')) {
+        return Promise.resolve({ ok: true, json: async () => ({ ok: true, profiles: [] }) });
       }
       return new Promise((resolve) => { resolveFetch = resolve; });
     },
@@ -411,5 +420,452 @@ test('publish routes and publish-studio generate, persist and resolve AI covers 
   } finally {
     globalThis.fetch = previousFetch;
     fs.rmSync(tmpProj, { recursive: true, force: true });
+  }
+});
+
+test('project video path uses project id, resolves fallback files, and publish-studio avoids hardcoded final_video_1080p.mp4', () => {
+  const demoPaths = getProjectPaths('demo_video_001');
+  assert.equal(demoPaths.videoFileName, 'demo_video_001.mp4');
+  assert.equal(demoPaths.videoPath, path.join(ROOT_DIR, 'projects/demo_video_001/output/demo_video_001.mp4'));
+
+  const tmpOut = fs.mkdtempSync(path.join(os.tmpdir(), 'whyvideo-out-'));
+  try {
+    const fakePaths = {
+      projectId: 'demo_video_001',
+      outputDir: tmpOut,
+      videoPath: path.join(tmpOut, 'demo_video_001.mp4'),
+    };
+    assert.equal(resolveProjectVideoPath(fakePaths), null);
+
+    fs.writeFileSync(path.join(tmpOut, 'preview.mp4'), 'preview');
+    fs.writeFileSync(path.join(tmpOut, '.hidden.mp4'), 'hidden');
+    assert.equal(resolveProjectVideoPath(fakePaths), null);
+
+    const customPath = path.join(tmpOut, 'custom_render.mp4');
+    fs.writeFileSync(customPath, 'custom');
+    assert.equal(resolveProjectVideoPath(fakePaths), customPath);
+
+    const legacyPath = path.join(tmpOut, 'final_video_1080p.mp4');
+    fs.writeFileSync(legacyPath, 'legacy');
+    assert.equal(resolveProjectVideoPath(fakePaths), legacyPath);
+
+    fs.writeFileSync(fakePaths.videoPath, 'primary');
+    assert.equal(resolveProjectVideoPath(fakePaths), fakePaths.videoPath);
+  } finally {
+    fs.rmSync(tmpOut, { recursive: true, force: true });
+  }
+
+  const publishJs = fs.readFileSync(path.join(publicDir, 'js/publish-studio.js'), 'utf8');
+  assert.ok(!publishJs.includes('final_video_1080p.mp4'));
+  assert.ok(publishJs.includes('/api/publish/video'));
+});
+
+test('english dub service splits long text, formats non-overlapping SRT, and publish routes save _en.srt', async () => {
+  const { Readable } = await import('node:stream');
+  const { splitEnglishTextForTts, buildEnglishSrtFromWords } = await import('../packages/qc-tools/ui-server/lib/english-dub-service.mjs');
+  const { handlePublishRoutes } = await import('../packages/qc-tools/ui-server/routes/publish-routes.mjs');
+  const { parseSrt } = await import('../packages/qc-tools/ui-server/lib/publish-localization.mjs');
+
+  const longScript = [
+    'Why do people in Japan live so long compared to many other countries?',
+    'Researchers often look closely at diet, healthcare access, and daily walking habits.',
+    'In addition, life expectancy reflects mortality risks across every single age group.',
+  ].join(' ');
+  const chunks = splitEnglishTextForTts(longScript, 110);
+  assert.ok(chunks.length >= 2);
+  assert.ok(chunks.every((c) => c.length <= 110));
+  assert.equal(chunks.join(' '), longScript);
+
+  const srt = buildEnglishSrtFromWords([
+    { w: 'Why', s: 0.0, e: 0.2 },
+    { w: 'do', s: 0.21, e: 0.35 },
+    { w: 'people', s: 0.36, e: 0.65 },
+    { w: 'live', s: 0.66, e: 0.9 },
+    { w: 'long?', s: 0.91, e: 1.25 },
+    { w: 'Let', s: 1.8, e: 2.0 },
+    { w: 'us', s: 2.01, e: 2.2 },
+    { w: 'look', s: 2.21, e: 2.45 },
+    { w: 'closely', s: 2.46, e: 2.85 },
+    { w: 'at', s: 2.86, e: 3.0 },
+    { w: 'the', s: 3.01, e: 3.15 },
+    { w: 'real', s: 3.16, e: 3.4 },
+    { w: 'evidence', s: 3.41, e: 3.85 },
+    { w: 'across', s: 3.86, e: 4.2 },
+    { w: 'every', s: 4.21, e: 4.5 },
+    { w: 'age', s: 4.51, e: 4.8 },
+    { w: 'group.', s: 4.81, e: 5.2 },
+  ], { maxCharsPerLine: 28, maxLines: 2 });
+  const parsed = parseSrt(srt);
+  assert.equal(parsed.warnings.length, 0);
+  assert.ok(parsed.cues.length >= 2);
+  assert.match(parsed.cues[0].text, /Why do people live long\?/);
+
+  const jaSrt = buildEnglishSrtFromWords([
+    { w: 'なぜ', s: 0.0, e: 0.3 },
+    { w: '日本人は', s: 0.31, e: 0.8 },
+    { w: '長生きなのか？', s: 0.81, e: 1.4 },
+    { w: 'データの', s: 2.0, e: 2.4 },
+    { w: '裏側を', s: 2.41, e: 2.8 },
+    { w: '見てみよう。', s: 2.81, e: 3.4 },
+  ], { lang: 'ja' });
+  const parsedJa = parseSrt(jaSrt);
+  assert.equal(parsedJa.warnings.length, 0);
+  assert.equal(parsedJa.cues[0].text, 'なぜ日本人は長生きなのか？');
+
+  const publishHtml = fs.readFileSync(path.join(publicDir, 'partials/publish-panel.html'), 'utf8');
+  assert.equal(publishHtml.includes('localizationPanel'), false);
+  assert.equal(publishHtml.includes('englishDubPanel'), false);
+  for (const id of ['publishLangTabZh', 'publishLangTabEn', 'publishLangTabJa', 'publishTranslateToEnBtn', 'publishTranslateToJaBtn', 'publishForeignDubBox']) {
+    assert.ok(publishHtml.includes(`id="${id}"`), `Missing publish UI element: ${id}`);
+  }
+  assert.ok(publishHtml.indexOf('id="publishVideo"') < publishHtml.indexOf('id="youtubeUploadButton"'));
+  assert.ok(publishHtml.indexOf('id="youtubeUploadButton"') < publishHtml.indexOf('id="publishCover"'));
+  assert.ok(publishHtml.indexOf('id="publishCover"') < publishHtml.indexOf('id="publishTitle"'));
+  assert.ok(publishHtml.indexOf('id="publishTitle"') < publishHtml.indexOf('id="publishCaptions"'));
+
+  const tmpProj = fs.mkdtempSync(path.join(os.tmpdir(), 'whyvideo-endub-'));
+  try {
+    const dataDir = path.join(tmpProj, 'data');
+    const outputDir = path.join(tmpProj, 'output');
+    const publicDirProj = path.join(tmpProj, 'public');
+    fs.mkdirSync(dataDir, { recursive: true });
+
+    const callRoute = async (method, pathname, bodyObj = null, queryStr = '') => {
+      const req = bodyObj
+        ? Readable.from([Buffer.from(JSON.stringify(bodyObj))])
+        : Readable.from([]);
+      req.method = method;
+      let resStatus = 0;
+      let resBody = '';
+      const res = {
+        writeHead(status) { resStatus = status; },
+        end(chunk) { resBody += chunk || ''; },
+      };
+      const url = new URL('http://localhost' + pathname + (queryStr ? ('?' + queryStr) : ''));
+      const handled = await handlePublishRoutes(req, res, {
+        url,
+        pathname,
+        queryProject: 'demo_en_proj',
+        paths: {
+          projectDir: tmpProj,
+          dataDir,
+          outputDir,
+          publicDir: publicDirProj,
+          promptConfigPath: path.join(dataDir, 'prompt-config.json'),
+          finalScriptPath: path.join(dataDir, 'final-script.json'),
+        },
+      });
+      return { handled, status: resStatus, body: JSON.parse(resBody) };
+    };
+
+    const saveRes = await callRoute('POST', '/api/publish/english-dub/save-srt', { srt });
+    assert.equal(saveRes.handled, true);
+    assert.equal(saveRes.status, 200);
+    assert.equal(saveRes.body.fileName, 'demo_en_proj_en.srt');
+    assert.ok(fs.existsSync(path.join(outputDir, 'demo_en_proj_en.srt')));
+
+    const saveJaRes = await callRoute('POST', '/api/publish/english-dub/save-srt', { lang: 'ja', srt: jaSrt });
+    assert.equal(saveJaRes.status, 200);
+    assert.equal(saveJaRes.body.fileName, 'demo_en_proj_ja.srt');
+    assert.ok(fs.existsSync(path.join(outputDir, 'demo_en_proj_ja.srt')));
+
+    const copyPostRes = await callRoute('POST', '/api/publish/copy', {
+      lang: 'en',
+      title: 'Why Do Japanese People Live So Long?',
+      description: 'Deep dive into life expectancy data.',
+      tags: 'Japan, Longevity, Health',
+      coverKeywords: 'Japan longevity chart',
+    });
+    assert.equal(copyPostRes.status, 200);
+    assert.equal(copyPostRes.body.copy.en.title, 'Why Do Japanese People Live So Long?');
+
+    const getRes = await callRoute('GET', '/api/publish/english-dub');
+    assert.equal(getRes.handled, true);
+    assert.equal(getRes.status, 200);
+    assert.equal(getRes.body.srtFileName, 'demo_en_proj_en.srt');
+    assert.equal(getRes.body.srtText, srt);
+    assert.equal(getRes.body.copy.en.title, 'Why Do Japanese People Live So Long?');
+
+    const getJaRes = await callRoute('GET', '/api/publish/english-dub', null, 'lang=ja');
+    assert.equal(getJaRes.status, 200);
+    assert.equal(getJaRes.body.srtFileName, 'demo_en_proj_ja.srt');
+    assert.equal(getJaRes.body.srtText, jaSrt);
+  } finally {
+    fs.rmSync(tmpProj, { recursive: true, force: true });
+  }
+
+  assert.ok(publishHtml.includes('id="youtubeMultiLangSummary"'));
+  assert.ok(publishHtml.includes('id="youtubeStudioLanguagesLink"'));
+
+  const publishJsSrc = fs.readFileSync(path.join(publicDir, 'js/publish-studio.js'), 'utf8');
+  assert.ok(publishJsSrc.includes('part=localizations'));
+
+  const elements = new Map();
+  const getElement = (id) => {
+    if (!elements.has(id)) {
+      elements.set(id, {
+        value: id === 'youtubeSourceLanguage' || id === 'youtubeCaptionLanguage' ? 'zh-Hans' : '',
+        textContent: '',
+        innerHTML: '',
+        src: '',
+        href: '',
+        download: '',
+        disabled: false,
+        files: [],
+        dataset: {},
+        classList: { add() {}, remove() {}, toggle() {}, contains: () => true },
+        removeAttribute(attr) { delete this[attr]; },
+        addEventListener() {},
+      });
+    }
+    return elements.get(id);
+  };
+  const langCtx = vm.createContext({
+    console, Promise, URL, Blob, encodeURIComponent,
+    activeProjectId: 'proj_multi',
+    document: { getElementById: getElement },
+    localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    sessionStorage: { getItem: () => null, setItem() {} },
+    setInterval: () => 1,
+    clearInterval() {},
+    showToast() {},
+    fetch: async (url) => {
+      if (url.includes('/api/publish/english-dub')) return { ok: true, json: async () => ({ ok: true, scriptText: '', audioUrl: null, srtText: '', job: null }) };
+      if (url.includes('/api/voicebox/profiles')) return { ok: true, json: async () => ({ ok: true, profiles: [] }) };
+      if (url.includes('/api/publish/cover')) return { ok: true, json: async () => ({ coverUrl: null }) };
+      if (url.includes('/api/publish/video')) return { ok: true, json: async () => ({ hasVideo: false, videoUrl: null }) };
+      return { ok: true, text: async () => '' };
+    },
+  });
+  vm.runInContext(publishJsSrc, langCtx, { filename: 'js/publish-studio.js' });
+  await langCtx.switchPublishLanguage('en');
+  assert.equal(getElement('youtubeSourceLanguage').value, 'zh-Hans');
+  assert.equal(getElement('youtubeCaptionLanguage').value, 'zh-Hans');
+  await langCtx.switchPublishLanguage('ja');
+  assert.equal(getElement('youtubeSourceLanguage').value, 'zh-Hans');
+  assert.equal(getElement('youtubeCaptionLanguage').value, 'zh-Hans');
+
+  const merged = langCtx.mergeMultilingualTags({
+    zh: { tags: '日本长寿, 预期寿命, 公共卫生' },
+    en: { tags: 'Japan longevity, life expectancy, public health, Japan longevity' },
+    ja: { tags: '日本 長寿, 平均寿命, ' + 'x'.repeat(500) },
+  }, 500);
+  assert.ok(merged.includes('日本长寿'));
+  assert.ok(merged.includes('Japan longevity'));
+  assert.ok(merged.includes('日本 長寿'));
+  assert.equal(merged.filter((t) => t === 'Japan longevity').length, 1);
+  assert.ok(merged.map((t) => (t.includes(' ') ? `"${t}"` : t)).join(',').length <= 500);
+});
+
+test('publish ai-settings persists translateModel, publishCoverModel, and custom coverPrompt used by cover generation', async () => {
+  const { Readable } = await import('node:stream');
+  const { handlePublishRoutes } = await import('../packages/qc-tools/ui-server/routes/publish-routes.mjs');
+
+  const modelSettingsHtml = fs.readFileSync(path.join(publicDir, 'partials/model-settings.html'), 'utf8');
+  assert.ok(modelSettingsHtml.includes('id="accordionHeaderModel7"'));
+  assert.ok(modelSettingsHtml.includes('id="currentTranslateModelInput"'));
+
+  const publishHtml = fs.readFileSync(path.join(publicDir, 'partials/publish-panel.html'), 'utf8');
+  assert.ok(publishHtml.includes('openPublishAiSettings()'));
+  assert.ok(publishHtml.includes('id="publishTranslateModelInput"'));
+  assert.ok(publishHtml.includes('id="publishCoverModelInput"'));
+  assert.ok(publishHtml.includes('id="publishCoverPrompt"'));
+
+  const tmpProj = fs.mkdtempSync(path.join(os.tmpdir(), 'whyvideo-pubai-'));
+  const previousFetch = globalThis.fetch;
+  try {
+    const dataDir = path.join(tmpProj, 'data');
+    const publicDirProj = path.join(tmpProj, 'public');
+    fs.mkdirSync(dataDir, { recursive: true });
+    fs.mkdirSync(publicDirProj, { recursive: true });
+    fs.writeFileSync(
+      path.join(dataDir, 'prompt-config.json'),
+      JSON.stringify({
+        apiKey: 'test-openrouter-key',
+        baseUrl: 'https://openrouter.ai/api/v1',
+        writerModel: 'openai/gpt-6.1-terra',
+        textModel: 'openai/gpt-4o-mini',
+        imageModel: 'black-forest-labs/flux-3-image',
+      })
+    );
+
+    const callRoute = async (method, pathname, bodyObj = null) => {
+      const req = bodyObj
+        ? Readable.from([Buffer.from(JSON.stringify(bodyObj))])
+        : Readable.from([]);
+      req.method = method;
+      let resStatus = 0;
+      let resBody = '';
+      const res = {
+        writeHead(status) { resStatus = status; },
+        end(chunk) { resBody += chunk || ''; },
+      };
+      const handled = await handlePublishRoutes(req, res, {
+        url: new URL('http://localhost' + pathname),
+        pathname,
+        queryProject: 'demo_pub_ai',
+        paths: {
+          projectDir: tmpProj,
+          dataDir,
+          publicDir: publicDirProj,
+          promptConfigPath: path.join(dataDir, 'prompt-config.json'),
+          finalScriptPath: path.join(dataDir, 'final-script.json'),
+        },
+      });
+      return { handled, status: resStatus, body: JSON.parse(resBody) };
+    };
+
+    const initGet = await callRoute('GET', '/api/publish/ai-settings');
+    assert.equal(initGet.handled, true);
+    assert.equal(initGet.status, 200);
+    assert.equal(initGet.body.fallbackTranslateModel, 'openai/gpt-4o-mini');
+    assert.equal(initGet.body.fallbackCoverModel, 'black-forest-labs/flux-3-image');
+
+    const saveRes = await callRoute('POST', '/api/publish/ai-settings', {
+      translateModel: 'google/gemini-2.5-flash',
+      coverModel: 'qwen/qwen-image-2.1-turbo',
+      prompt: '自定义发布资料提示词',
+      coverPrompt: '极简科普封面风格，主体：{keywords}{titleHint}',
+    });
+    assert.equal(saveRes.status, 200);
+    assert.equal(saveRes.body.translateModel, 'google/gemini-2.5-flash');
+    assert.equal(saveRes.body.coverModel, 'qwen/qwen-image-2.1-turbo');
+
+    const pngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+    let seenModel = '';
+    let seenPrompt = '';
+    globalThis.fetch = async (_url, options) => {
+      const reqBody = JSON.parse(options.body);
+      seenModel = reqBody.model;
+      seenPrompt = reqBody.prompt;
+      return new Response(
+        JSON.stringify({ data: [{ b64_json: pngBase64, media_type: 'image/png' }] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      );
+    };
+
+    const coverRes = await callRoute('POST', '/api/publish/generate-cover', {
+      keywords: '长寿曲线图',
+      title: '为什么日本人更长寿',
+    });
+    assert.equal(coverRes.status, 200);
+    assert.equal(coverRes.body.model, 'qwen/qwen-image-2.1-turbo');
+    assert.equal(seenModel, 'qwen/qwen-image-2.1-turbo');
+    assert.match(seenPrompt, /^极简科普封面风格，主体：长寿曲线图/);
+  } finally {
+    globalThis.fetch = previousFetch;
+    fs.rmSync(tmpProj, { recursive: true, force: true });
+  }
+});
+
+test('render-project plans chunks cleanly, builds hardware-accelerated commands, and builds lossless concat args', async () => {
+  const {
+    planRenderFrameChunks,
+    makeConcatFfmpegArgs,
+    makeRenderCommand,
+  } = await import('../packages/qc-tools/render-project.mjs');
+
+  assert.deepEqual(planRenderFrameChunks(1800, 3600), [{ index: 0, startFrame: 0, endFrame: 1799 }]);
+  assert.deepEqual(planRenderFrameChunks(7350, 3600), [
+    { index: 0, startFrame: 0, endFrame: 3599 },
+    { index: 1, startFrame: 3600, endFrame: 7349 },
+  ]);
+  assert.deepEqual(planRenderFrameChunks(8400, 3600), [
+    { index: 0, startFrame: 0, endFrame: 3599 },
+    { index: 1, startFrame: 3600, endFrame: 7199 },
+    { index: 2, startFrame: 7200, endFrame: 8399 },
+  ]);
+
+  const { listContent, args: ffArgs } = makeConcatFfmpegArgs(['chunk_000.mp4', 'chunk_001.mp4'], '/tmp/out.mp4');
+  assert.equal(listContent, "file 'chunk_000.mp4'\nfile 'chunk_001.mp4'\n");
+  assert.ok(ffArgs.includes('-c') && ffArgs.includes('copy'));
+  assert.ok(ffArgs.includes('+faststart'));
+
+  const tmpId = `tmp_render_spec_${process.pid}_${Date.now()}`;
+  const tmpPaths = getProjectPaths(tmpId);
+  try {
+    fs.mkdirSync(path.join(tmpPaths.publicDir, 'audio'), { recursive: true });
+    fs.writeFileSync(path.join(tmpPaths.publicDir, 'audio', 'narration.wav'), 'RIFF');
+    fs.writeFileSync(tmpPaths.propsPath, JSON.stringify({
+      project_id: tmpId,
+      audio_track: { src: 'audio/narration.wav' },
+      video_config: { duration_in_frames: 9000 },
+    }));
+    const cmd = makeRenderCommand(tmpId, {
+      concurrency: 2,
+      frameRange: [0, 3599],
+      seamlessConcat: true,
+      outputPath: path.join(tmpPaths.outputDir, 'chunk_0.mp4'),
+    });
+    assert.ok(cmd.args.includes('--image-format=jpeg'));
+    assert.ok(cmd.args.includes('--jpeg-quality=85'));
+    assert.ok(cmd.args.includes('--hardware-acceleration=if-possible'));
+    assert.ok(cmd.args.includes('--x264-preset=veryfast'));
+    assert.ok(cmd.args.includes('--frames=0-3599'));
+    assert.ok(cmd.args.includes('--for-seamless-aac-concatenation'));
+  } finally {
+    fs.rmSync(tmpPaths.projectDir, { recursive: true, force: true });
+  }
+});
+
+test('render confirm modal wires burnCaptions checkbox through generate-render-props', async () => {
+  const { execFileSync } = await import('node:child_process');
+  const confirmHtml = fs.readFileSync(path.join(publicDir, 'partials/render-confirm.html'), 'utf8');
+  assert.match(confirmHtml, /id="finalRenderBurnCaptions"[^>]*type="checkbox"/);
+
+  const controlsSrc = fs.readFileSync(path.join(publicDir, 'js/render-controls.js'), 'utf8');
+  assert.match(controlsSrc, /finalRenderBurnCaptions/);
+  assert.match(controlsSrc, /JSON\.stringify\(\{\s*projectId,\s*burnCaptions\s*\}\)/);
+
+  const routesSrc = fs.readFileSync(path.join(ROOT_DIR, 'packages/qc-tools/ui-server/routes/audio-render-routes.mjs'), 'utf8');
+  assert.match(routesSrc, /burnCaptions:\s*Boolean\(body\.burnCaptions\)/);
+
+  const jobsSrc = fs.readFileSync(path.join(ROOT_DIR, 'packages/qc-tools/ui-server/lib/jobs-service.mjs'), 'utf8');
+  assert.match(jobsSrc, /job\.burnCaptions\s*\?\s*'--burn-captions'\s*:\s*'--no-burn-captions'/);
+
+  const tmpId = `tmp_burn_caps_${process.pid}_${Date.now()}`;
+  const tmpPaths = getProjectPaths(tmpId);
+  try {
+    fs.mkdirSync(tmpPaths.dataDir, { recursive: true });
+    fs.mkdirSync(path.join(tmpPaths.publicDir, 'audio'), { recursive: true });
+    fs.mkdirSync(path.join(tmpPaths.publicDir, 'captions'), { recursive: true });
+    fs.writeFileSync(path.join(tmpPaths.publicDir, 'audio', 'narration.wav'), 'RIFF');
+    fs.writeFileSync(
+      path.join(tmpPaths.publicDir, 'captions', 'captions.srt'),
+      '1\n00:00:00,000 --> 00:00:02,000\n测试中文字幕\n'
+    );
+    fs.writeFileSync(
+      path.join(tmpPaths.dataDir, 'asset-index.json'),
+      JSON.stringify({ project_id: tmpId, assets: [] })
+    );
+    fs.writeFileSync(
+      path.join(tmpPaths.dataDir, 'scene-manifest.json'),
+      JSON.stringify({
+        project_id: tmpId,
+        title: 'Test Burn Captions',
+        audio_file: 'audio/narration.wav',
+        captions_file: 'captions/captions.srt',
+        total_duration_ms: 2000,
+        total_duration_sec: 2,
+        scenes: [],
+      })
+    );
+
+    execFileSync(process.execPath, [
+      'packages/qc-tools/generate-render-props.mjs', '--project', tmpId, '--no-burn-captions',
+    ], { cwd: ROOT_DIR });
+    const propsOff = JSON.parse(fs.readFileSync(tmpPaths.propsPath, 'utf8'));
+    assert.equal(propsOff.burn_in_captions, false);
+    assert.equal(propsOff.caption_track.burn_in_captions, false);
+    assert.equal(propsOff.caption_track.captions.length, 1);
+
+    execFileSync(process.execPath, [
+      'packages/qc-tools/generate-render-props.mjs', '--project', tmpId, '--burn-captions',
+    ], { cwd: ROOT_DIR });
+    const propsOn = JSON.parse(fs.readFileSync(tmpPaths.propsPath, 'utf8'));
+    assert.equal(propsOn.burn_in_captions, true);
+    assert.equal(propsOn.caption_track.burn_in_captions, true);
+  } finally {
+    fs.rmSync(tmpPaths.projectDir, { recursive: true, force: true });
   }
 });

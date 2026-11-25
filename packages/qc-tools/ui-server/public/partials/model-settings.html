@@ -236,6 +236,28 @@
                 class="w-full px-2.5 py-1 text-xs rounded-lg bg-input border border-line text-ink font-mono font-bold focus:outline-none focus:border-ink" />
             </div>
           </div>
+
+          <!-- Item 7: 🌐 AI 发布资料与多语言翻译模型 (Translate) -->
+          <div class="rounded-xl border border-line bg-subtle overflow-hidden transition">
+            <button type="button" onclick="toggleModelAccordion(7)" id="accordionHeaderModel7" class="w-full px-3 py-1.5 text-left flex items-center justify-between hover:bg-muted transition cursor-pointer">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="w-4 h-4 rounded-full bg-info-soft text-info font-bold flex items-center justify-center text-[10px] shrink-0">7</span>
+                <span class="text-xs font-bold text-ink truncate">🌐 AI 发布资料与多语言翻译模型</span>
+                <span id="modelHeaderBadgeTranslate" class="px-2 py-0.2 rounded text-[10px] font-mono bg-info-soft text-info border border-info-line truncate max-w-[200px]">deepseek-chat</span>
+              </div>
+              <span id="accordionArrowModel7" class="text-[10px] text-ink-muted font-mono transition">▶</span>
+            </button>
+            <div id="accordionBodyModel7" class="p-2.5 border-t border-line bg-subtle space-y-1.5 hidden">
+              <input type="search" id="translateModelSearch" oninput="filterModelSelect('translate')" placeholder="🔍 实时搜索模型名称或 ID（支持多关键词，如 gemini flash / gpt-4o-mini / deepseek）..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-input border border-line text-ink focus:outline-none focus:border-ink" />
+              <select id="translateModelSelect" onchange="if(this.value) selectTranslateModelSlug(this.value)" style="color-scheme: light;"
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-input border border-info-line text-info font-mono focus:outline-none focus:border-ink cursor-pointer">
+                <option value="">⏳ 正在从 OpenRouter 拉取模型列表...</option>
+              </select>
+              <input type="text" id="currentTranslateModelInput" list="openrouterModelsList" value="deepseek/deepseek-chat" oninput="updateModelHeaderBadges()" placeholder="从上方下拉选择，或手动输入发布资料与翻译模型 slug..."
+                class="w-full px-2.5 py-1 text-xs rounded-lg bg-input border border-line text-ink font-mono font-bold focus:outline-none focus:border-ink" />
+            </div>
+          </div>
         </div>
 
         <!-- 3. 弹窗固定底部栏：取消与保存应用 -->

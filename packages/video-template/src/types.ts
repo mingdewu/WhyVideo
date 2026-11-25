@@ -191,10 +191,12 @@ export interface RenderPropsType {
     volume: number;
     bgm?: BgmTrackProp | null;
   };
+  burn_in_captions?: boolean;
   caption_track: {
     srt_src: string;
     safe_bottom_margin_px: number;
     max_chars_per_line: number;
+    burn_in_captions?: boolean;
     captions: CaptionItemProp[];
   };
   timeline_tracks: TimelineTrackProp[];

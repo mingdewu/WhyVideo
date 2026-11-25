@@ -17,6 +17,8 @@ const HEIGHT = projectConfig.video_spec?.height ?? 1080;
 const SAFE_BOTTOM_MARGIN_PX =
   projectConfig.video_spec?.safe_bottom_margin_px ?? 96;
 const MAX_CHARS_PER_LINE = projectConfig.video_spec?.max_chars_per_line ?? 22;
+const hasBurnCaptionsFlag = process.argv.includes("--burn-captions");
+const hasNoBurnCaptionsFlag = process.argv.includes("--no-burn-captions");
 
 const ALLOWED_LICENSES = new Set(["approved", "internal_placeholder"]);
 
@@ -255,6 +257,12 @@ const bgmTrack = compileBgmRenderProp(
   FPS
 );
 
+const burnInCaptions = hasBurnCaptionsFlag
+  ? true
+  : hasNoBurnCaptionsFlag
+    ? false
+    : Boolean(sceneManifest.burn_in_captions ?? projectConfig.video_spec?.burn_in_captions ?? false);
+
 const renderProps = {
   composition_id: "WhyExplainerMVP",
   project_id: sceneManifest.project_id,
@@ -265,6 +273,7 @@ const renderProps = {
   title: sceneManifest.title,
   ready_for_final_render: blockingReasons.length === 0,
   blocking_reasons: blockingReasons,
+  burn_in_captions: burnInCaptions,
   video_config: {
     fps: FPS,
     width: WIDTH,
@@ -300,6 +309,7 @@ const renderProps = {
     srt_src: sceneManifest.captions_file,
     safe_bottom_margin_px: SAFE_BOTTOM_MARGIN_PX,
     max_chars_per_line: MAX_CHARS_PER_LINE,
+    burn_in_captions: burnInCaptions,
     captions,
   },
   timeline_tracks: timelineTracks,

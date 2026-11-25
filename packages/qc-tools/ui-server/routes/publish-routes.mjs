@@ -2,8 +2,18 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readBody, normalizePromptConfig } from '../lib/config.mjs';
+import { resolveProjectVideoPath } from '../../project-paths.mjs';
 import { callOpenRouterText } from '../lib/llm-gateway.mjs';
-import { parseSrt, renderSrt } from '../lib/publish-localization.mjs';
+import {
+  englishDubJobs,
+  dubJobKey,
+  normalizeDubLang,
+  extractChineseSourceNarration,
+  translateChineseNarration,
+  getEnglishDubArtifacts,
+  runEnglishDubJob,
+  cancelEnglishDubJob,
+} from '../lib/english-dub-service.mjs';
 import { callGatewayImageGeneration, downloadRemoteMedia } from '../lib/media-gateway.mjs';
 import {
   createAuthorizationUrl,
@@ -14,6 +24,26 @@ import {
 } from '../lib/youtube-oauth.mjs';
 
 const DEFAULT_PROMPT = '你是一位中文 YouTube 视频编辑。请根据文案生成准确、有吸引力的标题、简介和搜索标签。标题清晰自然，简介概括视频内容，标签覆盖主题、相关人物和常见搜索词。不要编造事实，不要编造章节时间。';
+const DEFAULT_COVER_PROMPT = 'YouTube 16:9 高点击率视频封面缩略图，核心关键词与画面元素：{keywords}{titleHint}，视觉主体突出、电影级戏剧光影、构图饱满清晰、高对比度、超清画质';
+
+function loadPublishPromptStore(promptPath) {
+  try {
+    const saved = JSON.parse(fs.readFileSync(promptPath, 'utf8'));
+    return {
+      prompt: typeof saved?.prompt === 'string' && saved.prompt.trim() ? saved.prompt.trim() : DEFAULT_PROMPT,
+      coverPrompt: typeof saved?.coverPrompt === 'string' && saved.coverPrompt.trim() ? saved.coverPrompt.trim() : DEFAULT_COVER_PROMPT,
+    };
+  } catch {
+    return { prompt: DEFAULT_PROMPT, coverPrompt: DEFAULT_COVER_PROMPT };
+  }
+}
+
+function savePublishPromptStore(promptPath, store) {
+  fs.mkdirSync(path.dirname(promptPath), { recursive: true });
+  const tempPath = `${promptPath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(store, null, 2), 'utf8');
+  fs.renameSync(tempPath, promptPath);
+}
 const COVER_CANDIDATES = [
   { fileName: 'publish-cover.jpg', mimeType: 'image/jpeg' },
   { fileName: 'publish-cover.png', mimeType: 'image/png' },
@@ -85,10 +115,9 @@ function buildOAuthCallbackHtml({ ok, channelTitle = '', error = '' }) {
 </html>`;
 }
 
-function findExistingCover(publicDir) {
-  if (!publicDir || !fs.existsSync(publicDir)) return null;
+function findCoverFromCandidates(publicDir, candidates) {
   let latest = null;
-  for (const candidate of COVER_CANDIDATES) {
+  for (const candidate of candidates) {
     const fullPath = path.join(publicDir, candidate.fileName);
     if (!fs.existsSync(fullPath)) continue;
     try {
@@ -102,9 +131,67 @@ function findExistingCover(publicDir) {
   return latest;
 }
 
+function findExistingCover(publicDir, lang = 'zh') {
+  if (!publicDir || !fs.existsSync(publicDir)) return null;
+  if (lang === 'en' || lang === 'ja') {
+    const langCandidates = [
+      { fileName: `publish-cover.${lang}.jpg`, mimeType: 'image/jpeg' },
+      { fileName: `publish-cover.${lang}.png`, mimeType: 'image/png' },
+    ];
+    const langHit = findCoverFromCandidates(publicDir, langCandidates);
+    if (langHit) return { ...langHit, isFallback: false };
+  }
+  const baseHit = findCoverFromCandidates(publicDir, COVER_CANDIDATES);
+  return baseHit ? { ...baseHit, isFallback: lang !== 'zh' } : null;
+}
+
+function normalizePublishLang(lang) {
+  return lang === 'en' || lang === 'ja' ? lang : 'zh';
+}
+
+function loadPublishCopy(dataDir) {
+  const defaultCopy = { zh: {}, en: {}, ja: {} };
+  if (!dataDir) return defaultCopy;
+  const copyPath = path.join(dataDir, 'publish-copy.json');
+  if (!fs.existsSync(copyPath)) return defaultCopy;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(copyPath, 'utf8'));
+    return {
+      zh: parsed?.zh && typeof parsed.zh === 'object' ? parsed.zh : {},
+      en: parsed?.en && typeof parsed.en === 'object' ? parsed.en : {},
+      ja: parsed?.ja && typeof parsed.ja === 'object' ? parsed.ja : {},
+    };
+  } catch {
+    return defaultCopy;
+  }
+}
+
+function savePublishCopy(dataDir, copy) {
+  fs.mkdirSync(dataDir, { recursive: true });
+  const copyPath = path.join(dataDir, 'publish-copy.json');
+  const tempPath = `${copyPath}.${process.pid}.${Date.now()}.tmp`;
+  fs.writeFileSync(tempPath, JSON.stringify(copy, null, 2), 'utf8');
+  fs.renameSync(tempPath, copyPath);
+}
+
 export async function handlePublishRoutes(req, res, { url, pathname, paths, queryProject }) {
   const isYoutubeRoute = pathname.startsWith('/api/publish/youtube/');
-  if (!isYoutubeRoute && !['/api/publish/generate', '/api/publish/prompt', '/api/publish/cover', '/api/publish/generate-cover', '/api/publish/localizations', '/api/publish/localize', '/api/publish/check-srt'].includes(pathname)) return false;
+  if (!isYoutubeRoute && ![
+    '/api/publish/generate',
+    '/api/publish/prompt',
+    '/api/publish/ai-settings',
+    '/api/publish/copy',
+    '/api/publish/translate-copy',
+    '/api/publish/translate-script',
+    '/api/publish/video',
+    '/api/publish/cover',
+    '/api/publish/generate-cover',
+    '/api/publish/english-dub',
+    '/api/publish/english-dub/generate',
+    '/api/publish/english-dub/status',
+    '/api/publish/english-dub/cancel',
+    '/api/publish/english-dub/save-srt',
+  ].includes(pathname)) return false;
   const respond = (status, data) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); return true; };
   if (pathname === '/api/publish/youtube/token' && req.method === 'GET') {
     const forceRefresh = url?.searchParams?.get('force') === '1';
@@ -163,67 +250,207 @@ export async function handlePublishRoutes(req, res, { url, pathname, paths, quer
   if (isYoutubeRoute) return false;
   const projectId = queryProject || path.basename(paths.projectDir);
   const promptPath = path.join(paths.dataDir, 'publish-prompt.json');
-  const getPrompt = () => { try { const saved = JSON.parse(fs.readFileSync(promptPath, 'utf8')); return typeof saved.prompt === 'string' && saved.prompt.trim() ? saved.prompt : DEFAULT_PROMPT; } catch { return DEFAULT_PROMPT; } };
+  const getPrompt = () => loadPublishPromptStore(promptPath).prompt;
   try {
-    const localizationPath = path.join(paths.dataDir, 'publish-localizations.json');
-    if (pathname === '/api/publish/localizations' && req.method === 'GET') {
-      try { return respond(200, JSON.parse(fs.readFileSync(localizationPath, 'utf8'))); }
-      catch (err) { if (err.code === 'ENOENT') return respond(200, {}); throw err; }
+    if (pathname === '/api/publish/copy' && req.method === 'GET') {
+      return respond(200, { ok: true, copy: loadPublishCopy(paths.dataDir) });
     }
-    if (pathname === '/api/publish/localizations' && req.method === 'POST') {
-      const data = await readBody(req);
-      if (!data || typeof data !== 'object' || Array.isArray(data) || JSON.stringify(data).length > 3000000) return respond(400, {error:'多语言资料格式错误或超过大小限制。'});
-      fs.mkdirSync(paths.dataDir, {recursive:true});
-      const temp = localizationPath + '.' + process.pid + '.' + Date.now() + '.tmp';
-      fs.writeFileSync(temp, JSON.stringify(data, null, 2));
-      fs.renameSync(temp, localizationPath);
-      return respond(200, {ok:true});
-    }
-    if (pathname === '/api/publish/check-srt' && req.method === 'POST') {
+    if (pathname === '/api/publish/copy' && req.method === 'POST') {
       const body = await readBody(req);
-      const result = parseSrt(body.captions);
-      const duration = Number(body.duration);
-      if (duration > 0 && result.cues.some(c => c.end > duration * 1000 + 100)) result.warnings.push('有字幕超过成片时长');
-      return respond(200, {count:result.cues.length, warnings:result.warnings});
-    }
-    if (pathname === '/api/publish/localize' && req.method === 'POST') {
-      const body = await readBody(req);
-      const languages = {en:'英语', ja:'日语'};
-      if (!languages[body.language] || !['metadata','captions'].includes(body.kind)) return respond(400, {error:'不支持的语言或翻译类型。'});
-      let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8')); } catch {}
-      const options = { model: cfg.writerModel || cfg.textModel, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, maxTokens: 4500 };
-      const call = async (system, input) => {
-        const result = await callOpenRouterText(system, input, options);
-        if (!result) throw new Error(globalThis.__lastWriterLlmError || 'AI 生成失败，请检查模型配置。');
-        return JSON.parse(result.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, ''));
+      const lang = normalizePublishLang(body?.lang);
+      const copy = loadPublishCopy(paths.dataDir);
+      copy[lang] = {
+        title: typeof body?.title === 'string' ? body.title.slice(0, 100) : (copy[lang]?.title || ''),
+        description: typeof body?.description === 'string' ? body.description.slice(0, 20000) : (copy[lang]?.description || ''),
+        tags: typeof body?.tags === 'string' ? body.tags.slice(0, 2000) : (copy[lang]?.tags || ''),
+        coverKeywords: typeof body?.coverKeywords === 'string' ? body.coverKeywords.slice(0, 1000) : (copy[lang]?.coverKeywords || ''),
+        updatedAt: new Date().toISOString(),
       };
-      if (body.kind === 'metadata') {
-        if (!String(body.title || '').trim() || !String(body.description || '').trim()) return respond(400, {error:'请先填写原版标题和简介。'});
-        const data = await call(`将视频标题和简介本地化为${languages[body.language]}。标题自然准确，不编造事实；保留链接、已有时间戳及章节。只返回 JSON 对象，包含 title 和 description 字符串。`, JSON.stringify({title:body.title, description:body.description}));
-        if (typeof data.title !== 'string' || !data.title.trim() || typeof data.description !== 'string' || !data.description.trim()) throw new Error('AI 返回的标题或简介格式错误。');
-        return respond(200, {title:data.title.trim(), description:data.description.trim()});
+      savePublishCopy(paths.dataDir, copy);
+      return respond(200, { ok: true, lang, copy });
+    }
+    if (pathname === '/api/publish/translate-copy' && req.method === 'POST') {
+      const body = await readBody(req);
+      const targetLang = body?.targetLang === 'ja' ? 'ja' : (body?.targetLang === 'en' ? 'en' : '');
+      if (!targetLang) return respond(400, { error: '请选择目标语言（en 或 ja）。' });
+      const langName = targetLang === 'ja' ? '日语 (日本語)' : '英语 (English)';
+      const copy = loadPublishCopy(paths.dataDir);
+      const srcTitle = String(body?.title ?? copy.zh?.title ?? '').trim();
+      const srcDesc = String(body?.description ?? copy.zh?.description ?? '').trim();
+      const srcTags = String(body?.tags ?? copy.zh?.tags ?? '').trim();
+      const srcKeywords = String(body?.coverKeywords ?? copy.zh?.coverKeywords ?? '').trim();
+
+      let cfg = {};
+      try { cfg = JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8')); } catch {}
+      const llmOptions = { model: cfg.translateModel || cfg.textModel || cfg.writerModel, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, maxTokens: 2200 };
+
+      let systemPrompt = '';
+      let userInput = '';
+      if (srcTitle || srcDesc) {
+        systemPrompt = `你是一位资深多语言 YouTube 视频主编。请将以下中文 YouTube 视频发布资料（标题、简介、标签、封面关键词）地道地本土化翻译为${langName}。要求：1. 标题自然吸睛且准确，不超过 100 字符；2. 简介保留原有的结构、时间戳与链接；3. 标签符合${langName}观众搜索习惯（返回字符串数组或逗号分隔字符串）；4. 只返回 JSON 对象，包含 title、description、tags、coverKeywords 字段。`;
+        userInput = JSON.stringify({ title: srcTitle, description: srcDesc, tags: srcTags, coverKeywords: srcKeywords });
+      } else {
+        const scriptText = extractChineseSourceNarration(paths);
+        if (!scriptText) {
+          return respond(400, { error: '请先在中文界面填写标题和简介，或在文案创作台完成文案终稿。' });
+        }
+        systemPrompt = `你是一位资深多语言 YouTube 视频主编。请根据以下视频文案，直接使用${langName}撰写准确、吸引人的 YouTube 视频标题、简介、搜索标签和封面画面关键词。只返回 JSON 对象，包含 title（不超过 100 字符）、description、tags（字符串数组）和 coverKeywords（字符串）。`;
+        userInput = scriptText.slice(0, 60000);
       }
-      const parsed = parseSrt(body.captions);
-      const translated = [];
-      for (let i = 0; i < parsed.cues.length; i += 20) {
-        const batch = parsed.cues.slice(i, i + 20);
-        const data = await call(`将字幕正文翻译成${languages[body.language]}，结合上下文，保留专名、数字和语义。只返回 JSON 字符串数组，每个元素对应一条字幕，数量和顺序必须完全一致；不得添加说明或空字幕。`, JSON.stringify(batch.map(c => c.text)));
-        if (!Array.isArray(data) || data.length !== batch.length || data.some(x => typeof x !== 'string' || !x.trim() || /\n\s*\n/.test(x))) throw new Error(`第 ${i + 1} 段起的翻译结果格式不正确，请重试。`);
-        translated.push(...batch.map((c, j) => ({...c, text:data[j].trim()})));
+
+      const result = await callOpenRouterText(systemPrompt, userInput, llmOptions);
+      if (!result) return respond(502, { error: globalThis.__lastWriterLlmError || 'AI 翻译失败，请检查模型配置。' });
+      const cleaned = result.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+      const parsed = JSON.parse(cleaned);
+      if (typeof parsed?.title !== 'string' || !parsed.title.trim() || typeof parsed?.description !== 'string' || !parsed.description.trim()) {
+        throw new Error('AI 返回的翻译格式不正确，请重试。');
       }
-      return respond(200, {captions:renderSrt(translated)});
+      const tagsStr = Array.isArray(parsed.tags)
+        ? parsed.tags.map((t) => String(t || '').trim()).filter(Boolean).join(', ')
+        : String(parsed.tags || '').trim();
+      const translatedData = {
+        title: parsed.title.trim().slice(0, 100),
+        description: parsed.description.trim(),
+        tags: tagsStr,
+        coverKeywords: typeof parsed.coverKeywords === 'string' ? parsed.coverKeywords.trim() : srcKeywords,
+        updatedAt: new Date().toISOString(),
+      };
+      if (srcTitle || srcDesc || srcTags || srcKeywords) {
+        copy.zh = {
+          title: srcTitle || copy.zh?.title || '',
+          description: srcDesc || copy.zh?.description || '',
+          tags: srcTags || copy.zh?.tags || '',
+          coverKeywords: srcKeywords || copy.zh?.coverKeywords || '',
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      copy[targetLang] = translatedData;
+      savePublishCopy(paths.dataDir, copy);
+      return respond(200, { ok: true, targetLang, data: translatedData, copy });
+    }
+    if (pathname === '/api/publish/translate-script' && req.method === 'POST') {
+      const body = await readBody(req);
+      const targetLang = body?.targetLang === 'ja' ? 'ja' : (body?.targetLang === 'en' ? 'en' : '');
+      if (!targetLang) return respond(400, { error: '请选择目标语言（en 或 ja）。' });
+      const scriptText = await translateChineseNarration(paths, targetLang);
+      return respond(200, { ok: true, targetLang, scriptText });
+    }
+    if (pathname === '/api/publish/english-dub' && req.method === 'GET') {
+      const lang = normalizeDubLang(url?.searchParams?.get('lang'));
+      const key = dubJobKey(projectId, lang);
+      return respond(200, {
+        ok: true,
+        ...getEnglishDubArtifacts(projectId, paths, lang),
+        job: englishDubJobs.get(key) || null,
+        copy: loadPublishCopy(paths.dataDir),
+      });
+    }
+    if (pathname === '/api/publish/english-dub/status' && req.method === 'GET') {
+      const lang = normalizeDubLang(url?.searchParams?.get('lang'));
+      const key = dubJobKey(projectId, lang);
+      return respond(200, {
+        ok: true,
+        job: englishDubJobs.get(key) || null,
+        artifacts: getEnglishDubArtifacts(projectId, paths, lang),
+      });
+    }
+    if (pathname === '/api/publish/english-dub/generate' && req.method === 'POST') {
+      const body = await readBody(req);
+      const lang = normalizeDubLang(body?.lang || url?.searchParams?.get('lang'));
+      const langLabel = lang === 'ja' ? '日语' : '英语';
+      const key = dubJobKey(projectId, lang);
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      const autoTranslate = !text || Boolean(body.autoTranslate);
+      const engine = body.engine === 'elevenlabs' ? 'elevenlabs' : (body.engine === 'voicebox' || !body.engine ? 'voicebox' : '');
+      if (!engine) return respond(400, { error: '不支持的配音引擎，请选择 voicebox 或 elevenlabs。' });
+      const existing = englishDubJobs.get(key);
+      if (existing && ['preparing', 'translating', 'generating', 'transcribing'].includes(existing.status)) {
+        return respond(409, { error: `当前工程已有正在执行的${langLabel}配音任务，请等待完成或先取消。` });
+      }
+      const job = {
+        projectId,
+        lang,
+        engine,
+        status: autoTranslate ? 'translating' : 'preparing',
+        progressText: autoTranslate
+          ? `正在用大模型将中文终稿翻译为${langLabel}旁白稿…`
+          : `正在准备生成${langLabel}音频与同步字幕…`,
+        startedAt: new Date().toISOString(),
+        finishedAt: null,
+        error: null,
+        audioUrl: null,
+        audioFileName: null,
+        srtUrl: null,
+        srtFileName: null,
+        srtText: '',
+        durationSec: null,
+      };
+      englishDubJobs.set(key, job);
+      void runEnglishDubJob(job, {
+        lang,
+        text,
+        autoTranslate,
+        engine,
+        profileId: typeof body.profileId === 'string' ? body.profileId.trim() : '',
+        voiceId: typeof body.voiceId === 'string' ? body.voiceId.trim() : '',
+        modelId: typeof body.modelId === 'string' ? body.modelId.trim() : 'eleven_v4',
+        apiKey: typeof body.apiKey === 'string' ? body.apiKey.trim() : '',
+        paths,
+      });
+      return respond(200, { ok: true, job });
+    }
+    if (pathname === '/api/publish/english-dub/cancel' && req.method === 'POST') {
+      const body = await readBody(req).catch(() => ({}));
+      const lang = normalizeDubLang(body?.lang || url?.searchParams?.get('lang'));
+      const cancelled = cancelEnglishDubJob(projectId, lang);
+      return respond(200, { ok: true, cancelled });
+    }
+    if (pathname === '/api/publish/english-dub/save-srt' && req.method === 'POST') {
+      const body = await readBody(req);
+      const lang = normalizeDubLang(body?.lang || url?.searchParams?.get('lang'));
+      const srt = typeof body.srt === 'string' ? body.srt : '';
+      if (!srt.trim() || srt.length > 3000000) {
+        return respond(400, { error: '字幕内容为空或超过 3MB 限制。' });
+      }
+      fs.mkdirSync(paths.outputDir, { recursive: true });
+      const fileName = `${projectId}_${lang}.srt`;
+      const targetPath = path.join(paths.outputDir, fileName);
+      const tempPath = `${targetPath}.${process.pid}.${Date.now()}.tmp`;
+      fs.writeFileSync(tempPath, srt, 'utf8');
+      fs.renameSync(tempPath, targetPath);
+      return respond(200, {
+        ok: true,
+        lang,
+        fileName,
+        srtUrl: `/output/${encodeURIComponent(projectId)}/${encodeURIComponent(fileName)}?t=${Date.now()}`,
+      });
+    }
+    if (pathname === '/api/publish/video' && req.method === 'GET') {
+      const resolvedVideoPath = resolveProjectVideoPath(paths);
+      if (!resolvedVideoPath) return respond(200, { hasVideo: false, videoUrl: null, fileName: null });
+      const fileName = path.basename(resolvedVideoPath);
+      const stat = fs.statSync(resolvedVideoPath);
+      return respond(200, {
+        hasVideo: true,
+        videoUrl: '/output/' + encodeURIComponent(projectId) + '/' + encodeURIComponent(fileName) + '?t=' + Math.round(stat.mtimeMs),
+        fileName,
+      });
     }
     if (pathname === '/api/publish/cover'  && req.method === 'GET') {
-      const existing = findExistingCover(paths.publicDir);
+      const lang = normalizePublishLang(url?.searchParams?.get('lang'));
+      const existing = findExistingCover(paths.publicDir, lang);
       if (!existing) return respond(200, { coverUrl: null });
       return respond(200, {
         coverUrl: '/public/' + encodeURIComponent(projectId) + '/' + existing.fileName + '?t=' + Math.round(existing.mtimeMs),
         fileName: existing.fileName,
         mimeType: existing.mimeType,
+        isFallback: Boolean(existing.isFallback),
       });
     }
     if (pathname === '/api/publish/generate-cover' && req.method === 'POST') {
       const body = await readBody(req);
+      const lang = normalizePublishLang(body?.lang || url?.searchParams?.get('lang'));
+      const baseName = lang === 'zh' ? 'publish-cover' : `publish-cover.${lang}`;
       const keywords = typeof body.keywords === 'string' ? body.keywords.trim() : '';
       if (!keywords || keywords.length > 1000) {
         return respond(400, { error: '请输入封面关键词（1~1000 字符）。' });
@@ -238,14 +465,21 @@ export async function handlePublishRoutes(req, res, { url, pathname, paths, quer
       const titleHint = typeof body.title === 'string' && body.title.trim()
         ? `，视频主题参考：${body.title.trim().slice(0, 80)}`
         : '';
-      const coverPrompt = `YouTube 16:9 高点击率视频封面缩略图，核心关键词与画面元素：${keywords}${titleHint}，视觉主体突出、电影级戏剧光影、构图饱满清晰、高对比度、超清画质`;
+      const coverTpl = loadPublishPromptStore(promptPath).coverPrompt;
+      let coverPrompt = coverTpl
+        .replace(/\{keywords\}/g, keywords)
+        .replace(/\{titleHint\}/g, titleHint);
+      if (!coverTpl.includes('{keywords}')) {
+        coverPrompt = `${coverPrompt}，核心关键词与画面元素：${keywords}${titleHint}`;
+      }
+      const effectiveCoverModel = (normalizedCfg.publishCoverModel || normalizedCfg.imageModel || '').trim();
       const remoteImgUrl = await callGatewayImageGeneration(
-        { apiKey, baseUrl: normalizedCfg.baseUrl, imageModel: normalizedCfg.imageModel },
+        { apiKey, baseUrl: normalizedCfg.baseUrl, imageModel: effectiveCoverModel },
         coverPrompt
       );
       fs.mkdirSync(paths.publicDir, { recursive: true });
-      const tmpPath = path.join(paths.publicDir, `.publish-cover-${Date.now()}.tmp`);
-      let finalName = 'publish-cover.jpg';
+      const tmpPath = path.join(paths.publicDir, `.${baseName}-${Date.now()}.tmp`);
+      let finalName = `${baseName}.jpg`;
       let mimeType = 'image/jpeg';
       try {
         await downloadRemoteMedia(remoteImgUrl, tmpPath, apiKey);
@@ -253,7 +487,7 @@ export async function handlePublishRoutes(req, res, { url, pathname, paths, quer
         const isPng = buf.length >= 4 && buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47;
         const isJpg = buf.length >= 3 && buf[0] === 0xff && buf[1] === 0xd8 && buf[2] === 0xff;
         if ((isPng || isJpg) && buf.length <= YOUTUBE_MAX_COVER_BYTES) {
-          finalName = isPng ? 'publish-cover.png' : 'publish-cover.jpg';
+          finalName = isPng ? `${baseName}.png` : `${baseName}.jpg`;
           mimeType = isPng ? 'image/png' : 'image/jpeg';
           fs.renameSync(tmpPath, path.join(paths.publicDir, finalName));
         } else {
@@ -267,7 +501,7 @@ export async function handlePublishRoutes(req, res, { url, pathname, paths, quer
             throw new Error(`封面格式转换失败: ${(ff.stderr || ff.error?.message || '未知错误').slice(-200)}`);
           }
         }
-        const altName = finalName === 'publish-cover.png' ? 'publish-cover.jpg' : 'publish-cover.png';
+        const altName = finalName === `${baseName}.png` ? `${baseName}.jpg` : `${baseName}.png`;
         const altPath = path.join(paths.publicDir, altName);
         if (fs.existsSync(altPath)) fs.unlinkSync(altPath);
       } finally {
@@ -277,32 +511,117 @@ export async function handlePublishRoutes(req, res, { url, pathname, paths, quer
       }
       return respond(200, {
         ok: true,
+        lang,
         coverUrl: '/public/' + encodeURIComponent(projectId) + '/' + finalName + '?t=' + Date.now(),
         fileName: finalName,
         mimeType,
-        model: normalizedCfg.imageModel,
+        model: effectiveCoverModel,
+      });
+    }
+    if (pathname === '/api/publish/ai-settings' && req.method === 'GET') {
+      let rawCfg = {};
+      try { rawCfg = JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8')); } catch {}
+      const normalizedCfg = normalizePromptConfig(rawCfg);
+      const store = loadPublishPromptStore(promptPath);
+      return respond(200, {
+        ok: true,
+        translateModel: rawCfg.translateModel || '',
+        coverModel: rawCfg.publishCoverModel || '',
+        fallbackTranslateModel: normalizedCfg.translateModel,
+        fallbackCoverModel: normalizedCfg.imageModel,
+        prompt: store.prompt,
+        defaultPrompt: DEFAULT_PROMPT,
+        coverPrompt: store.coverPrompt,
+        defaultCoverPrompt: DEFAULT_COVER_PROMPT,
+      });
+    }
+    if (pathname === '/api/publish/ai-settings' && req.method === 'POST') {
+      const body = await readBody(req);
+      let rawCfg = {};
+      try { rawCfg = JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8')); } catch {}
+      if (body.reset === true) {
+        if (fs.existsSync(promptPath)) fs.unlinkSync(promptPath);
+        const normalizedCfg = normalizePromptConfig(rawCfg);
+        return respond(200, {
+          ok: true,
+          translateModel: rawCfg.translateModel || '',
+          coverModel: rawCfg.publishCoverModel || '',
+          fallbackTranslateModel: normalizedCfg.translateModel,
+          fallbackCoverModel: normalizedCfg.imageModel,
+          prompt: DEFAULT_PROMPT,
+          coverPrompt: DEFAULT_COVER_PROMPT,
+        });
+      }
+      const nextPrompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
+      const nextCoverPrompt = typeof body.coverPrompt === 'string' ? body.coverPrompt.trim() : '';
+      if (!nextPrompt || nextPrompt.length > 12000) {
+        return respond(400, { error: '发布资料提示词不能为空，且不能超过 12000 个字符。' });
+      }
+      if (!nextCoverPrompt || nextCoverPrompt.length > 4000) {
+        return respond(400, { error: '封面生图提示词模板不能为空，且不能超过 4000 个字符。' });
+      }
+      savePublishPromptStore(promptPath, { prompt: nextPrompt, coverPrompt: nextCoverPrompt });
+      if (typeof body.translateModel === 'string' || typeof body.coverModel === 'string') {
+        const updatedCfg = {
+          ...rawCfg,
+          translateModel: typeof body.translateModel === 'string' ? body.translateModel.trim() : (rawCfg.translateModel || ''),
+          publishCoverModel: typeof body.coverModel === 'string' ? body.coverModel.trim() : (rawCfg.publishCoverModel || ''),
+          updated_at: new Date().toISOString(),
+        };
+        if (!updatedCfg.translateModel) delete updatedCfg.translateModel;
+        fs.mkdirSync(paths.dataDir, { recursive: true });
+        fs.writeFileSync(paths.promptConfigPath, JSON.stringify(updatedCfg, null, 2), 'utf8');
+        rawCfg = updatedCfg;
+      }
+      const normalizedCfg = normalizePromptConfig(rawCfg);
+      return respond(200, {
+        ok: true,
+        translateModel: rawCfg.translateModel || '',
+        coverModel: rawCfg.publishCoverModel || '',
+        fallbackTranslateModel: normalizedCfg.translateModel,
+        fallbackCoverModel: normalizedCfg.imageModel,
+        prompt: nextPrompt,
+        coverPrompt: nextCoverPrompt,
       });
     }
     if (pathname === '/api/publish/prompt' && req.method === 'GET') return respond(200, {prompt: getPrompt(), defaultPrompt: DEFAULT_PROMPT});
     if (pathname === '/api/publish/prompt' && req.method === 'POST') {
       const body = await readBody(req);
+      const prev = loadPublishPromptStore(promptPath);
       if (body.reset === true) { if (fs.existsSync(promptPath)) fs.unlinkSync(promptPath); return respond(200, {prompt: DEFAULT_PROMPT}); }
       if (typeof body.prompt !== 'string' || !body.prompt.trim() || body.prompt.length > 12000) return respond(400, {error:'提示词不能为空，且不能超过 12000 个字符。'});
-      fs.mkdirSync(paths.dataDir, {recursive:true}); fs.writeFileSync(promptPath, JSON.stringify({prompt:body.prompt.trim()}, null, 2));
+      savePublishPromptStore(promptPath, { ...prev, prompt: body.prompt.trim() });
       return respond(200, {prompt:body.prompt.trim()});
     }
     if (pathname !== '/api/publish/generate' || req.method !== 'POST') return false;
+    const genBody = await readBody(req).catch(() => ({}));
+    const genLang = normalizePublishLang(genBody?.lang || url?.searchParams?.get('lang'));
     if (!fs.existsSync(paths.finalScriptPath)) return respond(400, { error: '当前工程没有文案终稿，请先在文案创作台完成定稿。' });
     const script = fs.readFileSync(paths.finalScriptPath, 'utf8');
     if (!script.trim() || script.trim() === '{}' || script.trim() === '[]') return respond(400, { error: '当前工程的文案终稿为空。' });
     let cfg = {};
     try { cfg = JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8')); } catch {}
-    const instruction = getPrompt() + '\n\n输出格式要求：只返回 JSON 对象，包含 title（标题字符串，不超过100字符）、description（简介字符串）和 tags（搜索标签字符串数组），标签总长度不超过400字符。';
-    const result = await callOpenRouterText(instruction, script.slice(0, 100000), { model: cfg.writerModel || cfg.textModel, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, maxTokens: 2000 });
+    const langConstraint = genLang === 'en'
+      ? '\n\n目标语言要求：所有输出内容（title、description、tags）必须使用地道的英语 (English) 撰写。'
+      : (genLang === 'ja' ? '\n\n目标语言要求：所有输出内容（title、description、tags）必须使用地道的日语 (日本語) 撰写。' : '');
+    const instruction = getPrompt() + langConstraint + '\n\n输出格式要求：只返回 JSON 对象，包含 title（标题字符串，不超过100字符）、description（简介字符串）和 tags（搜索标签字符串数组），标签总长度不超过400字符。';
+    const result = await callOpenRouterText(instruction, script.slice(0, 100000), { model: cfg.translateModel || cfg.textModel || cfg.writerModel, apiKey: cfg.apiKey, baseUrl: cfg.baseUrl, maxTokens: 2000 });
     if (!result) return respond(502, { error: globalThis.__lastWriterLlmError || 'AI 生成失败，请检查模型配置。' });
     const cleaned = result.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
     const data = JSON.parse(cleaned);
     if (typeof data.title !== 'string' || typeof data.description !== 'string' || !data.title.trim() || !data.description.trim() || !Array.isArray(data.tags) || !data.tags.every(tag => typeof tag === 'string')) throw new Error('AI 返回的标题、简介或标签格式不正确，请重试。');
-    return respond(200, { title: data.title.trim().slice(0, 100), description: data.description.trim(), tags: data.tags.map(t => t.trim()).filter(Boolean) });
+    const cleanTitle = data.title.trim().slice(0, 100);
+    const cleanDesc = data.description.trim();
+    const cleanTags = data.tags.map(t => t.trim()).filter(Boolean);
+    const copy = loadPublishCopy(paths.dataDir);
+    copy[genLang] = {
+      ...(copy[genLang] || {}),
+      title: cleanTitle,
+      description: cleanDesc,
+      tags: cleanTags.join(', '),
+      updatedAt: new Date().toISOString(),
+    };
+    savePublishCopy(paths.dataDir, copy);
+    return respond(200, { title: cleanTitle, description: cleanDesc, tags: cleanTags, lang: genLang });
   } catch (err) { return respond(500, { error: '操作失败：' + err.message }); }
 }

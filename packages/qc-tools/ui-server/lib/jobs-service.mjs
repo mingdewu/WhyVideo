@@ -30,10 +30,12 @@ export async function runProjectRenderJob(job) {
       fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
     }
     syncCaptions(manifest, curPaths.captionsPath, job.projectId);
+    const genPropsArgs = [
+      'packages/qc-tools/generate-render-props.mjs', '--project', job.projectId,
+      job.burnCaptions ? '--burn-captions' : '--no-burn-captions',
+    ];
     await new Promise((resolve, reject) => {
-      const child = spawn(process.execPath, [
-        'packages/qc-tools/generate-render-props.mjs', '--project', job.projectId,
-      ], { cwd: rootDir, stdio: ['ignore', 'pipe', 'pipe'] });
+      const child = spawn(process.execPath, genPropsArgs, { cwd: rootDir, stdio: ['ignore', 'pipe', 'pipe'] });
       child.stdout.on('data', (chunk) => appendLog(chunk.toString()));
       child.stderr.on('data', (chunk) => appendLog(chunk.toString()));
       child.on('error', reject);
