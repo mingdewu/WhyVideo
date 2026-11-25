@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { rootDir } from './config.mjs';
+import { sharedRuntimeConfig } from './shared-services.mjs';
 import { renderWriterPrompt } from '../../writer-prompts.mjs';
 
 export function extractJsonFromText(text) {
@@ -68,6 +69,7 @@ function normalizeSecretKey(value) {
 }
 
 export function getWriterTavilyKey(projectDir, explicitKey = '', { projectsRoot } = {}) {
+  if (sharedRuntimeConfig()) return normalizeSecretKey(sharedRuntimeConfig().tavilyApiKey);
   const direct = normalizeSecretKey(explicitKey);
   if (direct) return direct;
 
@@ -109,6 +111,7 @@ export function getWriterTavilyKey(projectDir, explicitKey = '', { projectsRoot 
 }
 
 export function getMeowloadApiKey(projectDir, explicitKey = '') {
+  if (sharedRuntimeConfig()) return normalizeSecretKey(sharedRuntimeConfig().meowloadApiKey);
   if (explicitKey && String(explicitKey).trim()) return String(explicitKey).trim();
   if (projectDir) {
     const configPath = path.join(projectDir, 'data', 'prompt-config.json');
@@ -192,6 +195,11 @@ export async function researchFactMaterials(title, { model, apiKey, baseUrl, pro
 }
 
 export async function callOpenRouterText(systemPrompt, userPrompt, { model, apiKey, baseUrl, maxTokens = 3500 } = {}) {
+  if (sharedRuntimeConfig()) {
+    apiKey = sharedRuntimeConfig().apiKey || '';
+    baseUrl = sharedRuntimeConfig().baseUrl || 'https://openrouter.ai/api/v1';
+    if (!apiKey) return null;
+  }
   let curApiKey = (apiKey || process.env.OPENROUTER_API_KEY || '').trim();
   let curBase = (baseUrl || 'https://openrouter.ai/api/v1').trim().replace(/\/+$/, '');
   let curModel = (model || 'deepseek/deepseek-chat').trim();

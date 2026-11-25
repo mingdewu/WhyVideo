@@ -61,8 +61,8 @@ test('download validation returns HTTP-neutral results and progress without invo
   const result = await downloadUrlAsset({ projectId: project, url: 'just some text', jobId: 'test-invalid' }, project);
   assert.equal(result.status, 400);
   assert.equal(result.body.ok, false);
-  assert.equal(getDownloadProgress('test-invalid').done, true);
-  assert.equal(getDownloadProgress('test-invalid').percent, 0);
+  assert.equal(getDownloadProgress('test-invalid', project).done, true);
+  assert.equal(getDownloadProgress('test-invalid', project).percent, 0);
 });
 
 test('generated and downloaded asset registration preserves existing records', () => {
@@ -122,6 +122,14 @@ test('all frontend scripts initialize in page order and inline buttons retain th
 });
 
 test('HTTP entry serves assembled panels, every script and download validation', { timeout: 15000 }, async () => {
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), 'whyvideo-http-auth-'));
+  const projectDir = fs.mkdtempSync(path.join(ROOT_DIR, 'projects', 'test_http_'));
+  const projectId = path.basename(projectDir);
+  const { openAccountStore } = await import('../packages/qc-tools/ui-server/lib/account-store.mjs');
+  const store = openAccountStore(authDir);
+  const user = await store.createUser('test-user', 'test-password-12345');
+  store.assignProject(projectId, user.id);
+  const cookie = 'whyvideo_session=' + store.createSession(user.id);
   const { createServer } = await import('node:net');
   const { spawn } = await import('node:child_process');
   const { once } = await import('node:events');
@@ -131,7 +139,7 @@ test('HTTP entry serves assembled panels, every script and download validation',
   const port = reservation.address().port;
   await new Promise(resolve => reservation.close(resolve));
   const child = spawn(process.execPath, ['packages/qc-tools/ui-server.mjs'], {
-    cwd: ROOT_DIR, env: { ...process.env, PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: ROOT_DIR, env: { ...process.env, PORT: String(port), WHYVIDEO_AUTH_DIR: authDir, PROJECT_ID: projectId }, stdio: ['ignore', 'pipe', 'pipe'],
   });
   const exit = once(child, 'exit');
   try {
@@ -142,7 +150,7 @@ test('HTTP entry serves assembled panels, every script and download validation',
       child.once('exit', code => { clearTimeout(timeout); reject(Error(`HTTP exited: ${code}`)); });
     });
     const base = `http://127.0.0.1:${port}`;
-    const response = await fetch(base + '/?tab=writer');
+    const response = await fetch(base + '/?tab=writer', { headers: { cookie } });
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.ok(!html.includes('<!--PARTIAL:'));
@@ -150,20 +158,26 @@ test('HTTP entry serves assembled panels, every script and download validation',
     assert.ok(html.includes('id="viewProducerContainer"') && html.includes('id="viewWriterContainer"'));
     for (const [, script] of html.matchAll(/<script src="([^"]+)"><\/script>/g)) {
       if (!script.startsWith('/studio/')) continue;
-      const response = await fetch(base + script);
+      const response = await fetch(base + script, { headers: { cookie } });
       assert.equal(response.status, 200, script);
       assert.match(response.headers.get('content-type'), /javascript/);
     }
-    assert.equal((await fetch(base + '/api/projects')).status, 200);
+    assert.equal((await fetch(base + '/api/projects', { headers: { cookie } })).status, 200);
+    const tab = 'testtab12345678901234567890123456';
+    const lease = await fetch(base + '/api/edit/acquire?project=' + projectId, { method: 'POST', headers: { cookie, origin: base, 'X-Edit-Token': tab } });
+    const { revision } = await lease.json();
     const invalid = await fetch(base + '/api/download-url-asset', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ projectId: listProjectIds()[0] || 'why_preview', url: 'invalid text' }),
+      method: 'POST', headers: { 'Content-Type': 'application/json', cookie, origin: base, 'X-Edit-Token': tab, 'X-Project-Revision': revision },
+      body: JSON.stringify({ projectId, url: 'invalid text' }),
     });
     assert.equal(invalid.status, 400);
     assert.equal((await invalid.json()).ok, false);
   } finally {
     child.kill('SIGTERM');
     await exit;
+    store.close();
+    fs.rmSync(authDir, { recursive: true, force: true });
+    fs.rmSync(projectDir, { recursive: true, force: true });
   }
 });
 
@@ -203,6 +217,7 @@ test('burned-in CaptionLayer is removed and publish-studio SRT upload avoids sta
     showToast: (msg) => toasts.push(msg),
     fetch: (url, opts) => {
       fetchCalls.push({ url, opts });
+      if (url.startsWith('/api/') && !url.includes('/api/publish/cover')) return Promise.resolve({ ok: true, json: async () => ({}) });
       if (url.includes('/api/publish/cover')) {
         return Promise.resolve({ ok: true, json: async () => ({ coverUrl: null }) });
       }

@@ -2,6 +2,8 @@
       try {
         bindModelPrefAutoSave();
         restoreModelPrefsFromLocal();
+        const shared = await loadSharedServices();
+        visualConfig = { ...visualConfig, ...shared, apiKey: shared.apiKeyConfigured ? '••••••••' : '' };
         loadOpenRouterModels();
         loadOpenRouterVideoModels();
         loadOpenRouterImageModels();
@@ -33,7 +35,7 @@
           }
 
           visualConfig = {
-            apiKey: cfg.apiKey || '',
+            apiKey: cfg.apiKeyConfigured ? '••••••••' : (cfg.apiKey || ''),
             baseUrl: cfg.baseUrl || 'https://openrouter.ai/api/v1',
             writerModel: cfg.writerModel || 'deepseek/deepseek-chat',
             videoModel: rawVideoModel,

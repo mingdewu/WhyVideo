@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import { randomUUID } from 'node:crypto';
 import { generateAiBgmPlan } from '../../bgm-ai.mjs';
-const bgmAiJobs = new Map();
 import {
   getPaths,
   readBody,
@@ -10,12 +9,13 @@ import {
   renderJobs,
   voiceJobs,
   voiceJobControllers,
+  bgmAiJobs,
 } from '../lib/config.mjs';
 import { recompileProject } from '../lib/project-store.mjs';
 import { callOpenRouterText } from '../lib/llm-gateway.mjs';
 import { runProjectRenderJob, runVoiceboxJob, runElevenlabsFullJob } from '../lib/jobs-service.mjs';
 import { projectRenderPaths } from '../../render-project.mjs';
-import { SHARED_BGM_DIR } from '../../project-paths.mjs';
+import { getSharedBgmDirectory } from '../../project-paths.mjs';
 import { getVoiceboxProfiles } from '../../synthesize-voicebox.mjs';
 import { buildElevenlabsTtsPayload } from '../../synthesize-elevenlabs.mjs';
 import { probeDurationMs, scenesText } from '../../narration-timing.mjs';
@@ -89,10 +89,10 @@ const loadBgmProjectContext = (targetProj) => {
 const buildBgmApiResponse = (targetProj, configOverride = null, extra = {}) => {
   const { curPaths, manifest, normalizedCfg, scenes, totalDurationMs } = loadBgmProjectContext(targetProj);
   const config = configOverride || loadBgmConfig(curPaths.projectDir, curPaths.publicDir);
-  const analysisCache = loadBgmAnalysisCache(curPaths.projectDir, SHARED_BGM_DIR);
+  const analysisCache = loadBgmAnalysisCache(curPaths.projectDir, getSharedBgmDirectory());
   const tracksWithUrl = (config.tracks || []).map((tr) => {
     let mtimeMs;
-    const diskPath = resolveBgmTrackDiskPath(curPaths.publicDir, tr.src, SHARED_BGM_DIR);
+    const diskPath = resolveBgmTrackDiskPath(curPaths.publicDir, tr.src, getSharedBgmDirectory());
     if (diskPath) {
       try { mtimeMs = fs.statSync(diskPath).mtimeMs; } catch {}
     }
@@ -139,6 +139,10 @@ const buildBgmApiResponse = (targetProj, configOverride = null, extra = {}) => {
 
 export async function handleAudioRenderRoutes(req, res, { pathname, queryProject }) {
   if (req.method === 'GET' && pathname === '/api/render-status') {
+    if (req.user && !req.accountStore.canReadProject(req.user, queryProject)) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '无权访问此工程' }));
+    }
     projectRenderPaths(queryProject);
     const job = renderJobs.get(queryProject) || { projectId: queryProject, status: 'idle' };
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -148,6 +152,10 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
   if (req.method === 'POST' && pathname === '/api/render-project') {
     const body = await readBody(req);
     const projectId = body.projectId || queryProject;
+    if (req.user && !req.accountStore.canWriteProject(req.user, projectId)) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '无权修改此工程' }));
+    }
     projectRenderPaths(projectId);
     const existing = renderJobs.get(projectId);
     const activeVoice = voiceJobs.get(projectId);
@@ -158,6 +166,10 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
     if (existing && ['preparing', 'rendering'].includes(existing.status)) {
       res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: '这个工程已有渲染任务在运行', job: existing }));
+    }
+    if ([...renderJobs.values()].some(job => ['preparing', 'rendering'].includes(job.status))) {
+      res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '服务器正在渲染其他视频，请稍后重试' }));
     }
     const job = {
       projectId,
@@ -470,15 +482,15 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
     }
 
     const baseStem = path.basename(rawName, ext).replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 48) || 'track';
-    fs.mkdirSync(SHARED_BGM_DIR, { recursive: true });
-    const existingFile = findDuplicateSharedBgmFile(SHARED_BGM_DIR, buffer);
+    fs.mkdirSync(getSharedBgmDirectory(), { recursive: true });
+    const existingFile = findDuplicateSharedBgmFile(getSharedBgmDirectory(), buffer);
     const safeFile = existingFile || `bgm_${Date.now()}_${baseStem}${ext}`;
-    const sharedDiskPath = path.join(SHARED_BGM_DIR, safeFile);
+    const sharedDiskPath = path.join(getSharedBgmDirectory(), safeFile);
     if (!existingFile) {
       fs.writeFileSync(sharedDiskPath, buffer);
     }
     const relSrc = `${BGM_PUBLIC_SUBDIR}/${safeFile}`;
-    ensureProjectBgmFile(curPaths.publicDir, relSrc, SHARED_BGM_DIR);
+    ensureProjectBgmFile(curPaths.publicDir, relSrc, getSharedBgmDirectory());
 
     const durationMs = probeDurationMs(sharedDiskPath);
     const config = loadBgmConfig(curPaths.projectDir, curPaths.publicDir);
@@ -539,8 +551,8 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
     }
 
     const target = config.tracks[idx];
-    deleteBgmTrackAnalysis(target, curPaths.projectDir, SHARED_BGM_DIR);
-    const sharedRoot = path.resolve(SHARED_BGM_DIR);
+    deleteBgmTrackAnalysis(target, curPaths.projectDir, getSharedBgmDirectory());
+    const sharedRoot = path.resolve(getSharedBgmDirectory());
     const fileName = path.basename(target.src || '');
     if (fileName) {
       const sharedFile = path.resolve(sharedRoot, fileName);
@@ -591,7 +603,7 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
       res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: '未找到指定 BGM 音轨' }));
     }
-    deleteBgmTrackAnalysis(target, curPaths.projectDir, SHARED_BGM_DIR);
+    deleteBgmTrackAnalysis(target, curPaths.projectDir, getSharedBgmDirectory());
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify(buildBgmApiResponse(targetProj, config, { clearedTrackId: trackId })));
   }
@@ -619,7 +631,7 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
     const apiKey = String(body.apiKey || normalizedCfg.apiKey || process.env.OPENROUTER_API_KEY || '').trim();
     void (async () => {
       try {
-        const ai = await generateAiBgmPlan({projectDir:curPaths.projectDir, publicDir:curPaths.publicDir,config,manifest,model,baseUrl,apiKey,sharedBgmDir:SHARED_BGM_DIR,onProgress:p=>{job.progress=p;}});
+        const ai = await generateAiBgmPlan({projectDir:curPaths.projectDir, publicDir:curPaths.publicDir,config,manifest,model,baseUrl,apiKey,sharedBgmDir:getSharedBgmDirectory(),onProgress:p=>{job.progress=p;}});
         const latest = loadBgmConfig(curPaths.projectDir,curPaths.publicDir);
         if (ai.track_order.some(id => !latest.tracks.some(t => t.track_id === id))) throw new Error('分析期间曲库发生变化，请重新生成配乐。');
         latest.ai_plan=ai;

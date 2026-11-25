@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { ROOT_DIR, defaultProjectId as selectDefaultProject, getProjectPaths } from '../../project-paths.mjs';
+import { sharedRuntimeConfig } from './shared-services.mjs';
 
 export const rootDir = ROOT_DIR;
 
@@ -8,6 +9,7 @@ export const renderJobs = new Map();
 export const voiceJobs = new Map();
 export const voiceJobControllers = new Map();
 export const alignJobs = new Map();
+export const bgmAiJobs = new Map();
 
 // 优先读取 .env
 
@@ -55,6 +57,8 @@ export const MIME_TYPES = {
 export const getPaths = getProjectPaths;
 
 export function normalizePromptConfig(cfg = {}) {
+  const shared = sharedRuntimeConfig();
+  if (shared) cfg = { ...cfg, ...Object.fromEntries(Object.entries(shared).filter(([, value]) => value !== '' && value != null)) };
   let vModel = cfg.videoModel || 'minimax/hailuo-3-max';
   if (vModel === 'minimax/video-01' || vModel === 'minimax/hailuo' || vModel === 'video-01') {
     vModel = 'minimax/hailuo-3-max';
@@ -81,13 +85,26 @@ export function normalizePromptConfig(cfg = {}) {
 
 
 export function readBody(req) {
+  if (req.bodyJson !== undefined) return Promise.resolve(req.bodyJson);
   return new Promise((resolve, reject) => {
     const chunks = [];
-    req.on('data', (c) => chunks.push(c));
+    let length = 0;
+    let exceeded = false;
+    req.on('data', (c) => {
+      length += c.length;
+      if (length > 256 * 1024 * 1024) { exceeded = true; chunks.length = 0; }
+      if (!exceeded) chunks.push(c);
+    });
     req.on('end', () => {
       try {
+        if (exceeded) throw new Error('请求内容过大');
         const str = Buffer.concat(chunks).toString('utf8');
-        resolve(str ? JSON.parse(str) : {});
+        const body = str ? JSON.parse(str) : {};
+        if (req.trustedWriterConfig && body && typeof body === 'object' && !Array.isArray(body)) {
+          body.apiKey = req.trustedWriterConfig.apiKey;
+          body.baseUrl = req.trustedWriterConfig.baseUrl;
+        }
+        resolve(body);
       } catch (e) {
         reject(e);
       }

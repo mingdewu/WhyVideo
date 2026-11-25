@@ -7,8 +7,8 @@ import { parseTimeRangeFromText, formatSecToMMSS, formatSecToFileTag } from './s
 import { syncLocalProjectAssets, registerProjectAsset } from './media-gateway.mjs';
 
 const downloadProgressMap = new Map();
-export function getDownloadProgress(jobId) {
- return downloadProgressMap.get(jobId) || { percent: 0, text: '准备中...', done: false, error: null };
+export function getDownloadProgress(jobId, projectId = '') {
+ return downloadProgressMap.get(`${projectId}:${jobId}`) || { percent: 0, text: '准备中...', done: false, error: null };
 }
 
 export async function downloadUrlAsset(body, queryProject) {
@@ -18,7 +18,7 @@ export async function downloadUrlAsset(body, queryProject) {
     const curPaths = getPaths(targetProject);
     const updateDlProgress = (percent, text, extra = {}) => {
       if (!jobId) return;
-      downloadProgressMap.set(String(jobId), {
+      downloadProgressMap.set(`${targetProject}:${jobId}`, {
         percent: Math.max(0, Math.min(100, Math.round(percent))),
         text: text || '',
         done: Boolean(extra.done),

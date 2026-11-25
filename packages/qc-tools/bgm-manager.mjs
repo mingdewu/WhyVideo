@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { probeDurationMs } from './narration-timing.mjs';
-import { SHARED_BGM_DIR } from './project-paths.mjs';
+import { getSharedBgmDirectory } from './project-paths.mjs';
 
 export const BGM_CONFIG_FILENAME = 'bgm-config.json';
 export const BGM_ANALYSIS_FILENAME = '.bgm-audio-analysis.json';
@@ -175,13 +175,13 @@ export function findTrackAnalysisInCache(cache, { fileName = '', src = '', size 
   return null;
 }
 
-export function loadBgmAnalysisCache(projectDir, sharedBgmDir = SHARED_BGM_DIR) {
+export function loadBgmAnalysisCache(projectDir, sharedBgmDir = getSharedBgmDirectory()) {
   const projCache = projectDir ? readJsonObject(path.join(projectDir, 'data', 'bgm-audio-analysis.json')) : {};
   const sharedCache = sharedBgmDir ? readJsonObject(path.join(path.resolve(sharedBgmDir), BGM_ANALYSIS_FILENAME)) : {};
   return { ...projCache, ...sharedCache };
 }
 
-export function saveBgmAnalysisCache(cache, projectDir, sharedBgmDir = SHARED_BGM_DIR) {
+export function saveBgmAnalysisCache(cache, projectDir, sharedBgmDir = getSharedBgmDirectory()) {
   const targetPath = sharedBgmDir
     ? path.join(path.resolve(sharedBgmDir), BGM_ANALYSIS_FILENAME)
     : path.join(projectDir, 'data', 'bgm-audio-analysis.json');
@@ -189,7 +189,7 @@ export function saveBgmAnalysisCache(cache, projectDir, sharedBgmDir = SHARED_BG
   return targetPath;
 }
 
-export function deleteBgmTrackAnalysis(track, projectDir, sharedBgmDir = SHARED_BGM_DIR) {
+export function deleteBgmTrackAnalysis(track, projectDir, sharedBgmDir = getSharedBgmDirectory()) {
   if (!track) return false;
   const fileName = path.basename(String(track.file_name || track.src || ''));
   const relSrc = track.src || (fileName ? `${BGM_PUBLIC_SUBDIR}/${fileName}` : '');
@@ -250,7 +250,7 @@ export function deleteBgmTrackAnalysis(track, projectDir, sharedBgmDir = SHARED_
  * Resolve a BGM track relative src (e.g. `audio/bgm/foo.mp3`) to an existing
  * file on disk, checking the project's public BGM dir first and then `sharedBgmDir`.
  */
-export function resolveBgmTrackDiskPath(publicDir, relSrc, sharedBgmDir = SHARED_BGM_DIR) {
+export function resolveBgmTrackDiskPath(publicDir, relSrc, sharedBgmDir = getSharedBgmDirectory()) {
   if (!relSrc || typeof relSrc !== 'string') return null;
 
   if (publicDir) {
@@ -279,7 +279,7 @@ export function resolveBgmTrackDiskPath(publicDir, relSrc, sharedBgmDir = SHARED
  * Ensure a BGM track exists inside `publicDir/audio/bgm/` for Remotion staticFile().
  * Hardlinks (falling back to copying) from `sharedBgmDir` when needed.
  */
-export function ensureProjectBgmFile(publicDir, relSrc, sharedBgmDir = SHARED_BGM_DIR) {
+export function ensureProjectBgmFile(publicDir, relSrc, sharedBgmDir = getSharedBgmDirectory()) {
   if (!publicDir || !relSrc || typeof relSrc !== 'string') return null;
   const bgmDir = path.resolve(getBgmPublicDir(publicDir));
   const dest = path.resolve(publicDir, relSrc);
@@ -332,7 +332,7 @@ export function findDuplicateSharedBgmFile(sharedBgmDir, buffer) {
  * One-time migration of legacy per-project BGM tracks and audio analysis caches
  * into the shared BGM library directory, plus promotion of legacy hash keys.
  */
-export function syncExistingProjectsToSharedBgm(projectsRoot, sharedBgmDir = SHARED_BGM_DIR) {
+export function syncExistingProjectsToSharedBgm(projectsRoot, sharedBgmDir = getSharedBgmDirectory()) {
   if (!projectsRoot || !sharedBgmDir || !fs.existsSync(projectsRoot)) {
     return { linkedFiles: 0, mergedAnalyses: 0 };
   }
@@ -476,7 +476,7 @@ function registerTracksFromDir(dirPath, scope, seenSrc, syncedTracks, existingBy
   }
 }
 
-export function loadBgmConfig(projectDir, publicDir, { sharedBgmDir = SHARED_BGM_DIR } = {}) {
+export function loadBgmConfig(projectDir, publicDir, { sharedBgmDir = getSharedBgmDirectory() } = {}) {
   const defaults = defaultBgmConfig();
   const cfgPath = getBgmConfigPath(projectDir);
   let raw = {};
@@ -819,7 +819,7 @@ export function buildBgmPlaylist(tracks, segments, totalMs, fps = 30, aiOrder = 
   return result;
 }
 
-export function compileBgmRenderProp(projectDir, publicDir, manifest = {}, captions = [], fps = 30, { sharedBgmDir = SHARED_BGM_DIR } = {}) {
+export function compileBgmRenderProp(projectDir, publicDir, manifest = {}, captions = [], fps = 30, { sharedBgmDir = getSharedBgmDirectory() } = {}) {
   const config = loadBgmConfig(projectDir, publicDir, { sharedBgmDir });
   if (!config.enabled || !config.selected_track_id) return null;
 

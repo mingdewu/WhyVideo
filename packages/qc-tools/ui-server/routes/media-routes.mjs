@@ -21,6 +21,12 @@ import { getVoiceSttCapabilities, transcribeAudioBuffer } from '../lib/voice-stt
 const ALLOWED_SOURCE_MODES = new Set(['manual_upload', 'ai_ppt_slide', 'ai_generated_image', 'ai_generated_video']);
 
 export async function handleMediaRoutes(req, res, { url, pathname, queryProject }) {
+  function canEditProject(projectId) {
+    if (!req.user || req.accountStore.canWriteProject(req.user, projectId)) return true;
+    res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ error: '无权修改此工程' }));
+    return false;
+  }
   // 4.5 智能分镜与指示词提炼 API (调用 OpenRouter 统一网关指定的模型)
   if (req.method === 'POST' && pathname === '/api/extract-prompt') {
     const body = await readBody(req);
@@ -383,8 +389,16 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
     const body = await readBody(req);
     const { sceneId, fileName, fileType, dataUrl, projectId } = body;
     const targetProject = projectId || queryProject;
+    if (req.user && !req.accountStore.canWriteProject(req.user, targetProject)) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: '无权修改此工程' }));
+    }
     const curPaths = getPaths(targetProject);
 
+    if (typeof sceneId !== 'string' || !sceneId || typeof fileName !== 'string' || !fileName || typeof dataUrl !== 'string') {
+      res.writeHead(400, { 'Content-Type': 'application/json' });
+      return res.end(JSON.stringify({ error: '缺少素材信息' }));
+    }
     const matches = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
     if (!matches) {
       res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -394,7 +408,8 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
     const buffer = Buffer.from(matches[2], 'base64');
     const isVideo = (fileType && fileType.startsWith('video/')) || /\.(mp4|mov|webm)$/i.test(fileName);
     const folder = isVideo ? 'assets/video' : 'assets/images';
-    const safeFile = `${sceneId.toLowerCase()}_${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+    const safeScene = sceneId.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const safeFile = `${safeScene}_${Date.now()}_${fileName.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
     const relPath = `${folder}/${safeFile}`;
     const diskPath = path.join(curPaths.publicDir, relPath);
 
@@ -463,14 +478,20 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
 
   if (req.method === 'GET' && pathname === '/api/download-progress') {
     const jobId = String(url.searchParams.get('jobId') || '').trim();
-    const job = getDownloadProgress(jobId);
+    if (req.user && !req.accountStore.canReadProject(req.user, queryProject)) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: '无权访问此工程' }));
+    }
+    const job = getDownloadProgress(jobId, queryProject);
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ ok: true, ...job }));
   }
 
   // 6.5 仅通过本机哼哼猫桌面端 (meowload CLI) 解析网络链接并按指定片段下载视频/图片素材到当前工程专属 assets 目录（绝不调用远程收费 API）
   if (req.method === 'POST' && pathname === '/api/download-url-asset') {
-    const result = await downloadUrlAsset(await readBody(req), queryProject);
+    const body = await readBody(req);
+    if (!canEditProject(body.projectId || queryProject)) return true;
+    const result = await downloadUrlAsset(body, queryProject);
     res.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify(result.body));
   }
@@ -480,6 +501,7 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
     const body = await readBody(req);
     const { sceneId, assetId, projectId } = body;
     const targetProject = projectId || queryProject;
+    if (!canEditProject(targetProject)) return true;
     const curPaths = getPaths(targetProject);
 
     const syncedAssetIndex = syncLocalProjectAssets(targetProject);
@@ -530,6 +552,7 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
     const body = await readBody(req);
     const { sceneId, projectId } = body;
     const targetProject = projectId || queryProject;
+    if (!canEditProject(targetProject)) return true;
     const curPaths = getPaths(targetProject);
 
     const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
@@ -550,6 +573,7 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
     const body = await readBody(req);
     const { sceneId, projectId, keepOriginalAudio, originalAudioVolume } = body;
     const targetProject = projectId || queryProject;
+    if (!canEditProject(targetProject)) return true;
     const curPaths = getPaths(targetProject);
 
     const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
@@ -793,6 +817,7 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
     const body = await readBody(req);
     const { sceneId, projectId } = body;
     const targetProject = projectId || queryProject;
+    if (!canEditProject(targetProject)) return true;
     const curPaths = getPaths(targetProject);
 
     const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
@@ -820,6 +845,7 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
     const body = await readBody(req);
     const { sceneId, projectId } = body;
     const targetProject = projectId || queryProject;
+    if (!canEditProject(targetProject)) return true;
     const curPaths = getPaths(targetProject);
 
     const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
@@ -847,6 +873,7 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
     const body = await readBody(req);
     const { sceneId, sourceMode, projectId } = body;
     const targetProject = projectId || queryProject;
+    if (!canEditProject(targetProject)) return true;
     const curPaths = getPaths(targetProject);
 
     const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
@@ -872,6 +899,7 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
     const body = await readBody(req);
     const { sceneId, assetId, isSharedWithPrev, projectId } = body;
     const targetProject = projectId || queryProject;
+    if (!canEditProject(targetProject)) return true;
     const curPaths = getPaths(targetProject);
 
     const manifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));

@@ -502,7 +502,7 @@ function onFileDragOver(e, idx) {
 
       const pollTimer = setInterval(async () => {
         try {
-          const pr = await fetch('/api/download-progress?jobId=' + encodeURIComponent(jobId));
+          const pr = await fetch('/api/download-progress?project=' + encodeURIComponent(projectId) + '&jobId=' + encodeURIComponent(jobId));
           const pj = await pr.json();
           if (pj && pj.ok && typeof pj.percent === 'number') {
             setProgUi(pj.percent, pj.text || '下载处理中...');
@@ -701,14 +701,14 @@ function onFileDragOver(e, idx) {
       const studioWin = window.open('about:blank', 'whyvideo_remotion_studio');
       if (studioWin && !studioWin.closed) {
         try {
-          studioWin.document.title = '正在同步并打开 Remotion Studio (:3100)...';
+          studioWin.document.title = '正在同步并打开 视频预览...';
           studioWin.document.body.innerHTML =
             '<div style="font-family:sans-serif;background:#F5F6F8;color:#111827;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:18px;">💾 正在保存并同步工程「' +
             escapeHtml(activeProjectId) +
-            '」到 Remotion (:3100)，请稍候...</div>';
+            '」到 视频预览，请稍候...</div>';
         } catch (e) {}
       }
-      showToast('💾 正在保存并同步至 Remotion (:3100)...');
+      showToast('💾 正在保存并同步至 视频预览...');
 
       try {
         const globalPrompt = document.getElementById('globalPromptInput').value;
@@ -733,7 +733,7 @@ function onFileDragOver(e, idx) {
             renderTimingSummaryBadge(data.timingSummary);
           }
           renderTable();
-          const studioUrl = (data.remotionStudio && data.remotionStudio.url) || 'http://localhost:3100';
+          const studioUrl = (data.remotionStudio && data.remotionStudio.url) || ('/?preview=' + encodeURIComponent(activeProjectId));
           if (data.remotionStudio && data.remotionStudio.ok) {
             if (studioWin && !studioWin.closed) {
               studioWin.location.href = studioUrl;
@@ -756,11 +756,11 @@ function onFileDragOver(e, idx) {
               (manifestData?.scenes?.length || 0) +
               ' 个镜头）。' +
               (data.remotionStudio?.ok
-                ? '\nRemotion (:3100) 已自动切换到当前工程。'
+                ? '\n视频预览 已自动切换到当前工程。'
                 : data.remotionStudio?.error
                 ? '\nRemotion 自动切换提示：' + data.remotionStudio.error
                 : ''),
-            actionText: '🎬 打开 Remotion (:3100) ↗',
+            actionText: '🎬 打开 视频预览 ↗',
             actionUrl: studioUrl,
           });
         } else {
@@ -777,14 +777,14 @@ function onFileDragOver(e, idx) {
       const win = window.open('about:blank', 'whyvideo_remotion_studio');
       if (win && !win.closed) {
         try {
-          win.document.title = '正在切换 Remotion Studio (:3100)...';
+          win.document.title = '正在切换 视频预览...';
           win.document.body.innerHTML =
-            '<div style="font-family:sans-serif;background:#F5F6F8;color:#111827;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:18px;">🎬 正在将 Remotion (:3100) 切换到工程「' +
+            '<div style="font-family:sans-serif;background:#F5F6F8;color:#111827;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:18px;">🎬 正在将 视频预览 切换到工程「' +
             escapeHtml(activeProjectId) +
             '」，请稍候...</div>';
         } catch (e) {}
       }
-      showToast('🎬 正在切换 Remotion (:3100) 到当前工程...');
+      showToast('🎬 正在切换 视频预览 到当前工程...');
       try {
         const res = await fetch('/api/remotion-studio/open?project=' + encodeURIComponent(activeProjectId), {
           method: 'POST',
@@ -792,14 +792,14 @@ function onFileDragOver(e, idx) {
           body: JSON.stringify({ projectId: activeProjectId }),
         });
         const data = await res.json();
-        const studioUrl = data.url || 'http://localhost:3100';
+        const studioUrl = data.url || ('/?preview=' + encodeURIComponent(activeProjectId));
         if (data.ok) {
           if (win && !win.closed) {
             win.location.href = studioUrl;
           } else {
             window.open(studioUrl, 'whyvideo_remotion_studio');
           }
-          showToast('✅ Remotion (:3100) 已切换到 ' + activeProjectId);
+          showToast('✅ 视频预览 已切换到 ' + activeProjectId);
         } else {
           if (win && !win.closed) win.close();
           showToast('❌ 打开 Remotion 失败: ' + (data.error || '未知错误'));

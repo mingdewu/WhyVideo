@@ -8,6 +8,15 @@ import { getProjectPaths } from './project-paths.mjs';
 const rootDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const remotionBin = path.join(rootDir, 'node_modules/.bin/remotion');
 const entryPoint = path.join(rootDir, 'packages/video-template/src/index.ts');
+const activeChildren = new Set();
+process.once('exit', () => {
+  for (const child of activeChildren) {
+    try {
+      if (process.platform !== 'win32') process.kill(-child.pid, 'SIGTERM');
+      else child.kill('SIGTERM');
+    } catch {}
+  }
+});
 
 export function projectRenderPaths(projectId) {
   const paths = getProjectPaths(projectId);
@@ -54,14 +63,26 @@ export async function renderProject(projectId, options = {}) {
   const temporaryPath = path.join(paths.outputDir, `.${preview ? 'preview' : 'final_video_1080p'}.${randomUUID()}.mp4`);
   const { command, args } = makeRenderCommand(projectId, { ...options, preview, outputPath: temporaryPath });
   try {
-    await new Promise((resolve, reject) => {
-      const child = spawn(command, args, { cwd: rootDir, stdio: ['ignore', 'pipe', 'pipe'] });
-      options.onStart?.(child);
-      child.stdout.on('data', (chunk) => options.onOutput?.(chunk.toString()));
-      child.stderr.on('data', (chunk) => options.onOutput?.(chunk.toString()));
-      child.on('error', reject);
-      child.on('close', (code) => code === 0 ? resolve() : reject(new Error(`Remotion 渲染失败，退出码 ${code}`)));
-    });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      let diagnostics = '';
+      try {
+        await new Promise((resolve, reject) => {
+          const child = spawn(command, args, { cwd: rootDir, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+          activeChildren.add(child);
+          options.onStart?.(child);
+          const output = chunk => { diagnostics = (diagnostics + chunk.toString()).slice(-12000); options.onOutput?.(chunk.toString()); };
+          child.stdout.on('data', output);
+          child.stderr.on('data', output);
+          child.on('error', error => { activeChildren.delete(child); reject(error); });
+          child.on('close', code => { activeChildren.delete(child); code === 0 ? resolve() : reject(new Error(`Remotion 渲染失败，退出码 ${code}`)); });
+        });
+        break;
+      } catch (error) {
+        if (attempt || !/Visited .+ but got no response/.test(diagnostics)) throw error;
+        if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
+        options.onOutput?.('本地渲染页面连接失败，正在重试一次。\n');
+      }
+    }
     fs.renameSync(temporaryPath, finalPath);
     return finalPath;
   } catch (error) {

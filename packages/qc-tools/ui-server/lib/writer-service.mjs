@@ -1195,6 +1195,7 @@ export function syncWriterToProducer(projectId, { finalScript, content, title, p
     title: resolvedTitle,
     content: scriptInput,
     targetSeconds: 5.5,
+    forceProjectId: true,
   });
 
   if (!result.ok) return result;

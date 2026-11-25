@@ -341,18 +341,33 @@ export function parseScriptToScenes(content, { projectId = 'why_project_001', ti
   };
 }
 
-export function createProjectFromScript({ projectId, title, content, targetSeconds = 5.5 }) {
+export function createProjectFromScript({ projectId, title, content, targetSeconds = 5.5, reserveProject, forceProjectId = false }) {
   if (!content || !content.trim()) {
     return { ok: false, error: '文案内容不能为空' };
   }
 
   const parsed = parseScriptToScenes(content, { projectId, title, targetSeconds });
-  const cleanId = (parsed.projectId || projectId || '')
+  const cleanId = ((forceProjectId ? projectId : parsed.projectId) || projectId || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9_-]/g, '_')
     .replace(/_+/g, '_') || `why_${Date.now().toString(36)}`;
   const curPaths = getPaths(cleanId);
+
+  if (reserveProject) {
+    try {
+      fs.mkdirSync(curPaths.projectDir);
+    } catch (err) {
+      if (err.code === 'EEXIST') return { ok: false, error: '工程 ID 已存在，请选择其他 ID' };
+      throw err;
+    }
+    try {
+      reserveProject(cleanId);
+    } catch (err) {
+      fs.rmdirSync(curPaths.projectDir);
+      throw err;
+    }
+  }
 
   fs.mkdirSync(curPaths.dataDir, { recursive: true });
   fs.mkdirSync(curPaths.audioDir, { recursive: true });

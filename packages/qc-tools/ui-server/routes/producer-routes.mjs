@@ -1,4 +1,7 @@
 import fs from 'fs';
+import { normalizePromptConfig } from '../lib/config.mjs';
+import { hasProjectEditLease } from '../lib/edit-service.mjs';
+import { sharedRuntimeConfig } from '../lib/shared-services.mjs';
 import path from 'path';
 import { rootDir, defaultProjectId, getPaths, readBody, alignJobs } from '../lib/config.mjs';
 import { ensureRemotionStudio } from '../lib/remotion-studio-service.mjs';
@@ -72,7 +75,7 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
     const manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
     const scenes = (manifest.scenes || []).filter(s => s.narration_text && s.duration_ms > 0);
     if (!scenes.length) { res.writeHead(400); return res.end(JSON.stringify({error: '请先生成带旁白的分镜'})); }
-    const cfg = fs.existsSync(paths.promptConfigPath) ? JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8')) : {};
+    const cfg = normalizePromptConfig(fs.existsSync(paths.promptConfigPath) ? JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8')) : {});
     const input = scenes.map(s => ({id: s.scene_id, text: s.narration_text, duration: Math.round(s.duration_ms / 100) / 10}));
     // Keep the full story available for context, but distribute detailed design output
     // across bounded sections so a long video is not limited to one response.
@@ -146,11 +149,11 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
 
   // 0. 工程列表 API
   if (req.method === 'GET' && pathname === '/api/projects') {
-    const projects = listProjects();
+    const projects = listProjects().filter(project => !req.user || req.accountStore.canReadProject(req.user, project.id));
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(
       JSON.stringify({
-        currentProjectId: queryProject,
+        currentProjectId: projects.some(project => project.id === queryProject) ? queryProject : projects[0]?.id || null,
         projects,
       })
     );
@@ -164,18 +167,23 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
       res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: '工程 ID 无效' }));
     }
+    if (req.user && !req.accountStore.canWriteProject(req.user, targetProject)) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ ok: false, error: '无权删除此工程' }));
+    }
     if (targetProject === defaultProjectId) {
       res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: '基准工程不可删除' }));
     }
     const targetDir = path.join(rootDir, 'projects', targetProject);
     if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
-    const projects = listProjects();
+    if (req.user) req.accountStore.removeProjectOwner(targetProject);
+    const projects = listProjects().filter(project => !req.user || req.accountStore.canReadProject(req.user, project.id));
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({
       ok: true,
       deletedProjectId: targetProject,
-      nextActiveProjectId: projects[0]?.id || defaultProjectId,
+      nextActiveProjectId: projects[0]?.id || (req.user ? null : defaultProjectId),
       projects,
     }));
   }
@@ -212,21 +220,26 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
       );
     }
     const manifest = JSON.parse(fs.readFileSync(paths.manifestPath, 'utf8'));
-    if (ensureTableFields(manifest)) {
+    const canWrite = hasProjectEditLease(req, queryProject);
+    if (ensureTableFields(manifest) && canWrite) {
       fs.writeFileSync(paths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
     }
-    const assetIndex = syncLocalProjectAssets(queryProject);
-    const promptConfig = fs.existsSync(paths.promptConfigPath)
+    const assetIndex = canWrite ? syncLocalProjectAssets(queryProject) : (fs.existsSync(paths.assetIndexPath) ? JSON.parse(fs.readFileSync(paths.assetIndexPath, 'utf8')) : { project_id: queryProject, assets: [] });
+    let promptConfig = fs.existsSync(paths.promptConfigPath)
       ? JSON.parse(fs.readFileSync(paths.promptConfigPath, 'utf8'))
       : {
           selected_visual_model: 'remotion_procedural',
           global_ai_visual_prompt:
             '作为 16:9 纪录片视觉总监，结合旁白片段与关键词，在 16:9 画幅中央提炼一个醒目标志大字（不超过 14 字），搭配 1 条副级阐述，用于动效视觉传达。',
         };
+    promptConfig = normalizePromptConfig(promptConfig);
+    promptConfig.apiKeyConfigured = Boolean(promptConfig.apiKey);
     promptConfig.tavilyKeyConfigured = Boolean(getWriterTavilyKey(paths.projectDir));
     delete promptConfig.tavilyApiKey;
     promptConfig.meowloadKeyConfigured = Boolean(getMeowloadApiKey(paths.projectDir));
     delete promptConfig.meowloadApiKey;
+    if (req.user) delete promptConfig.apiKey;
+    if (req.user) delete promptConfig.elevenlabsApiKey;
 
     let audioFile = null;
     if (fs.existsSync(paths.audioDir)) {
@@ -249,7 +262,7 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
         hasVideo,
         videoUrl,
         audioUrl: audioFile,
-        elevenlabsKeyConfigured: Boolean(process.env.ELEVENLABS_API_KEY),
+        elevenlabsKeyConfigured: Boolean(sharedRuntimeConfig()?.elevenlabsApiKey || process.env.ELEVENLABS_API_KEY),
         timingSummary: buildProjectTimingSummary(queryProject, manifest),
         bgmSummary: {
           enabled: bgmCfg.enabled,
@@ -264,6 +277,10 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
   if (req.method === 'POST' && pathname === '/api/workflow-save') {
     const body = await readBody(req);
     const targetProject = body.projectId || queryProject;
+    if (req.user && !req.accountStore.canWriteProject(req.user, targetProject)) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: '无权修改此工程' }));
+    }
     const curPaths = getPaths(targetProject);
 
     if (body.promptConfig) {
@@ -276,6 +293,7 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
         JSON.stringify({
           ...previousPromptConfig,
           ...body.promptConfig,
+          ...(req.user ? { apiKey: previousPromptConfig.apiKey || '', baseUrl: previousPromptConfig.baseUrl || '' } : {}),
           tavilyApiKey: previousPromptConfig.tavilyApiKey || '',
           meowloadApiKey: previousPromptConfig.meowloadApiKey || '',
         }, null, 2),
@@ -292,11 +310,11 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
       );
     }
     recompileProject(targetProject);
-    let remotionStudio = { ok: false, projectId: targetProject, url: 'http://localhost:3100' };
+    let remotionStudio = { ok: false, projectId: targetProject, url: '/?preview=' + encodeURIComponent(targetProject) };
     try {
       remotionStudio = await ensureRemotionStudio(targetProject);
     } catch (err) {
-      remotionStudio = { ok: false, projectId: targetProject, url: 'http://localhost:3100', error: err.message };
+      remotionStudio = { ok: false, projectId: targetProject, url: '/?preview=' + encodeURIComponent(targetProject), error: err.message };
     }
     const updatedManifest = JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -450,7 +468,7 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
 
   if (req.method === 'GET' && pathname === '/api/auto-plan-cuts-progress') {
     const jobId = String(url.searchParams.get('jobId') || queryProject || '').trim();
-    const job = autoPlanProgressMap.get(jobId) || { percent: 0, text: '准备分析切点...', done: false, error: null };
+    const job = autoPlanProgressMap.get(queryProject + ':' + jobId) || { percent: 0, text: '准备分析切点...', done: false, error: null };
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ ok: true, ...job }));
   }
@@ -461,7 +479,7 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
     const targetProject = body.projectId || queryProject;
     const jobId = String(body.jobId || targetProject).trim();
     const updateCutProgress = (percent, text, extra = {}) => {
-      autoPlanProgressMap.set(jobId, {
+      autoPlanProgressMap.set(targetProject + ':' + jobId, {
         percent: Math.max(0, Math.min(100, Math.round(percent || 0))),
         text: String(text || ''),
         done: Boolean(extra.done),
@@ -714,6 +732,10 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
   if (req.method === 'POST' && pathname === '/api/remotion-studio/open') {
     const body = await readBody(req);
     const targetProject = body.projectId || queryProject;
+    if (req.user && !req.accountStore.canReadProject(req.user, targetProject)) {
+      res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
+      return res.end(JSON.stringify({ error: '无权访问此工程' }));
+    }
     try {
       const studio = await ensureRemotionStudio(targetProject);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });

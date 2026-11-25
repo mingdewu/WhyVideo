@@ -180,7 +180,7 @@ function getProjectNarrationAudioUrl() {
 
       const pollTimer = setInterval(async () => {
         try {
-          const pr = await fetch('/api/auto-plan-cuts-progress?jobId=' + encodeURIComponent(jobId));
+          const pr = await fetch('/api/auto-plan-cuts-progress?project=' + encodeURIComponent(activeProjectId) + '&jobId=' + encodeURIComponent(jobId));
           const pj = await pr.json();
           if (pj && pj.ok && typeof pj.percent === 'number') {
             setCutProgUi(pj.percent, pj.text || '正在排切点...');

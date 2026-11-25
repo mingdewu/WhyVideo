@@ -1,3 +1,7 @@
+    if (window.STUDIO_CURRENT_USER_ID && localStorage.getItem('whyvideo_current_user') !== window.STUDIO_CURRENT_USER_ID) {
+      localStorage.removeItem('whyvideo_active_project');
+      localStorage.setItem('whyvideo_current_user', window.STUDIO_CURRENT_USER_ID);
+    }
     let activeProjectId = new URLSearchParams(window.location.search).get('project') || localStorage.getItem('whyvideo_active_project') || window.STUDIO_DEFAULT_PROJECT_ID;
     let manifestData = null;
     let assetIndexData = null;
@@ -13,6 +17,23 @@
       imageModel: 'black-forest-labs/flux-1-schnell',
       bgmModel: 'google/gemini-2.5-flash'
     };
+    let sharedServicesPromise;
+    function loadSharedServices() {
+      if (!sharedServicesPromise) sharedServicesPromise = fetch('/api/shared-config').then(response => response.json()).then(config => {
+        visualConfig = { ...visualConfig, ...config, apiKey: config.apiKeyConfigured ? '••••••••' : '' };
+        window._elevenlabsKeyConfigured = Boolean(config.elevenlabsApiKeyConfigured);
+        if (!config.canManage) {
+          for (const id of ['currentApiKeyInput', 'currentTavilyKeyInput', 'currentMeowloadKeyInput', 'currentBaseUrlInput']) {
+            const input = document.getElementById(id);
+            if (input) { input.disabled = true; input.placeholder = '由超级用户配置，登录后即可使用'; }
+          }
+          const save = document.querySelector('#visualModelModal button[onclick="saveVisualModelConfig()"]');
+          if (save) { save.disabled = true; save.textContent = '共享配置由超级用户管理'; }
+        }
+        return config;
+      }).catch(() => ({}));
+      return sharedServicesPromise;
+    }
 
     function showToast(msg) {
       const t = document.getElementById('toast');
@@ -617,11 +638,14 @@
         }
 
         const sel = document.getElementById('projectSelect');
-        sel.innerHTML = projectsList.map(p => `
-          <option value="${p.id}" ${p.id === activeProjectId ? 'selected' : ''}>
-            ${p.title} (${p.id})
-          </option>
-        `).join('');
+        sel.replaceChildren();
+        for (const project of projectsList) {
+          const option = document.createElement('option');
+          option.value = project.id;
+          option.selected = project.id === activeProjectId;
+          option.textContent = `${project.title} (${project.id})`;
+          sel.appendChild(option);
+        }
 
         const cur = projectsList.find(p => p.id === activeProjectId);
         if (cur) {
@@ -661,6 +685,12 @@
         activeProjectId = data.nextActiveProjectId;
         pendingSelectedProjectId = activeProjectId;
         const url = new URL(window.location);
+        if (!activeProjectId) {
+          localStorage.removeItem('whyvideo_active_project');
+          url.searchParams.delete('project');
+          window.location.assign(url.toString());
+          return;
+        }
         url.searchParams.set('project', activeProjectId);
         window.history.pushState({}, '', url);
         await loadProjects();

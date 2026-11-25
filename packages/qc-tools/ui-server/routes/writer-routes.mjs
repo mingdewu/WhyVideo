@@ -150,6 +150,7 @@ export async function handleWriterRoutes(req, res, { url, pathname, queryProject
       title: body.title,
       content: body.content,
       targetSeconds: Number(body.targetSeconds) || 5.5,
+      reserveProject: req.user ? id => req.accountStore.assignProject(id, req.user.id) : undefined,
     });
     res.writeHead(resData.ok ? 200 : 400, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify(resData));
@@ -190,6 +191,23 @@ export async function handleWriterRoutes(req, res, { url, pathname, queryProject
       cleanId = `${cleanId}_${Date.now().toString(36).slice(-4)}`;
     }
     const finalPaths = getPaths(cleanId);
+    try {
+      fs.mkdirSync(finalPaths.projectDir);
+    } catch (err) {
+      if (err.code === 'EEXIST') {
+        res.writeHead(409, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: '工程 ID 已存在，请重试' }));
+      }
+      throw err;
+    }
+    if (req.user) {
+      try {
+        req.accountStore.assignProject(cleanId, req.user.id);
+      } catch (err) {
+        fs.rmdirSync(finalPaths.projectDir);
+        throw err;
+      }
+    }
     fs.mkdirSync(finalPaths.dataDir, { recursive: true });
     fs.mkdirSync(finalPaths.audioDir, { recursive: true });
     fs.mkdirSync(path.dirname(finalPaths.captionsPath), { recursive: true });
