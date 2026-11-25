@@ -158,7 +158,10 @@
               <button type="button" onclick="loadEnglishDubVoiceboxProfiles(true)" class="bg-surface hover:bg-subtle border border-line-strong text-ink px-2.5 py-1.5 rounded-lg text-xs">刷新音色</button>
             </div>
             <div id="englishDubElevenlabsRow" class="hidden flex flex-wrap gap-2 items-center">
-              <input id="englishDubElevenlabsVoiceId" type="text" class="p-2 bg-input border border-line rounded-lg text-sm" placeholder="Voice ID（留空用 Rachel）">
+              <select id="englishDubElevenlabsVoiceId" onchange="try { if (this.value) localStorage.setItem('whyvideo_elevenlabs_voice_id', this.value); } catch {}" class="p-2 bg-input border border-line rounded-lg text-sm">
+                <option value="">请先点击拉取音色</option>
+              </select>
+              <button type="button" id="btnFetchPublishElevenlabsVoices" onclick="loadPublishElevenlabsVoices(true)" class="bg-surface hover:bg-subtle border border-line-strong text-ink px-2.5 py-1.5 rounded-lg text-xs">拉取音色</button>
             </div>
           </div>
           <div class="flex flex-wrap gap-2 items-center">

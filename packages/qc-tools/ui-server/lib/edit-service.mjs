@@ -61,6 +61,7 @@ export function clearProjectEditState(project, store) {
 export function hasProjectEditLease(req, project) {
   if (!req.user) return true;
   const lease = currentLease(project, req.accountStore);
+  if (req.user.role === 'superuser') return !isBusy(lease, project);
   return Boolean(lease && !isBusy(lease, project) && lease.userId === req.user.id && lease.token === req.headers['x-edit-token']);
 }
 
@@ -77,11 +78,13 @@ export async function handleEditRoutes(req, res, url) {
   const lease = currentLease(project, store);
   const token = req.headers['x-edit-token'];
   const ownerId = store.getProjectOwner(project);
-  const owned = ownerId === req.user.id || (req.user.role === 'superuser' && ownerId === null);
+  const isSuperuser = req.user.role === 'superuser';
+  const owned = ownerId === req.user.id || (isSuperuser && ownerId === null);
+  const canWrite = store.canWriteProject(req.user, project);
   const mine = lease?.userId === req.user.id && lease?.token === token;
   const operation = url.pathname.slice('/api/edit/'.length);
   if (req.method === 'GET' && operation === 'state') {
-    reply(res, 200, { revision: projectRevision(project), editing: Boolean(lease), mine, owner: owned, holder: lease?.username || null, request: owned ? requests.get(project) || null : null });
+    reply(res, 200, { revision: projectRevision(project), editing: Boolean(lease), mine, owner: owned, canWrite, holder: lease?.username || null, request: owned ? requests.get(project) || null : null });
     return true;
   }
   if (req.method !== 'POST') { reply(res, 405, {}); return true; }
@@ -104,8 +107,11 @@ export async function handleEditRoutes(req, res, url) {
     leases.delete(project); store.setProjectDelegate(project, null);
     reply(res, 200, { ok: true }); return true;
   }
-  if (operation === 'acquire' && store.canWriteProject(req.user, project)) {
-    if (lease && !mine && !(lease.userId === req.user.id && lease.token === null)) { reply(res, 409, { error: '该工程正在由其他编辑会话使用' }); return true; }
+  if (operation === 'acquire' && canWrite) {
+    if (lease && !mine && !(lease.userId === req.user.id && lease.token === null)) {
+      if (!isSuperuser) { reply(res, 409, { error: '该工程正在由其他编辑会话使用' }); return true; }
+      if (isBusy(lease, project)) { reply(res, 409, { error: '操作执行中，请稍后再试' }); return true; }
+    }
     if (mine) lease.expiresAt = Date.now() + lifetime;
     else leases.set(project, { userId: req.user.id, username: req.user.username, token, expiresAt: Date.now() + lifetime, busy: false });
     if (!owned) store.setProjectDelegate(project, req.user.id, Date.now() + lifetime);
@@ -118,13 +124,27 @@ export async function protectProjectWrite(req, res, url, fallbackProject) {
   if (!req.user) return false;
   const store = req.accountStore;
   // Account administration and edit controls are handled before this middleware.
-  const excluded = new Set(['/api/writer/create-blank-project', '/api/import-script-project', '/api/preview-script-segmentation', '/api/remotion-studio/open', '/api/delete-project', '/api/test-provider', '/api/test-openrouter', '/api/test-tavily', '/api/test-meowload']);
+  const excluded = new Set(['/api/writer/create-blank-project', '/api/import-script-project', '/api/preview-script-segmentation', '/api/remotion-studio/open', '/api/delete-project', '/api/test-provider', '/api/test-openrouter', '/api/test-tavily', '/api/test-meowload', '/api/publish/english-dub/generate', '/api/publish/english-dub/cancel']);
   if (req.method === 'GET' || req.method === 'HEAD' || !url.pathname.startsWith('/api/') || excluded.has(url.pathname) || url.pathname.startsWith('/api/youtube/') || url.pathname.startsWith('/api/publish/youtube/')) return false;
   try { req.bodyJson = await readBody(req); } catch { reply(res, 400, { error: '请求内容无效' }); return true; }
   const project = req.bodyJson?.projectId || fallbackProject;
-  const lease = currentLease(project, store);
-  if (!store.canWriteProject(req.user, project) || lease?.userId !== req.user.id || lease?.token !== req.headers['x-edit-token']) {
+  let lease = currentLease(project, store);
+  const isSuperuser = req.user.role === 'superuser';
+  const token = req.headers['x-edit-token'];
+  if (!store.canWriteProject(req.user, project)) {
     reply(res, 409, { error: '当前页面没有编辑权，请先点击进入编辑' }); return true;
+  }
+  if (lease?.userId !== req.user.id || lease?.token !== token) {
+    if (!isSuperuser) {
+      reply(res, 409, { error: '当前页面没有编辑权，请先点击进入编辑' }); return true;
+    }
+    if (isBusy(lease, project)) {
+      reply(res, 409, { error: '工程内容已经更新或操作仍在执行。当前输入已保留，请刷新后核对再保存' }); return true;
+    }
+    const validToken = typeof token === 'string' && /^[a-zA-Z0-9_-]{20,100}$/.test(token) ? token : null;
+    lease = { userId: req.user.id, username: req.user.username, token: validToken, expiresAt: Date.now() + lifetime, busy: false };
+    leases.set(project, lease);
+    if (store.getProjectOwner(project) !== req.user.id) store.setProjectDelegate(project, req.user.id, Date.now() + lifetime);
   }
   const cancelling = url.pathname === '/api/voicebox/cancel';
   if (!cancelling && (isBusy(lease, project) || req.headers['x-project-revision'] !== projectRevision(project))) {

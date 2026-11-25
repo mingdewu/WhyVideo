@@ -1,7 +1,13 @@
 (() => {
   if (!window.STUDIO_CURRENT_USER_ID) return;
   const originalFetch = window.fetch.bind(window);
-  const token = crypto.randomUUID().replaceAll('-', '');
+  const tokenKey = 'whyvideo_edit_token';
+  let token = null;
+  try { token = sessionStorage.getItem(tokenKey); } catch {}
+  if (!token || !/^[a-zA-Z0-9_-]{20,100}$/.test(token)) {
+    token = crypto.randomUUID().replaceAll('-', '');
+    try { sessionStorage.setItem(tokenKey, token); } catch {}
+  }
   const states = new Map();
   let shownProject;
   let panel;
@@ -15,7 +21,13 @@
       states.set(project, control(project, 'state', 'GET').then(async response => {
         if (!response.ok) return null;
         const data = await response.json();
-        if (data.owner && !data.editing) await control(project, 'acquire');
+        if ((data.canWrite || data.owner) && !data.editing) {
+          const acq = await control(project, 'acquire');
+          if (acq.ok) {
+            const acqData = await acq.json().catch(() => ({}));
+            return { revision: acqData.revision || data.revision };
+          }
+        }
         return { revision: data.revision };
       }));
     }
@@ -28,7 +40,7 @@
     if (url.origin !== location.origin || !url.pathname.startsWith('/api/') || url.pathname.startsWith('/api/auth/') || url.pathname.startsWith('/api/edit/')) return originalFetch(input, options);
     let body = {};
     try { body = JSON.parse(options.body || '{}'); } catch {}
-    const project = body.projectId || url.searchParams.get('project');
+    const project = body.projectId || url.searchParams.get('project') || shownProject || new URL(location.href).searchParams.get('project') || window.STUDIO_DEFAULT_PROJECT_ID;
     if (!project || exempt.has(url.pathname)) return originalFetch(input, options);
     shownProject = project;
     const entry = await state(project);
@@ -61,8 +73,14 @@
     await state(project);
     const response = await control(project, 'state', 'GET');
     if (!response.ok) { panel.textContent = '请创建或选择工程'; return; }
-    const info = await response.json();
-    if (info.mine) await control(project, 'acquire');
+    let info = await response.json();
+    if (info.mine || ((info.canWrite || info.owner) && !info.editing)) {
+      const acq = await control(project, 'acquire');
+      if (acq.ok && !info.mine) {
+        const refreshed = await control(project, 'state', 'GET');
+        if (refreshed.ok) info = await refreshed.json();
+      }
+    }
     panel.replaceChildren();
     const label = document.createElement('span');
     label.textContent = info.mine ? '编辑中' : (info.holder ? '只读 · ' + info.holder + '正在编辑' : '只读');
@@ -78,7 +96,7 @@
       panel.appendChild(element);
     };
     if (info.mine) button('退出编辑', 'release');
-    else if (info.owner) button('进入编辑', 'acquire');
+    else if (info.canWrite || info.owner) button('进入编辑', 'acquire');
     else { button('申请编辑', 'request'); button('接手编辑', 'acquire'); }
     if (info.owner && info.request) button('交给 ' + info.request.username + ' 编辑', 'grant');
   }

@@ -118,6 +118,7 @@ export function makeRenderCommand(projectId, {
     '--image-format=jpeg',
     '--jpeg-quality=85',
     '--hardware-acceleration=if-possible',
+    '--gl=angle',
     '--x264-preset=veryfast',
     `--offthreadvideo-cache-size-in-bytes=${Math.max(64 * 1024 * 1024, Number(offthreadCacheBytes) || 1024 * 1024 * 1024)}`,
   ];

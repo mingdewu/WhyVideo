@@ -85,6 +85,14 @@ test('editing leases, voluntary handoff, stale saves and isolated authenticated 
     assert.equal((await request(admin, '/api/writer/save?project=project_a', { method: 'POST', body: { part: 'materials', data: 'admin version' }, revision: current.revision, tab: adminToken })).status, 200);
     assert.equal((await edit(admin, 'release', adminToken)).status, 200);
     assert.equal((await edit(owner, 'acquire')).status, 200);
+    const adminState = await (await edit(admin, 'state', adminToken)).json();
+    assert.equal(adminState.canWrite, true);
+    assert.equal((await edit(admin, 'acquire', adminToken)).status, 200);
+    assert.equal((await edit(admin, 'release', adminToken)).status, 200);
+    const afterRelease = await (await edit(admin, 'state', adminToken)).json();
+    assert.equal((await request(admin, '/api/writer/save?project=project_a', { method: 'POST', body: { part: 'materials', data: 'admin version' }, revision: afterRelease.revision, tab: adminToken })).status, 200);
+    assert.equal((await edit(admin, 'release', adminToken)).status, 200);
+    assert.equal((await edit(owner, 'acquire')).status, 200);
     assert.equal((await request(other, '/?preview=project_a')).status, 403);
     const first = await request(owner, '/?preview=project_a');
     assert.equal(first.status, 200, log + await first.clone().text());

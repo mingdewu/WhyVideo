@@ -21,6 +21,7 @@ Config.setVideoImageFormat("jpeg");
 Config.setJpegQuality(85);
 Config.setConcurrency(4);
 Config.setHardwareAcceleration("if-possible");
+Config.setChromiumOpenGlRenderer("angle");
 Config.setX264Preset("veryfast");
 Config.setOffthreadVideoCacheSizeInBytes(1024 * 1024 * 1024);
 if (selectedId) {

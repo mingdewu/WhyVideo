@@ -1199,12 +1199,103 @@ function setEnglishDubStatus(message, { tone = 'muted' } = {}) {
   el.className = 'text-sm ' + toneClass;
 }
 
+function populatePublishElevenlabsSelect(voices = []) {
+  const select = document.getElementById('englishDubElevenlabsVoiceId');
+  if (!select) return;
+  const list = Array.isArray(voices) ? voices : [];
+  const prev = select.value || (() => { try { return localStorage.getItem('whyvideo_elevenlabs_voice_id') || ''; } catch { return ''; } })();
+  select.replaceChildren();
+  if (!list.length) {
+    const opt = document.createElement('option');
+    opt.value = '';
+    opt.textContent = '暂无可用音色，请点右侧拉取';
+    select.appendChild(opt);
+    return;
+  }
+  const customVoices = list.filter((v) => v.category !== 'premade');
+  const premadeVoices = list.filter((v) => v.category === 'premade');
+  const appendGroup = (label, items) => {
+    if (!items.length) return;
+    const grp = document.createElement('optgroup');
+    grp.label = label;
+    for (const v of items) {
+      const opt = document.createElement('option');
+      opt.value = v.voice_id;
+      const catTag = v.category === 'cloned' ? '[克隆]' : v.category === 'professional' ? '[专业]' : v.category === 'generated' ? '[生成]' : '';
+      opt.textContent = catTag ? `${catTag} ${v.name}` : v.name;
+      grp.appendChild(opt);
+    }
+    select.appendChild(grp);
+  };
+  appendGroup(`我的定制/克隆音色 (${customVoices.length})`, customVoices);
+  appendGroup(`ElevenLabs 官方预设 (${premadeVoices.length})`, premadeVoices);
+  if (prev && list.some((v) => v.voice_id === prev)) {
+    select.value = prev;
+  } else if (list[0]?.voice_id) {
+    select.value = list[0].voice_id;
+  }
+  try {
+    if (select.value) localStorage.setItem('whyvideo_elevenlabs_voice_id', select.value);
+  } catch {}
+}
+
+async function loadPublishElevenlabsVoices(showNotice = false) {
+  const select = document.getElementById('englishDubElevenlabsVoiceId');
+  const btn = document.getElementById('btnFetchPublishElevenlabsVoices');
+  if (!select) return;
+  if (!showNotice && Array.isArray(window._elevenlabsVoices) && window._elevenlabsVoices.length > 0) {
+    populatePublishElevenlabsSelect(window._elevenlabsVoices);
+    return;
+  }
+  const apiKey = (() => {
+    try {
+      const inputVal = (document.getElementById('elevenlabsKeyInput')?.value || '').trim();
+      return inputVal || (localStorage.getItem('whyvideo_elevenlabs_api_key') || '').trim();
+    } catch {
+      return '';
+    }
+  })();
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ 拉取中...';
+  }
+  try {
+    const res = await fetch('/api/elevenlabs/voices', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data?.ok) throw new Error(data?.error || '拉取 ElevenLabs 音色失败');
+    const voices = Array.isArray(data.voices) ? data.voices : [];
+    window._elevenlabsVoices = voices;
+    populatePublishElevenlabsSelect(voices);
+    if (showNotice) {
+      setEnglishDubStatus(`已拉取 ${voices.length} 个 ElevenLabs 音色。`, { tone: 'success' });
+      if (typeof showToast === 'function') showToast(`✅ 已拉取 ${voices.length} 个 ElevenLabs 音色`);
+    }
+  } catch (err) {
+    if (showNotice) {
+      setEnglishDubStatus('拉取 ElevenLabs 音色失败：' + err.message, { tone: 'error' });
+      if (typeof showToast === 'function') showToast('❌ ' + err.message);
+    }
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '拉取音色';
+    }
+  }
+}
+
 function onEnglishDubEngineChange() {
   const engine = document.getElementById('englishDubEngine')?.value || 'voicebox';
   const vbRow = document.getElementById('englishDubVoiceboxRow');
   const elRow = document.getElementById('englishDubElevenlabsRow');
   if (vbRow) vbRow.classList.toggle('hidden', engine !== 'voicebox');
   if (elRow) elRow.classList.toggle('hidden', engine !== 'elevenlabs');
+  if (engine === 'elevenlabs') {
+    void loadPublishElevenlabsVoices(false);
+  }
 }
 
 async function loadEnglishDubVoiceboxProfiles(forceToast = false) {
@@ -1423,13 +1514,22 @@ async function startEnglishDubGenerate() {
   const text = (document.getElementById('englishDubScript')?.value || '').trim();
   const engine = document.getElementById('englishDubEngine')?.value || 'voicebox';
   const profileId = document.getElementById('englishDubVoiceboxProfile')?.value || '';
-  const voiceId = (document.getElementById('englishDubElevenlabsVoiceId')?.value || '').trim();
+  const voiceId = (document.getElementById('englishDubElevenlabsVoiceId')?.value || '').trim()
+    || (() => { try { return (localStorage.getItem('whyvideo_elevenlabs_voice_id') || '').trim(); } catch { return ''; } })();
+  const apiKey = (() => {
+    try {
+      const inputVal = (document.getElementById('elevenlabsKeyInput')?.value || '').trim();
+      return inputVal || (localStorage.getItem('whyvideo_elevenlabs_api_key') || '').trim();
+    } catch {
+      return '';
+    }
+  })();
   setEnglishDubStatus(text ? '⏳ 正在启动配音与字幕生成…' : '⏳ 正在启动：自动翻译中文终稿 → 配音 → Whisper 字幕…');
   try {
     const res = await fetch('/api/publish/english-dub/generate?project=' + encodeURIComponent(project), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ lang, text, autoTranslate: !text, engine, profileId, voiceId }),
+      body: JSON.stringify({ lang, text, autoTranslate: !text, engine, profileId, voiceId, apiKey }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data?.error || '启动生成任务失败');
