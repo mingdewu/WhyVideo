@@ -438,6 +438,7 @@ test('project video path uses project id, resolves fallback files, and publish-s
     assert.equal(resolveProjectVideoPath(fakePaths), null);
 
     fs.writeFileSync(path.join(tmpOut, 'preview.mp4'), 'preview');
+    fs.writeFileSync(path.join(tmpOut, 'demo_video_001_preview.mp4'), 'studio-preview');
     fs.writeFileSync(path.join(tmpOut, '.hidden.mp4'), 'hidden');
     assert.equal(resolveProjectVideoPath(fakePaths), null);
 
@@ -867,5 +868,118 @@ test('render confirm modal wires burnCaptions checkbox through generate-render-p
     assert.equal(propsOn.caption_track.burn_in_captions, true);
   } finally {
     fs.rmSync(tmpPaths.projectDir, { recursive: true, force: true });
+  }
+});
+
+test('studio-out-location overrides Studio default output path to project output directory', async () => {
+  const { createRequire } = await import('node:module');
+  const require = createRequire(import.meta.url);
+  const { getDefaultOutLocation } = require('../packages/video-template/src/studio-out-location.cjs');
+  const previousProjectId = process.env.WHYVIDEO_STUDIO_PROJECT_ID;
+  try {
+    process.env.WHYVIDEO_STUDIO_PROJECT_ID = 'why_demo_001';
+    assert.equal(
+      getDefaultOutLocation({ compositionName: 'WhyExplainerFinal', defaultExtension: 'mp4', type: 'asset' }),
+      'projects/why_demo_001/output/why_demo_001.mp4',
+    );
+    assert.equal(
+      getDefaultOutLocation({ compositionName: 'WhyExplainerMVP', defaultExtension: 'mp4', type: 'asset' }),
+      'projects/why_demo_001/output/why_demo_001_preview.mp4',
+    );
+    assert.equal(
+      getDefaultOutLocation({ compositionName: 'WhyExplainerFinal', defaultExtension: 'png', type: 'still' }),
+      'projects/why_demo_001/output/why_demo_001.png',
+    );
+    assert.equal(
+      getDefaultOutLocation({ compositionName: 'WhyExplainerFinal', defaultExtension: 'mp4', type: 'sequence' }),
+      'projects/why_demo_001/output/why_demo_001',
+    );
+
+    delete process.env.WHYVIDEO_STUDIO_PROJECT_ID;
+    assert.equal(
+      getDefaultOutLocation({ compositionName: 'WhyExplainerFinal', defaultExtension: 'mp4', type: 'asset' }),
+      'out/WhyExplainerFinal.mp4',
+    );
+  } finally {
+    if (previousProjectId === undefined) delete process.env.WHYVIDEO_STUDIO_PROJECT_ID;
+    else process.env.WHYVIDEO_STUDIO_PROJECT_ID = previousProjectId;
+  }
+});
+
+test('POST /api/delete-project allows superuser on unowned/default project and owner on own project, rejects non-owners', { timeout: 15000 }, async () => {
+  const authDir = fs.mkdtempSync(path.join(os.tmpdir(), 'whyvideo-del-auth-'));
+  const unownedDir = fs.mkdtempSync(path.join(ROOT_DIR, 'projects', 'test_del_unowned_'));
+  const ownedDir = fs.mkdtempSync(path.join(ROOT_DIR, 'projects', 'test_del_owned_'));
+  const otherOwnedDir = fs.mkdtempSync(path.join(ROOT_DIR, 'projects', 'test_del_other_'));
+  const unownedId = path.basename(unownedDir);
+  const ownedId = path.basename(ownedDir);
+  const otherOwnedId = path.basename(otherOwnedDir);
+
+  const { openAccountStore } = await import('../packages/qc-tools/ui-server/lib/account-store.mjs');
+  const store = openAccountStore(authDir);
+  const superuser = await store.createUser('del-super', 'test-password-12345', 'superuser');
+  const owner = await store.createUser('del-owner', 'test-password-12345');
+  const other = await store.createUser('del-other', 'test-password-12345');
+  store.assignProject(ownedId, owner.id);
+  store.assignProject(otherOwnedId, owner.id);
+  const superCookie = 'whyvideo_session=' + store.createSession(superuser.id);
+  const ownerCookie = 'whyvideo_session=' + store.createSession(owner.id);
+  const otherCookie = 'whyvideo_session=' + store.createSession(other.id);
+
+  const { createServer } = await import('node:net');
+  const { spawn } = await import('node:child_process');
+  const { once } = await import('node:events');
+  const reservation = createServer();
+  reservation.listen(0, '127.0.0.1');
+  await once(reservation, 'listening');
+  const port = reservation.address().port;
+  await new Promise(resolve => reservation.close(resolve));
+  const child = spawn(process.execPath, ['packages/qc-tools/ui-server.mjs'], {
+    cwd: ROOT_DIR, env: { ...process.env, PORT: String(port), WHYVIDEO_AUTH_DIR: authDir, PROJECT_ID: unownedId }, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const exit = once(child, 'exit');
+  try {
+    await new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => reject(Error('HTTP startup timeout')), 5000);
+      child.stdout.on('data', chunk => { if (chunk.toString().includes('http://localhost:')) { clearTimeout(timeout); resolve(); } });
+      child.once('error', error => { clearTimeout(timeout); reject(error); });
+      child.once('exit', code => { clearTimeout(timeout); reject(Error(`HTTP exited: ${code}`)); });
+    });
+    const base = `http://127.0.0.1:${port}`;
+    const postDelete = (cookie, projectId) => fetch(base + '/api/delete-project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', cookie, origin: base },
+      body: JSON.stringify({ projectId }),
+    });
+
+    // Non-owner and non-delegated superuser receive 403 on another user's owned project.
+    assert.equal((await postDelete(otherCookie, otherOwnedId)).status, 403);
+    assert.equal((await postDelete(superCookie, otherOwnedId)).status, 403);
+    assert.equal(fs.existsSync(otherOwnedDir), true);
+
+    // Superuser can delete an unowned project (including PROJECT_ID / default project) without edit lease or revision header.
+    const superDel = await postDelete(superCookie, unownedId);
+    assert.equal(superDel.status, 200);
+    const superBody = await superDel.json();
+    assert.equal(superBody.ok, true);
+    assert.equal(superBody.deletedProjectId, unownedId);
+    assert.equal(fs.existsSync(unownedDir), false);
+
+    // Owner can delete their own project without edit lease or revision header.
+    const ownerDel = await postDelete(ownerCookie, ownedId);
+    assert.equal(ownerDel.status, 200);
+    const ownerBody = await ownerDel.json();
+    assert.equal(ownerBody.ok, true);
+    assert.equal(ownerBody.deletedProjectId, ownedId);
+    assert.equal(fs.existsSync(ownedDir), false);
+    assert.equal(store.getProjectOwner(ownedId), null);
+  } finally {
+    child.kill('SIGTERM');
+    await exit;
+    store.close();
+    fs.rmSync(authDir, { recursive: true, force: true });
+    fs.rmSync(unownedDir, { recursive: true, force: true });
+    fs.rmSync(ownedDir, { recursive: true, force: true });
+    fs.rmSync(otherOwnedDir, { recursive: true, force: true });
   }
 });

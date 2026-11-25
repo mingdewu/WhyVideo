@@ -21,7 +21,7 @@
     }
     return states.get(project);
   }
-  const exempt = new Set(['/api/writer/create-blank-project', '/api/import-script-project', '/api/preview-script-segmentation', '/api/remotion-studio/open']);
+  const exempt = new Set(['/api/writer/create-blank-project', '/api/import-script-project', '/api/preview-script-segmentation', '/api/remotion-studio/open', '/api/delete-project']);
   window.fetch = async (input, options = {}) => {
     const url = new URL(typeof input === 'string' ? input : input.url, location.href);
     const method = (options.method || input.method || 'GET').toUpperCase();

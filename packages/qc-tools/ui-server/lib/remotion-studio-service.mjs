@@ -54,6 +54,15 @@ export async function ensureRemotionStudio(projectId) {
   pending.set(projectId, task);
   try { return await task; } finally { pending.delete(projectId); }
 }
+
+export function stopRemotionStudio(projectId) {
+  const instance = instances.get(projectId);
+  if (!instance) return;
+  instances.delete(projectId);
+  try {
+    instance.child.kill();
+  } catch {}
+}
 const cleanup = setInterval(() => {
   for (const [id, instance] of instances) if (Date.now() - instance.lastUsed > 15 * 60 * 1000) { instance.child.kill(); instances.delete(id); }
 }, 60000);

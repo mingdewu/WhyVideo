@@ -74,7 +74,12 @@ export function resolveProjectVideoPath(pathsOrProjectId) {
   for (const entry of fs.readdirSync(paths.outputDir, { withFileTypes: true })) {
     if (!entry.isFile()) continue;
     const name = entry.name;
-    if (name.startsWith('.') || name === 'preview.mp4' || !name.toLowerCase().endsWith('.mp4')) continue;
+    if (
+      name.startsWith('.') ||
+      name === 'preview.mp4' ||
+      name.toLowerCase().endsWith('_preview.mp4') ||
+      !name.toLowerCase().endsWith('.mp4')
+    ) continue;
     const candidate = path.join(paths.outputDir, name);
     const stat = fs.statSync(candidate, { throwIfNoEntry: false });
     if (stat?.isFile() && stat.size > 0 && stat.mtimeMs > latestMtimeMs) {

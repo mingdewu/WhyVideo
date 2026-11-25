@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { webpack } from "@remotion/bundler";
 import { Config } from "@remotion/cli/config";
 
 // Remotion bundles this configuration as CommonJS; avoid importing modules
@@ -26,4 +27,32 @@ if (selectedId) {
   const outputDir = path.join(projectsRoot, selectedId, "output");
   fs.mkdirSync(outputDir, { recursive: true });
   Config.setOutputLocation(path.join(outputDir, `${selectedId}.mp4`));
+
+  const studioOutLocationPath = path.join(
+    rootDir,
+    "packages",
+    "video-template",
+    "src",
+    "studio-out-location.cjs",
+  );
+  Config.overrideWebpackConfig((currentConfiguration) => ({
+    ...currentConfiguration,
+    plugins: [
+      ...(currentConfiguration.plugins ?? []),
+      new webpack.DefinePlugin({
+        "process.env.WHYVIDEO_STUDIO_PROJECT_ID": JSON.stringify(selectedId),
+      }),
+      new webpack.NormalModuleReplacementPlugin(
+        /get-default-out-name(\.js)?$/,
+        (resource) => {
+          if (
+            resource.context &&
+            /[/\\]@remotion[/\\]studio-shared([/\\]|$)/.test(resource.context)
+          ) {
+            resource.request = studioOutLocationPath;
+          }
+        },
+      ),
+    ],
+  }));
 }

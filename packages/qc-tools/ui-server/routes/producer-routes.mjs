@@ -1,11 +1,11 @@
 import fs from 'fs';
 import { normalizePromptConfig } from '../lib/config.mjs';
-import { hasProjectEditLease } from '../lib/edit-service.mjs';
+import { hasProjectEditLease, canDeleteProjectNow, clearProjectEditState } from '../lib/edit-service.mjs';
 import { sharedRuntimeConfig } from '../lib/shared-services.mjs';
 import path from 'path';
 import { rootDir, defaultProjectId, getPaths, readBody, alignJobs } from '../lib/config.mjs';
 import { resolveProjectVideoPath } from '../../project-paths.mjs';
-import { ensureRemotionStudio } from '../lib/remotion-studio-service.mjs';
+import { ensureRemotionStudio, stopRemotionStudio } from '../lib/remotion-studio-service.mjs';
 import {
   listProjects,
   getProjectTiming,
@@ -160,7 +160,7 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
     );
   }
 
-  // 删除工程（基准工程保护）
+  // 删除工程
   if (req.method === 'POST' && pathname === '/api/delete-project') {
     const body = await readBody(req);
     const targetProject = String(body.projectId || '').trim();
@@ -172,19 +172,24 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
       res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
       return res.end(JSON.stringify({ ok: false, error: '无权删除此工程' }));
     }
-    if (targetProject === defaultProjectId) {
-      res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-      return res.end(JSON.stringify({ ok: false, error: '基准工程不可删除' }));
+    if (req.user) {
+      const check = canDeleteProjectNow(req, targetProject);
+      if (!check.ok) {
+        res.writeHead(check.status, { 'Content-Type': 'application/json; charset=utf-8' });
+        return res.end(JSON.stringify({ ok: false, error: check.error }));
+      }
     }
+    stopRemotionStudio(targetProject);
     const targetDir = path.join(rootDir, 'projects', targetProject);
-    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true });
+    if (fs.existsSync(targetDir)) fs.rmSync(targetDir, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+    clearProjectEditState(targetProject, req.accountStore);
     if (req.user) req.accountStore.removeProjectOwner(targetProject);
     const projects = listProjects().filter(project => !req.user || req.accountStore.canReadProject(req.user, project.id));
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({
       ok: true,
       deletedProjectId: targetProject,
-      nextActiveProjectId: projects[0]?.id || (req.user ? null : defaultProjectId),
+      nextActiveProjectId: projects[0]?.id || null,
       projects,
     }));
   }

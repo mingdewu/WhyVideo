@@ -36,8 +36,26 @@ function currentLease(project, store) {
     return null;
   }
   if (lease && isBusy(lease, project)) lease.expiresAt = Date.now() + lifetime;
-  if (lease && store.getProjectOwner(project) !== lease.userId) store.setProjectDelegate(project, lease.userId, lease.expiresAt);
+  const ownerId = store.getProjectOwner(project);
+  if (lease && ownerId !== null && ownerId !== lease.userId) store.setProjectDelegate(project, lease.userId, lease.expiresAt);
   return lease;
+}
+
+export function canDeleteProjectNow(req, project) {
+  const lease = currentLease(project, req.accountStore);
+  if (lease && req.user && lease.userId !== req.user.id) {
+    return { ok: false, status: 409, error: '该工程正在由 ' + lease.username + ' 编辑，暂时无法删除' };
+  }
+  if (isBusy(lease, project)) {
+    return { ok: false, status: 409, error: '该工程仍有任务执行中，请等待完成后再删除' };
+  }
+  return { ok: true };
+}
+
+export function clearProjectEditState(project, store) {
+  leases.delete(project);
+  requests.delete(project);
+  store?.setProjectDelegate(project, null);
 }
 
 export function hasProjectEditLease(req, project) {
@@ -58,7 +76,8 @@ export async function handleEditRoutes(req, res, url) {
   if (!req.user || !store.canReadProject(req.user, project)) { reply(res, 403, { error: '无权访问此工程' }); return true; }
   const lease = currentLease(project, store);
   const token = req.headers['x-edit-token'];
-  const owned = store.getProjectOwner(project) === req.user.id;
+  const ownerId = store.getProjectOwner(project);
+  const owned = ownerId === req.user.id || (req.user.role === 'superuser' && ownerId === null);
   const mine = lease?.userId === req.user.id && lease?.token === token;
   const operation = url.pathname.slice('/api/edit/'.length);
   if (req.method === 'GET' && operation === 'state') {
@@ -99,7 +118,7 @@ export async function protectProjectWrite(req, res, url, fallbackProject) {
   if (!req.user) return false;
   const store = req.accountStore;
   // Account administration and edit controls are handled before this middleware.
-  const excluded = new Set(['/api/writer/create-blank-project', '/api/import-script-project', '/api/preview-script-segmentation', '/api/remotion-studio/open', '/api/test-provider', '/api/test-openrouter', '/api/test-tavily', '/api/test-meowload']);
+  const excluded = new Set(['/api/writer/create-blank-project', '/api/import-script-project', '/api/preview-script-segmentation', '/api/remotion-studio/open', '/api/delete-project', '/api/test-provider', '/api/test-openrouter', '/api/test-tavily', '/api/test-meowload']);
   if (req.method === 'GET' || req.method === 'HEAD' || !url.pathname.startsWith('/api/') || excluded.has(url.pathname) || url.pathname.startsWith('/api/youtube/') || url.pathname.startsWith('/api/publish/youtube/')) return false;
   try { req.bodyJson = await readBody(req); } catch { reply(res, 400, { error: '请求内容无效' }); return true; }
   const project = req.bodyJson?.projectId || fallbackProject;

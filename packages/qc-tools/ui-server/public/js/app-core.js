@@ -649,9 +649,10 @@
         const data = await res.json();
         projectsList = data.projects || [];
         
-        if (!projectsList.some(p => p.id === activeProjectId) && projectsList.length > 0) {
-          activeProjectId = projectsList[0].id;
+        if (!projectsList.some(p => p.id === activeProjectId)) {
+          activeProjectId = projectsList[0]?.id || null;
         }
+        pendingSelectedProjectId = activeProjectId;
 
         const sel = document.getElementById('projectSelect');
         sel.replaceChildren();
@@ -685,33 +686,43 @@
     }
 
     async function deleteCurrentProject() {
-      if (!activeProjectId || activeProjectId === 'why_nikko_heritage_road_001') {
-        showToast('基准工程不可删除');
+      const targetProjectId = document.getElementById('projectSelect')?.value || pendingSelectedProjectId || activeProjectId;
+      if (!targetProjectId) {
+        showToast('当前没有可删除的工程');
         return;
       }
-      if (!window.confirm('确定删除当前工程及其本地文件吗？此操作无法撤销。')) return;
+      const targetProj = projectsList.find(p => p.id === targetProjectId);
+      const label = targetProj ? `${targetProj.title} (${targetProjectId})` : targetProjectId;
+      if (!window.confirm(`确定删除工程「${label}」及其本地文件吗？此操作无法撤销。`)) return;
       try {
         const res = await fetch('/api/delete-project', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ projectId: activeProjectId }),
+          body: JSON.stringify({ projectId: targetProjectId }),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok || !data.ok) throw new Error(data.error || '删除失败');
-        activeProjectId = data.nextActiveProjectId;
-        pendingSelectedProjectId = activeProjectId;
-        const url = new URL(window.location);
-        if (!activeProjectId) {
-          localStorage.removeItem('whyvideo_active_project');
-          url.searchParams.delete('project');
-          window.location.assign(url.toString());
-          return;
+        if (targetProjectId === activeProjectId) {
+          activeProjectId = data.nextActiveProjectId || null;
+          pendingSelectedProjectId = activeProjectId;
+          const url = new URL(window.location);
+          if (!activeProjectId) {
+            localStorage.removeItem('whyvideo_active_project');
+            url.searchParams.delete('project');
+            window.location.assign(url.toString());
+            return;
+          }
+          localStorage.setItem('whyvideo_active_project', activeProjectId);
+          url.searchParams.set('project', activeProjectId);
+          window.history.pushState({}, '', url);
+          await loadProjects();
+          await loadWorkflow();
+          if (currentWorkspaceTab === 'writer') await loadWriterProjectData(activeProjectId);
+          else if (currentWorkspaceTab === 'publish') await loadPublishProject();
+        } else {
+          pendingSelectedProjectId = activeProjectId;
+          await loadProjects();
         }
-        url.searchParams.set('project', activeProjectId);
-        window.history.pushState({}, '', url);
-        await loadProjects();
-        await loadWorkflow();
-        if (currentWorkspaceTab === 'writer') await loadWriterProjectData(activeProjectId);
         showToast('已删除工程：' + data.deletedProjectId);
       } catch (e) {
         showToast('删除失败：' + e.message);
