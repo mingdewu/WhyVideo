@@ -952,10 +952,14 @@ test('POST /api/delete-project allows superuser on unowned/default project and o
       body: JSON.stringify({ projectId }),
     });
 
-    // Non-owner and non-delegated superuser receive 403 on another user's owned project.
+    // Non-owner regular user receives 403 on another user's owned project.
     assert.equal((await postDelete(otherCookie, otherOwnedId)).status, 403);
-    assert.equal((await postDelete(superCookie, otherOwnedId)).status, 403);
     assert.equal(fs.existsSync(otherOwnedDir), true);
+
+    // Superuser can delete any project, including another user's owned project.
+    const superOwnedDel = await postDelete(superCookie, otherOwnedId);
+    assert.equal(superOwnedDel.status, 200);
+    assert.equal(fs.existsSync(otherOwnedDir), false);
 
     // Superuser can delete an unowned project (including PROJECT_ID / default project) without edit lease or revision header.
     const superDel = await postDelete(superCookie, unownedId);

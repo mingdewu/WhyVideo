@@ -90,8 +90,7 @@ export function openAccountStore(directory = process.env.WHYVIDEO_AUTH_DIR || pa
     },
     canWriteProject(user, projectId) {
       if (!user || !/^[a-zA-Z0-9_-]+$/.test(projectId)) return false;
-      const ownerId = this.getProjectOwner(projectId);
-      return ownerId === user.id || (user.role === 'superuser' && (ownerId === null || (delegates.get(projectId)?.userId === user.id && delegates.get(projectId).expiresAt > Date.now())));
+      return user.role === 'superuser' || this.getProjectOwner(projectId) === user.id;
     },
     setProjectDelegate(projectId, userId, expiresAt) {
       if (userId) delegates.set(projectId, { userId, expiresAt });

@@ -82,13 +82,18 @@ export async function proxyStudio(req, res, projectId, upstreamPath = '/') {
   const studio = await ensureRemotionStudio(projectId);
   const pathname = new URL(upstreamPath, 'http://localhost').pathname;
   if (req.method === 'GET' && pathname === '/_keepalive') { res.writeHead(204); res.end(); return; }
-  // The website owns uploads, editing and the global render limit.
-  if (req.method !== 'GET' || pathname.startsWith('/api/')) {
+  const isSuperuser = req.user?.role === 'superuser';
+  // The website owns uploads, editing and the global render limit for non-superuser accounts.
+  if (!isSuperuser && (req.method !== 'GET' || pathname.startsWith('/api/'))) {
     res.writeHead(403, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ error: '请在 WhyVideo 工作台编辑素材或启动渲染' })); return;
   }
+  const upstreamHeaders = {};
+  for (const key of ['range', 'content-type', 'content-length', 'accept']) {
+    if (req.headers[key]) upstreamHeaders[key] = req.headers[key];
+  }
   await new Promise((resolve, reject) => {
-    const upstream = http.request({ host: '127.0.0.1', port: studio.port, path: upstreamPath, method: 'GET', headers: { ...(req.headers.range ? { range: req.headers.range } : {}) } }, response => {
+    const upstream = http.request({ host: '127.0.0.1', port: studio.port, path: upstreamPath, method: req.method, headers: upstreamHeaders }, response => {
       const headers = { ...response.headers, 'cache-control': 'no-store' };
       delete headers['content-length']; delete headers['content-encoding']; delete headers['transfer-encoding'];
       if (String(response.headers['content-type']).includes('text/html')) {
@@ -108,6 +113,8 @@ export async function proxyStudio(req, res, projectId, upstreamPath = '/') {
       }
       response.on('error', reject);
     });
-    upstream.on('error', reject); upstream.end();
+    upstream.on('error', reject);
+    if (req.method === 'GET' || req.method === 'HEAD') upstream.end();
+    else req.pipe(upstream);
   });
 }
