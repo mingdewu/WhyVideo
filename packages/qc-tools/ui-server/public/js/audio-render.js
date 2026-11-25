@@ -351,7 +351,8 @@
       document.getElementById('elevenlabsFields').classList.toggle('hidden', provider !== 'elevenlabs');
       document.getElementById('voiceboxFields').classList.toggle('hidden', provider !== 'voicebox');
       document.getElementById('voiceboxJobStatus').classList.remove('hidden');
-      document.getElementById('useAsNarrationLabel').classList.toggle('hidden', provider !== 'voicebox');
+      const useNarrationLbl = document.getElementById('useAsNarrationLabel');
+      if (useNarrationLbl) useNarrationLbl.classList.toggle('hidden', provider !== 'voicebox');
       if (provider === 'elevenlabs') {
         restoreElevenlabsInputs();
         const curKey = (document.getElementById('elevenlabsKeyInput')?.value || '').trim() || (window._elevenlabsKeyConfigured ? '__env__' : '');
@@ -389,6 +390,14 @@
       }
     }
 
+    function formatVoiceDurationSec(totalSeconds) {
+      const sec = Math.max(0, Math.round(Number(totalSeconds) || 0));
+      if (sec < 60) return sec + '秒';
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return s > 0 ? (m + '分' + s + '秒') : (m + '分钟');
+    }
+
     async function updateVoiceboxStatus() {
       const projectId = activeProjectId;
       const statusEl = document.getElementById('voiceboxJobStatus');
@@ -396,6 +405,14 @@
       const fullBtn = document.getElementById('btnSynthFull');
       const cancelBtn = document.getElementById('btnCancelVoicebox');
       const cancelMainBtn = document.getElementById('btnCancelVoiceboxMain');
+      const mainProgWrap = document.getElementById('voiceSynthProgressWrap');
+      const mainProgText = document.getElementById('voiceSynthProgressText');
+      const mainProgMeta = document.getElementById('voiceSynthProgressMeta');
+      const mainProgBar = document.getElementById('voiceSynthProgressBar');
+      const modalProgWrap = document.getElementById('modalVoiceSynthProgressWrap');
+      const modalProgSeg = document.getElementById('modalVoiceSynthSegText');
+      const modalProgPct = document.getElementById('modalVoiceSynthPctText');
+      const modalProgBar = document.getElementById('modalVoiceSynthProgressBar');
       if (!statusEl) return;
       try {
         const response = await fetch('/api/voicebox/status?project=' + encodeURIComponent(projectId));
@@ -423,6 +440,40 @@
           msg += '（时间轴提示：' + job.timingWarning + '）';
         }
         statusEl.textContent = msg;
+
+        const pct = typeof job.percent === 'number'
+          ? Math.max(0, Math.min(100, Math.round(job.percent)))
+          : (job.status === 'completed' ? 100 : (isRunning ? 5 : 0));
+        const totalChunks = Number(job.totalChunks) || 0;
+        const currentChunk = Number(job.currentChunk) || (Number(job.completedChunks) || 0) + 1;
+        const segStr = totalChunks > 0
+          ? ('第 ' + Math.min(totalChunks, currentChunk) + ' / ' + totalChunks + ' 段')
+          : '处理中';
+        const liveElapsedSec = job.startedAtMs
+          ? Math.max(0, Math.round((Date.now() - job.startedAtMs) / 1000))
+          : (Number(job.elapsedSec) || 0);
+        const etaStr = job.etaSec != null && job.etaSec > 0
+          ? ('预计剩余 ' + formatVoiceDurationSec(job.etaSec))
+          : (job.voiceboxStatus === 'aligning_timing' ? '正在对齐时间轴…' : '正在估算剩余时间…');
+        const metaStr = segStr + ' · ' + pct + '% · 已用时 ' + formatVoiceDurationSec(liveElapsedSec) + (isRunning ? (' · ' + etaStr) : '');
+
+        if (mainProgWrap) {
+          mainProgWrap.classList.toggle('hidden', !isRunning);
+          if (isRunning) {
+            if (mainProgText) mainProgText.textContent = '⏳ ' + (labels[job.status] || '正在生成配音…');
+            if (mainProgMeta) mainProgMeta.textContent = pct + '%';
+            if (mainProgBar) mainProgBar.style.width = pct + '%';
+          }
+        }
+        if (modalProgWrap) {
+          modalProgWrap.classList.toggle('hidden', !isRunning);
+          if (isRunning) {
+            if (modalProgSeg) modalProgSeg.textContent = metaStr;
+            if (modalProgPct) modalProgPct.textContent = pct + '%';
+            if (modalProgBar) modalProgBar.style.width = pct + '%';
+          }
+        }
+
         if (button) {
           button.disabled = isRunning;
           button.classList.toggle('opacity-50', isRunning);
@@ -432,9 +483,10 @@
           fullBtn.classList.toggle('opacity-50', isRunning);
           if (isRunning) {
             const pLabel = job.provider === 'elevenlabs' ? 'ElevenLabs' : 'Voicebox';
+            const shortSeg = totalChunks > 1 ? (' ' + Math.min(totalChunks, currentChunk) + '/' + totalChunks + '段 · ' + pct + '%') : (pct > 0 ? (' ' + pct + '%') : '');
             fullBtn.textContent = job.voiceboxStatus === 'aligning_timing'
-              ? '⏳ 正在对齐旁白时间轴...'
-              : ('⏳ 正在生成全片旁白 (' + pLabel + ')...');
+              ? '⏳ 正在对齐旁白时间轴 (' + pct + '%)...'
+              : ('⏳ 正在生成旁白 (' + pLabel + shortSeg + ')...');
           } else {
             fullBtn.textContent = '🎙️ 生成音频';
           }
@@ -491,7 +543,7 @@
       const similarityBoost = Number(document.getElementById('elevenlabsSimilaritySlider')?.value ?? localStorage.getItem('whyvideo_elevenlabs_similarity') ?? 0.8);
       const profileId = (document.getElementById('voiceboxProfileSelect')?.value || '').trim() || localStorage.getItem('whyvideo_voicebox_profile_id') || '';
       const text = document.getElementById('sampleAudioText')?.value || '';
-      const useAsNarration = Boolean(document.getElementById('useAsNarrationCheckbox')?.checked);
+      const useAsNarration = false;
 
       if (provider === 'elevenlabs') {
         if (apiKey) localStorage.setItem('whyvideo_elevenlabs_api_key', apiKey);

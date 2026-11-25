@@ -311,9 +311,13 @@ let selectedHumanizeStyle = 'humorous';
       if (btnSuspense) btnSuspense.className = style === 'suspense' ? activeClass : inactiveClass;
       if (btnColloquial) btnColloquial.className = style === 'colloquial' ? activeClass : inactiveClass;
 
-      // 切换人设风格时，若当前不处于待确认状态，则允许重新启动修复
-      if (!pendingHumanizeMeta) {
-        updateHumanizeVersionUI(null, false);
+      // 切换人设风格时，若当前存在其他风格的待确认预览结果，清除待确认状态以便按新风格重新生成
+      if (pendingHumanizeMeta && pendingHumanizeMeta.style !== style) {
+        pendingHumanizeMeta = null;
+        latestHumanizedText = '';
+        updateHumanizeVersionUI(writerData?.finalScript?.humanize_meta || null, false);
+      } else if (!pendingHumanizeMeta) {
+        updateHumanizeVersionUI(writerData?.finalScript?.humanize_meta || null, false);
       }
     }
 

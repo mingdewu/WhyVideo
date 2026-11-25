@@ -502,8 +502,24 @@ export function scenesText(scenes) {
  * 返回 getTime(j) => [s,e]
  */
 export function buildTimeLookup(timing, currentText) {
+  if (!timing || !Array.isArray(timing.times)) {
+    return { getTime: null, exact: false, count: 0, stale: true, matchRate: 0 };
+  }
   const cur = spokenIndex(currentText).chars;
   const ref = spokenIndex(timing.text).chars;
+  const totalMs = Number(timing.audio_duration_ms) || 0;
+  // 语速合理性校验：如果文案超过 80 个发音字，但音频平均每字不足 45ms（即语速 > 22字/秒，通常是几秒钟的试听测试音频误覆盖了全片），判为无效时间轴
+  if (cur.length >= 80 && (totalMs <= 0 || totalMs / cur.length < 45)) {
+    return {
+      getTime: null,
+      exact: false,
+      count: 0,
+      stale: true,
+      invalidDuration: true,
+      msPerChar: cur.length ? Number((totalMs / cur.length).toFixed(1)) : 0,
+      matchRate: 0,
+    };
+  }
   let idxMap;
   const same = cur.length === ref.length && cur.every((c, i) => c === ref[i]);
   if (same) {

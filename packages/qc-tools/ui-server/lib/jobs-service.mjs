@@ -58,7 +58,7 @@ export async function runProjectRenderJob(job) {
 }
 
 /** 把长篇文案按句末/逗号标点安全拆分为适合 TTS 单次请求的片段 */
-export function splitScriptForTts(fullText, maxChars = 1200) {
+export function splitScriptForTts(fullText, maxChars = 75) {
   const cleaned = String(fullText || '').trim();
   if (!cleaned) return [];
   if (cleaned.length <= maxChars) return [cleaned];
@@ -88,10 +88,20 @@ export function splitScriptForTts(fullText, maxChars = 1200) {
     }
   }
 
+  const targetMinChars = Math.min(50, Math.floor(maxChars * 0.68));
   const chunks = [];
   let buf = '';
   for (const u of units) {
-    if (buf && buf.length + u.length > maxChars) {
+    if (!buf) {
+      buf = u;
+      continue;
+    }
+    const endsWithSentencePunct = /[。！？!?；;”"’'）)】\]]$/.test(buf);
+    if (buf.length + u.length > maxChars) {
+      chunks.push(buf);
+      buf = u;
+    } else if (buf.length >= targetMinChars && endsWithSentencePunct) {
+      // 已经达到 50+ 字且刚结束一个完整句子，优先在此处切段，避免单段塞太多句子导致末尾音质劣化
       chunks.push(buf);
       buf = u;
     } else {
@@ -151,38 +161,146 @@ export async function finalizeProjectNarration(job, curPaths, wavPath, fullText,
   return narrationPath;
 }
 
+function formatDurationText(totalSeconds) {
+  const sec = Math.max(0, Math.round(Number(totalSeconds) || 0));
+  if (sec < 60) return `${sec}秒`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return s > 0 ? `${m}分${s}秒` : `${m}分钟`;
+}
+
 export async function runVoiceboxJob(job, text) {
   const curPaths = getPaths(job.projectId);
   const fileName = 'voicebox_' + randomUUID() + '.wav';
   const outputPath = path.join(curPaths.audioDir, fileName);
   const controller = new AbortController();
   voiceJobControllers.set(job.projectId, controller);
+  let tmpDir = null;
   try {
     fs.mkdirSync(curPaths.audioDir, { recursive: true });
-    const result = await synthesizeWithVoicebox({
-      text,
-      profileId: job.profileId || undefined,
-      outputPath,
-      maxWaitMs: 2 * 60 * 60 * 1000,
-      loadingTimeoutMs: 180000,
-      signal: controller.signal,
-      onProgress: (status, generationId) => {
-        job.status = 'generating';
-        job.voiceboxStatus = status;
-        job.generationId = generationId;
-        job.progressText = status === 'loading_model'
-          ? 'Voicebox 正在加载模型 (loading_model)…'
-          : `Voicebox 正在生成音频 (${status})…`;
-      },
-    });
+    const chunks = splitScriptForTts(text, 75);
+    if (!chunks.length) throw new Error('合成文本不能为空');
+
+    const totalChars = chunks.reduce((sum, c) => sum + c.length, 0) || 1;
+    let completedChars = 0;
+    const startedAtMs = Date.now();
+    const synthCapPct = job.useAsNarration ? 92 : 98;
+
+    job.startedAtMs = startedAtMs;
+    job.totalChunks = chunks.length;
+    job.completedChunks = 0;
+    job.currentChunk = 1;
+    job.percent = 0;
+    job.elapsedSec = 0;
+    job.etaSec = null;
+
+    if (chunks.length > 1) {
+      tmpDir = fs.mkdtempSync(path.join(curPaths.audioDir, '.vb-tmp-'));
+    }
+
+    const segNames = [];
+    let totalDuration = 0;
+    let profileName = null;
+
+    const updateProgressFields = (chunkIdx, subStatus) => {
+      const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+      job.elapsedSec = Math.round(elapsedMs / 1000);
+      job.currentChunk = chunkIdx + 1;
+      const inFlightRatio = subStatus === 'loading_model' ? 0.1 : 0.35;
+      const effectiveChars = completedChars + (chunks[chunkIdx]?.length || 0) * inFlightRatio;
+      job.percent = Math.min(synthCapPct, Math.max(1, Math.round((effectiveChars / totalChars) * synthCapPct)));
+
+      if (completedChars > 0 && elapsedMs > 1000) {
+        const msPerChar = elapsedMs / completedChars;
+        const remainingChars = Math.max(0, totalChars - completedChars);
+        const alignBufferSec = job.useAsNarration ? 6 : 1;
+        job.etaSec = Math.max(1, Math.round((remainingChars * msPerChar) / 1000) + alignBufferSec);
+      } else {
+        job.etaSec = null;
+      }
+
+      const segLabel = chunks.length > 1 ? `第 ${chunkIdx + 1}/${chunks.length} 段` : '1/1 段';
+      const timeLabel = `已用时 ${formatDurationText(job.elapsedSec)}` + (job.etaSec != null ? ` · 预计剩余 ${formatDurationText(job.etaSec)}` : ' · 正在估算剩余时间…');
+      if (subStatus === 'loading_model') {
+        job.progressText = `Voicebox 正在加载模型（${segLabel} · ${timeLabel}）`;
+      } else {
+        job.progressText = `Voicebox 正在生成配音（${segLabel} · ${job.percent}% · ${timeLabel}）`;
+      }
+    };
+
+    for (let i = 0; i < chunks.length; i++) {
+      if (controller.signal.aborted) throw new Error('Voicebox 配音任务已取消');
+      job.status = 'generating';
+      updateProgressFields(i, 'generating');
+
+      const segName = `seg_${String(i + 1).padStart(3, '0')}.wav`;
+      const segOutputPath = chunks.length === 1 ? outputPath : path.join(tmpDir, segName);
+
+      const result = await synthesizeWithVoicebox({
+        text: chunks[i],
+        profileId: job.profileId || undefined,
+        outputPath: segOutputPath,
+        maxWaitMs: 60 * 60 * 1000,
+        loadingTimeoutMs: 180000,
+        signal: controller.signal,
+        onProgress: (status, generationId) => {
+          job.status = 'generating';
+          job.voiceboxStatus = status;
+          job.generationId = generationId;
+          updateProgressFields(i, status);
+        },
+      });
+
+      segNames.push(segName);
+      totalDuration += Number(result.duration) || 0;
+      if (result.profileName) profileName = result.profileName;
+      completedChars += chunks[i].length;
+      job.completedChunks = i + 1;
+      const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+      job.elapsedSec = Math.round(elapsedMs / 1000);
+      job.percent = Math.min(synthCapPct, Math.round((completedChars / totalChars) * synthCapPct));
+      if (completedChars < totalChars && elapsedMs > 500) {
+        const msPerChar = elapsedMs / completedChars;
+        const alignBufferSec = job.useAsNarration ? 6 : 1;
+        job.etaSec = Math.max(1, Math.round(((totalChars - completedChars) * msPerChar) / 1000) + alignBufferSec);
+      } else {
+        job.etaSec = job.useAsNarration ? 6 : 1;
+      }
+    }
+
+    if (chunks.length > 1) {
+      job.voiceboxStatus = 'concatenating';
+      job.percent = job.useAsNarration ? 93 : 99;
+      job.progressText = `正在无缝拼接 ${chunks.length} 段音频…`;
+      const listTxt = segNames.map((n) => `file '${n}'`).join('\n');
+      fs.writeFileSync(path.join(tmpDir, 'list.txt'), listTxt, 'utf8');
+      const ff = spawnSync(
+        'ffmpeg',
+        ['-y', '-f', 'concat', '-safe', '0', '-i', 'list.txt', '-ar', '44100', '-ac', '1', '-c:a', 'pcm_s16le', outputPath],
+        { cwd: tmpDir, encoding: 'utf8' },
+      );
+      if (ff.status !== 0) {
+        throw new Error(`ffmpeg 拼接 Voicebox 分段音频失败: ${(ff.stderr || '').slice(-400)}`);
+      }
+      const probedMs = probeDurationMs(outputPath);
+      if (probedMs) totalDuration = Number((probedMs / 1000).toFixed(1));
+    }
+
     if (job.useAsNarration) {
+      job.percent = 95;
+      job.etaSec = 5;
       await finalizeProjectNarration(job, curPaths, outputPath, text, controller.signal);
     }
+    job.elapsedSec = Math.round(Math.max(0, Date.now() - startedAtMs) / 1000);
+    job.percent = 100;
+    job.etaSec = 0;
     job.status = 'completed';
-    job.progressText = job.useAsNarration ? '全片旁白生成与逐字时间轴已同步' : '配音已完成';
+    job.progressText = job.useAsNarration
+      ? `全片旁白生成与逐字时间轴已同步（共 ${chunks.length} 段 · 用时 ${formatDurationText(job.elapsedSec)}）`
+      : `配音已完成（共 ${chunks.length} 段 · 用时 ${formatDurationText(job.elapsedSec)}）`;
     job.audioUrl = '/public/' + job.projectId + '/audio/' + fileName + '?t=' + Date.now();
-    job.duration = result.duration;
-    job.profileName = result.profileName;
+    job.duration = Number(totalDuration.toFixed(1)) || null;
+    job.profileName = profileName;
   } catch (error) {
     if (controller.signal.aborted) {
       job.status = 'cancelled';
@@ -192,6 +310,9 @@ export async function runVoiceboxJob(job, text) {
       job.error = error.message;
     }
   } finally {
+    if (tmpDir) {
+      try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+    }
     voiceJobControllers.delete(job.projectId);
     job.finishedAt = new Date().toISOString();
   }
@@ -208,12 +329,32 @@ export async function runElevenlabsFullJob(job, { fullText, voiceId, modelId, st
     const chunks = splitScriptForTts(fullText, 1200);
     if (!chunks.length) throw new Error('当前工程分镜文案为空，无法生成全片旁白');
 
+    const totalChars = chunks.reduce((sum, c) => sum + c.length, 0) || 1;
+    let completedChars = 0;
+    const startedAtMs = Date.now();
+    job.startedAtMs = startedAtMs;
+    job.totalChunks = chunks.length;
+    job.completedChunks = 0;
+    job.currentChunk = 1;
+    job.percent = 0;
+    job.elapsedSec = 0;
+    job.etaSec = null;
+
     tmpDir = fs.mkdtempSync(path.join(curPaths.audioDir, '.el-tmp-'));
     const segNames = [];
     for (let i = 0; i < chunks.length; i++) {
       if (controller.signal.aborted) throw new Error('已手动取消配音任务');
       job.status = 'generating';
-      job.progressText = `ElevenLabs 正在生成全片旁白（第 ${i + 1}/${chunks.length} 段）…`;
+      job.currentChunk = i + 1;
+      const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+      job.elapsedSec = Math.round(elapsedMs / 1000);
+      job.percent = Math.min(92, Math.max(1, Math.round(((completedChars + chunks[i].length * 0.3) / totalChars) * 92)));
+      if (completedChars > 0 && elapsedMs > 500) {
+        const msPerChar = elapsedMs / completedChars;
+        job.etaSec = Math.max(1, Math.round(((totalChars - completedChars) * msPerChar) / 1000) + 5);
+      }
+      const timeLabel = `已用时 ${formatDurationText(job.elapsedSec)}` + (job.etaSec != null ? ` · 预计剩余 ${formatDurationText(job.etaSec)}` : '');
+      job.progressText = `ElevenLabs 正在生成全片旁白（第 ${i + 1}/${chunks.length} 段 · ${job.percent}% · ${timeLabel}）…`;
 
       const ttsPayload = buildElevenlabsTtsPayload({
         text: chunks[i],
@@ -243,8 +384,12 @@ export async function runElevenlabsFullJob(job, { fullText, voiceId, modelId, st
       const segName = `seg_${String(i + 1).padStart(3, '0')}.mp3`;
       fs.writeFileSync(path.join(tmpDir, segName), buf);
       segNames.push(segName);
+      completedChars += chunks[i].length;
+      job.completedChunks = i + 1;
+      job.percent = Math.min(92, Math.round((completedChars / totalChars) * 92));
     }
 
+    job.percent = 94;
     job.progressText = '正在拼接音频并转为成片标准 WAV…';
     const narrationPath = path.join(curPaths.audioDir, 'narration.wav');
     let ffmpegArgs;
@@ -263,8 +408,11 @@ export async function runElevenlabsFullJob(job, { fullText, voiceId, modelId, st
 
     await finalizeProjectNarration(job, curPaths, narrationPath, fullText, controller.signal);
 
+    job.elapsedSec = Math.round(Math.max(0, Date.now() - startedAtMs) / 1000);
+    job.percent = 100;
+    job.etaSec = 0;
     job.status = 'completed';
-    job.progressText = `ElevenLabs 全片旁白已生成并对齐时间轴（共 ${chunks.length} 段）`;
+    job.progressText = `ElevenLabs 全片旁白已生成并对齐时间轴（共 ${chunks.length} 段 · 用时 ${formatDurationText(job.elapsedSec)}）`;
     job.audioUrl = `/public/${job.projectId}/audio/narration.wav?t=${Date.now()}`;
     const durMs = probeDurationMs(narrationPath);
     job.duration = durMs ? Number((durMs / 1000).toFixed(1)) : null;

@@ -112,11 +112,16 @@
         <div id="fullScriptSummaryBox" class="px-3 py-2 rounded-xl bg-ok-soft border border-ok-line text-xs text-ok">
           📄 全片旁白：确认保存当前配音引擎设置后，点击主界面顶部的「🎙️ 生成音频」即可生成整部视频配音并对齐时间轴
         </div>
-        <label id="useAsNarrationLabel" class="flex items-center gap-2 text-xs text-ink-secondary">
-          <input type="checkbox" id="useAsNarrationCheckbox" class="accent-emerald-500" />
-          试听测试时也设为当前工程成片旁白（Voicebox）
-        </label>
         <div id="voiceboxJobStatus" class="text-xs text-ink-secondary font-medium"></div>
+        <div id="modalVoiceSynthProgressWrap" class="hidden space-y-1">
+          <div class="flex items-center justify-between text-[11px] text-ok font-mono font-bold">
+            <span id="modalVoiceSynthSegText">0 / 0 段</span>
+            <span id="modalVoiceSynthPctText">0%</span>
+          </div>
+          <div class="w-full h-2 rounded-full bg-subtle border border-line overflow-hidden">
+            <div id="modalVoiceSynthProgressBar" class="h-full rounded-full transition-all duration-300 bg-ok-solid" style="width: 0%;"></div>
+          </div>
+        </div>
 
         <div id="audioPlayerContainer" class="hidden p-3 rounded-xl bg-subtle border border-line">
           <audio id="audioPreviewPlayer" controls class="w-full h-8"></audio>

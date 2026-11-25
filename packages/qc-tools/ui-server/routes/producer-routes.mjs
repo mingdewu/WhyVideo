@@ -28,6 +28,7 @@ import {
   alignNarration,
   buildTimeLookup,
   isSpoken,
+  probeDurationMs,
   timingPath,
   scenesText,
   sceneSpokenRanges,
@@ -519,12 +520,20 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
     try {
       let timing = getProjectTiming(targetProject);
       const text = scenesText(scenes);
+      const spokenCount = Array.from(text).filter((c) => /\S/.test(c)).length;
       if (!timing || buildTimeLookup(timing, text).stale) {
         const audioPath = findProjectAudioPath(curPaths, manifest);
         if (!audioPath) {
           updateCutProgress(0, '缺少配音音频', { done: true, error: '请先生成或上传配音音频，再按声音时间轴排切点' });
           res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
           return res.end(JSON.stringify({ ok: false, error: '请先生成或上传配音音频，再按声音时间轴排切点' }));
+        }
+        const durMs = probeDurationMs(audioPath);
+        if (spokenCount >= 80 && durMs > 0 && durMs / spokenCount < 45) {
+          const errMsg = `当前旁白音频时长仅 ${(durMs / 1000).toFixed(1)} 秒，与全片文案（${spokenCount} 字）严重不匹配（可能是试听测试音频）。请先点击「🎙️ 生成音频」生成完整全片旁白后再排切点！`;
+          updateCutProgress(0, '旁白音频时长异常', { done: true, error: errMsg });
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          return res.end(JSON.stringify({ ok: false, error: errMsg }));
         }
         alignJobs.set(targetProject, true);
         updateCutProgress(12, '正在用 Whisper 对齐配音时间轴（首次或文案改动后需数秒）...');

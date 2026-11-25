@@ -20,14 +20,7 @@ function escapeHtml(value) {
   }[c]));
 }
 
-function buildAuthToolbarScript(user) {
-  const adminLinks = user.role === 'superuser'
-    ? "const link=document.createElement('a');link.href='/account-management';link.textContent='账号管理';link.style.cssText='padding:8px 12px;background:#374151;color:white;border-radius:8px';box.appendChild(link);const settings=document.createElement('a');settings.href='/service-settings';settings.textContent='共享服务设置';settings.style.cssText=link.style.cssText;box.appendChild(settings);"
-    : '';
-  return `<script>window.addEventListener('DOMContentLoaded',()=>{const box=document.createElement('div');box.style.cssText='position:fixed;right:12px;bottom:12px;z-index:9999;display:flex;gap:8px';${adminLinks}const button=document.createElement('button');button.textContent='退出登录';button.style.cssText='padding:8px 12px;background:#374151;color:white;border-radius:8px';button.onclick=async()=>{await fetch('/api/auth/logout',{method:'POST'});location.href='/'};box.appendChild(button);document.body.appendChild(box)});</script>`;
-}
-
-/** Render the main studio HTML shell with server-injected project options and auth toolbar. */
+/** Render the main studio HTML shell with server-injected project options and auth context. */
 export function renderMainHtml(curProjectId = defaultProjectId, user = null) {
   const serverProjects = listProjects().filter((project) => !user || accountStore.canReadProject(user, project.id));
   const serverOptions = serverProjects
@@ -43,14 +36,12 @@ export function renderMainHtml(curProjectId = defaultProjectId, user = null) {
     .replace(/  <!--PARTIAL:([a-z-]+)-->\n\n/gm, (_, name) =>
       fs.readFileSync(path.join(studioPublicDir, 'partials', `${name}.html`), 'utf8'));
 
-  let html = templateHtml
+  const userPayload = user ? { id: user.id, username: user.username, role: user.role } : null;
+  const html = templateHtml
     .replace('<!--SERVER_PROJECT_OPTIONS-->', () => serverOptions)
     .replace('<!--SERVER_DEFAULT_PROJECT-->', () =>
-      `<script>window.STUDIO_DEFAULT_PROJECT_ID = ${JSON.stringify(curProjectId).replace(/</g, '\\u003c')};window.STUDIO_CURRENT_USER_ID = ${JSON.stringify(user?.id || null).replace(/</g, '\\u003c')};</script><script src="/studio/js/edit-session.js"></script>`);
+      `<script>window.STUDIO_DEFAULT_PROJECT_ID = ${JSON.stringify(curProjectId).replace(/</g, '\\u003c')};window.STUDIO_CURRENT_USER_ID = ${JSON.stringify(user?.id || null).replace(/</g, '\\u003c')};window.STUDIO_CURRENT_USER = ${JSON.stringify(userPayload).replace(/</g, '\\u003c')};</script><script src="/studio/js/edit-session.js"></script>`);
 
-  if (user) {
-    html = html.replace('</body>', `${buildAuthToolbarScript(user)}</body>`);
-  }
   return html;
 }
 

@@ -110,9 +110,12 @@
         </div>
       </div>
 
-      <!-- 右侧：对应工作台快捷动作组 -->
+      <!-- 右侧：顶部右上角账号菜单 + 工作台快捷动作组 -->
       <div class="min-w-0 flex flex-col items-end gap-2 w-full">
-        <!-- 两种工作台共用固定高度的操作区，避免下方内容随按钮换行跳动 -->
+        <!-- 第一行（右）：右上角统一账号、系统管理与编辑状态入口 -->
+        <div id="studioAccountMenuMount" class="relative z-50 w-full flex justify-end empty:hidden"></div>
+
+        <!-- 第二行（右）：两种工作台共用固定高度的操作区，避免下方内容随按钮换行跳动 -->
         <div class="min-h-[56px] w-full flex items-start justify-end">
           <!-- 视觉分镜制作台快捷操作组 -->
           <div id="producerHeaderActions" class="w-full flex flex-wrap content-start justify-end items-center gap-2">

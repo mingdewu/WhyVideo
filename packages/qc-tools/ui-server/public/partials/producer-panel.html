@@ -69,6 +69,17 @@
         </div>
       </div>
 
+      <!-- 全片配音生成实时进度条（Voicebox / ElevenLabs） -->
+      <div id="voiceSynthProgressWrap" class="hidden pt-1.5 border-t border-line space-y-1">
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ok">
+          <span id="voiceSynthProgressText" class="truncate font-semibold">⏳ 准备生成配音...</span>
+          <span id="voiceSynthProgressMeta" class="shrink-0 font-mono font-bold text-ok">0%</span>
+        </div>
+        <div class="w-full h-1.5 rounded-full bg-surface border border-line overflow-hidden">
+          <div id="voiceSynthProgressBar" class="h-full rounded-full transition-all duration-300 bg-ok-solid" style="width: 0%;"></div>
+        </div>
+      </div>
+
       <!-- 关键词/停顿智能排切点进度条 -->
       <div id="autoPlanCutsProgressWrap" class="hidden pt-1.5 border-t border-line space-y-1">
         <div class="flex items-center justify-between text-[11px] text-accent">
