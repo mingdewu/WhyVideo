@@ -17,7 +17,7 @@ function getProjectNarrationAudioUrl() {
         const active = window._playingShotIdx === i;
         btn.textContent = active ? '⏹️ 停止' : '🔊 试听';
         btn.className = 'px-1.5 py-0.5 rounded ' +
-          (active ? 'bg-rose-600 text-white border-rose-400' : 'bg-emerald-600/25 hover:bg-emerald-600/45 text-emerald-200 border-emerald-500/40') +
+          (active ? 'bg-danger-solid text-ink-inverse border-danger-line' : 'bg-ok-soft hover:bg-ok-soft text-ok border-ok-line') +
           ' border text-[9px] font-bold transition cursor-pointer shadow-sm';
       }
     }
@@ -116,7 +116,7 @@ function getProjectNarrationAudioUrl() {
         }
       }
       if (!summary) {
-        badge.className = 'px-2.5 py-0.5 rounded-lg bg-gray-900 border border-gray-700 text-gray-300 font-semibold';
+        badge.className = 'px-2.5 py-0.5 rounded-lg bg-surface border border-line text-ink-secondary font-semibold';
         badge.textContent = '📐 时间轴：按字数估算';
         if (rhythmEl) rhythmEl.classList.add('hidden');
         return;
@@ -124,16 +124,16 @@ function getProjectNarrationAudioUrl() {
       if (summary.available && !summary.stale) {
         const mLabel = summary.method === 'whisper' ? 'Whisper 逐字对齐' : '音频停顿对齐';
         const sec = ((summary.audio_duration_ms || 0) / 1000).toFixed(1);
-        badge.className = 'px-2.5 py-0.5 rounded-lg bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-semibold';
+        badge.className = 'px-2.5 py-0.5 rounded-lg bg-ok-soft border border-ok-line text-ok font-semibold';
         badge.textContent = '🎙️ 已对齐真实配音（' + mLabel + ' · ' + sec + 's）';
       } else if (summary.available && summary.stale) {
-        badge.className = 'px-2.5 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300 font-semibold';
+        badge.className = 'px-2.5 py-0.5 rounded-lg bg-warn-soft border border-warn-line text-warn font-semibold';
         badge.textContent = '⚠️ 文案变动，旧时间轴已过期（请重新生成全片旁白）';
       } else if (summary.has_audio_file) {
-        badge.className = 'px-2.5 py-0.5 rounded-lg bg-sky-500/15 border border-sky-500/40 text-sky-300 font-semibold';
+        badge.className = 'px-2.5 py-0.5 rounded-lg bg-info-soft border border-info-line text-info font-semibold';
         badge.textContent = '🎧 已检测到配音 (' + (summary.audio_file_name || '音频') + ')，点击右侧智能排切自动对齐';
       } else {
-        badge.className = 'px-2.5 py-0.5 rounded-lg bg-gray-900 border border-gray-700 text-gray-400 font-semibold';
+        badge.className = 'px-2.5 py-0.5 rounded-lg bg-surface border border-line text-ink-muted font-semibold';
         badge.textContent = '📐 时间轴：按字数估算（先生成 Voicebox 配音即可按真实时间切画面）';
       }
 
@@ -145,10 +145,10 @@ function getProjectNarrationAudioUrl() {
           const warns = Array.isArray(r.warnings) ? r.warnings : [];
           rhythmEl.classList.remove('hidden');
           if (warns.length) {
-            rhythmEl.className = 'px-2 py-0.5 rounded-lg bg-amber-500/15 border border-amber-500/40 text-amber-300';
+            rhythmEl.className = 'px-2 py-0.5 rounded-lg bg-warn-soft border border-warn-line text-warn';
             rhythmEl.textContent = '⚠️ ' + warns[0] + '（句末切 ' + sentPct + '% · 句中切 ' + midPct + '%）';
           } else {
-            rhythmEl.className = 'px-2 py-0.5 rounded-lg bg-indigo-500/15 border border-indigo-500/30 text-indigo-200';
+            rhythmEl.className = 'px-2 py-0.5 rounded-lg bg-accent-soft border border-accent-line text-accent';
             rhythmEl.textContent = '🎞️ 节奏自然（句末切 ' + sentPct + '% · 句中切 ' + midPct + '%）';
           }
         } else {
@@ -274,14 +274,14 @@ function getProjectNarrationAudioUrl() {
         const prevText = String(scenes[idx - 1].narration_text || '');
         const tailStart = Math.max(0, prevText.length - 28);
         let prevCharsHtml = '';
-        if (tailStart > 0) prevCharsHtml += '<span class="text-gray-500 px-0.5">…</span>';
+        if (tailStart > 0) prevCharsHtml += '<span class="text-ink-muted px-0.5">…</span>';
         for (let i = tailStart; i < prevText.length; i++) {
           const ch = prevText[i];
           if (!ch.trim()) continue;
           if (i === 0) {
-            prevCharsHtml += '<span class="px-0.5 text-gray-500">' + escapeHtml(ch) + '</span>';
+            prevCharsHtml += '<span class="px-0.5 text-ink-muted">' + escapeHtml(ch) + '</span>';
           } else {
-            prevCharsHtml += '<button type="button" onclick="moveCutToPrevChar(' + idx + ', ' + i + ')" title="点击后，从「' + escapeHtml(ch) + '」开始提前切到本画面" class="px-1 py-0.5 rounded hover:bg-indigo-600 hover:text-white text-indigo-200 bg-indigo-950/60 border border-indigo-500/20 text-[11px] leading-tight cursor-pointer transition">' + escapeHtml(ch) + '</button>';
+            prevCharsHtml += '<button type="button" onclick="moveCutToPrevChar(' + idx + ', ' + i + ')" title="点击后，从「' + escapeHtml(ch) + '」开始提前切到本画面" class="px-1 py-0.5 rounded hover:bg-action-hover hover:text-ink-inverse text-accent bg-accent-soft border border-accent-line text-[11px] leading-tight cursor-pointer transition">' + escapeHtml(ch) + '</button>';
           }
         }
 
@@ -291,18 +291,18 @@ function getProjectNarrationAudioUrl() {
           const ch = currText[i];
           if (!ch.trim()) continue;
           if (i === 0) {
-            currHeadHtml += '<span class="px-0.5 text-gray-500">' + escapeHtml(ch) + '</span>';
+            currHeadHtml += '<span class="px-0.5 text-ink-muted">' + escapeHtml(ch) + '</span>';
           } else {
-            currHeadHtml += '<button type="button" onclick="moveCutToCurrChar(' + idx + ', ' + i + ')" title="点击后，把「' + escapeHtml(ch) + '」之前的字退回上一画面" class="px-1 py-0.5 rounded hover:bg-sky-600 hover:text-white text-sky-200 bg-sky-950/60 border border-sky-500/20 text-[11px] leading-tight cursor-pointer transition">' + escapeHtml(ch) + '</button>';
+            currHeadHtml += '<button type="button" onclick="moveCutToCurrChar(' + idx + ', ' + i + ')" title="点击后，把「' + escapeHtml(ch) + '」之前的字退回上一画面" class="px-1 py-0.5 rounded hover:bg-info-solid hover:text-ink-inverse text-info bg-info-soft border border-info-line text-[11px] leading-tight cursor-pointer transition">' + escapeHtml(ch) + '</button>';
           }
         }
-        if (headEnd < currText.length) currHeadHtml += '<span class="text-gray-500 px-0.5">…</span>';
+        if (headEnd < currText.length) currHeadHtml += '<span class="text-ink-muted px-0.5">…</span>';
 
-        html += '<div class="space-y-1 pb-2 border-b border-gray-800">' +
-          '<div class="text-[10px] font-bold text-indigo-300">⬅️ 挪动换画面点（点哪个字，本画面就从这个字开始，不增减镜头）：</div>' +
+        html += '<div class="space-y-1 pb-2 border-b border-line">' +
+          '<div class="text-[10px] font-bold text-accent">⬅️ 挪动换画面点（点哪个字，本画面就从这个字开始，不增减镜头）：</div>' +
           '<div class="flex flex-wrap items-center gap-0.5 leading-relaxed">' +
             prevCharsHtml +
-            '<span class="px-1.5 py-0.5 mx-1 rounded bg-amber-500/25 text-amber-300 border border-amber-500/40 text-[10px] font-black">｜当前切点</span>' +
+            '<span class="px-1.5 py-0.5 mx-1 rounded bg-warn-soft text-warn border border-warn-line text-[10px] font-black">｜当前切点</span>' +
             currHeadHtml +
           '</div>' +
         '</div>';
@@ -313,16 +313,16 @@ function getProjectNarrationAudioUrl() {
         const ch = currText[i];
         if (!ch.trim()) continue;
         if (i === 0) {
-          splitCharsHtml += '<span class="px-0.5 text-gray-500 text-[11px]">' + escapeHtml(ch) + '</span>';
+          splitCharsHtml += '<span class="px-0.5 text-ink-muted text-[11px]">' + escapeHtml(ch) + '</span>';
         } else {
-          splitCharsHtml += '<button type="button" onclick="splitShotAtChar(' + idx + ', ' + i + ')" title="点击后，在「' + escapeHtml(ch) + '」前面新增一个换画面点" class="px-1 py-0.5 rounded hover:bg-purple-600 hover:text-white text-gray-200 bg-gray-950 border border-gray-700/80 text-[11px] leading-tight cursor-pointer transition">' + escapeHtml(ch) + '</button>';
+          splitCharsHtml += '<button type="button" onclick="splitShotAtChar(' + idx + ', ' + i + ')" title="点击后，在「' + escapeHtml(ch) + '」前面新增一个换画面点" class="px-1 py-0.5 rounded hover:bg-action-hover hover:text-ink-inverse text-ink bg-subtle border border-line text-[11px] leading-tight cursor-pointer transition">' + escapeHtml(ch) + '</button>';
         }
       }
 
       html += '<div class="space-y-1">' +
         '<div class="flex flex-wrap items-center justify-between gap-1">' +
-          '<span class="text-[10px] font-bold text-purple-300">✂️ 新增换画面点（点哪个字，就在那个字前切出新镜头）：</span>' +
-          '<button type="button" onclick="quickAutoSplitShot(' + idx + ')" class="px-1.5 py-0.5 rounded bg-purple-600/30 hover:bg-purple-600 text-purple-200 hover:text-white border border-purple-500/40 text-[10px] font-bold cursor-pointer transition">⚡ 在逗号处自动一分为二</button>' +
+          '<span class="text-[10px] font-bold text-accent">✂️ 新增换画面点（点哪个字，就在那个字前切出新镜头）：</span>' +
+          '<button type="button" onclick="quickAutoSplitShot(' + idx + ')" class="px-1.5 py-0.5 rounded bg-accent-soft hover:bg-action-hover text-accent hover:text-ink-inverse border border-accent-line text-[10px] font-bold cursor-pointer transition">⚡ 在逗号处自动一分为二</button>' +
         '</div>' +
         '<div class="flex flex-wrap items-center gap-0.5 leading-relaxed">' + splitCharsHtml + '</div>' +
       '</div>';

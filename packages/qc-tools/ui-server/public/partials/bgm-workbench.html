@@ -1,59 +1,59 @@
   <!-- 🎵 AI 自适应 BGM 背景音乐与闭环 Review 工作台 -->
-  <div id="bgmModal" onclick="if(event.target===this) toggleBgmModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
-    <div class="card w-full max-w-3xl p-6 rounded-2xl border border-amber-500/50 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
-      <div class="flex items-center justify-between pb-3 border-b border-gray-800">
+  <div id="bgmModal" onclick="if(event.target===this) toggleBgmModal()" class="studio-modal fixed inset-0 bg-backdrop backdrop-blur-md z-50 flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-3xl p-6 rounded-2xl border border-warn-line shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between pb-3 border-b border-line">
         <div>
-          <h3 class="text-lg font-bold text-white flex items-center gap-2">
+          <h3 class="text-lg font-bold text-ink flex items-center gap-2">
             🎵 AI 自适应 BGM 音乐与审查工作台
           </h3>
-          <p class="text-xs text-amber-300/80 mt-0.5">
+          <p class="text-xs text-warn mt-0.5">
             上传音乐后，AI 自动听取片段、结合文案选曲并编排整片。需要支持音频输入的模型，可能产生模型调用费用。
           </p>
         </div>
-        <button type="button" onclick="toggleBgmModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800/80 transition duration-150 text-xl font-bold cursor-pointer shrink-0 border border-transparent hover:border-gray-700" title="关闭退出 (Esc)">✕</button>
+        <button type="button" onclick="toggleBgmModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-ink-muted hover:text-ink hover:bg-muted transition duration-150 text-xl font-bold cursor-pointer shrink-0 border border-transparent hover:border-line-strong" title="关闭退出 (Esc)">✕</button>
       </div>
 
       <div class="space-y-4">
         <!-- 顶部调度模型 + 启用开关 -->
-        <div class="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-xs text-amber-200">
+        <div class="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl bg-warn-soft border border-warn-line text-xs text-warn">
           <div class="flex items-center gap-3 flex-wrap">
-            <span>🧠 当前调度模型：<b id="bgmModelActiveDisplay" class="font-mono text-white">加载中...</b></span>
-            <button type="button" onclick="toggleBgmModal(); toggleVisualModelModal('bgm');" class="text-purple-400 hover:underline font-bold text-[11px] cursor-pointer">
+            <span>🧠 当前调度模型：<b id="bgmModelActiveDisplay" class="font-mono text-ink">加载中...</b></span>
+            <button type="button" onclick="toggleBgmModal(); toggleVisualModelModal('bgm');" class="text-accent hover:underline font-bold text-[11px] cursor-pointer">
               ⚙️ 切换模型 ↗
             </button>
           </div>
-          <label class="flex items-center gap-2 cursor-pointer select-none px-2.5 py-1 rounded-lg bg-gray-900/80 border border-amber-500/40">
+          <label class="flex items-center gap-2 cursor-pointer select-none px-2.5 py-1 rounded-lg bg-subtle border border-warn-line">
             <input type="checkbox" id="bgmEnabledToggle" onchange="onBgmSettingsInput()" class="accent-amber-400 w-4 h-4 cursor-pointer" />
-            <span class="text-xs font-bold text-white">启用 BGM 音轨（挂载至成片）</span>
+            <span class="text-xs font-bold text-ink">启用 BGM 音轨（挂载至成片）</span>
           </label>
         </div>
 
-        <div class="p-4 rounded-xl border border-amber-500/40 bg-amber-950/20 space-y-2">
+        <div class="p-4 rounded-xl border border-warn-line bg-warn-soft space-y-2">
           <div class="flex flex-wrap items-center justify-between gap-3">
-            <div><div class="text-sm font-bold text-white">让 AI 自动完成配乐</div>
-              <div class="text-xs text-gray-400 mt-1">每首歌仅首次听歌打标签并永久复用 · 换工程/换模型不重听 · 省 Token · 平滑切换 · 旁白避让</div></div>
-            <button type="button" id="btnAutoBgm" onclick="startAutoBgm()" class="px-5 py-2.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-gray-950 text-xs font-black cursor-pointer">✨ AI 自动配乐</button>
+            <div><div class="text-sm font-bold text-ink">让 AI 自动完成配乐</div>
+              <div class="text-xs text-ink-muted mt-1">每首歌仅首次听歌打标签并永久复用 · 换工程/换模型不重听 · 省 Token · 平滑切换 · 旁白避让</div></div>
+            <button type="button" id="btnAutoBgm" onclick="startAutoBgm()" class="px-5 py-2.5 rounded-xl bg-action hover:bg-action-hover text-ink-inverse text-xs font-black cursor-pointer">✨ AI 自动配乐</button>
           </div>
-          <div id="bgmAutoStatus" class="text-xs text-amber-200">上传音乐后点击按钮；已上传的音乐可以直接使用。</div>
-          <div id="bgmAutoSummary" class="text-xs text-gray-300 whitespace-pre-line"></div>
-          <button type="button" onclick="toggleBgmModal(); openProducerPromptsModal().then(() => switchProducerPromptStage('P6_bgm_director'));" class="text-[11px] text-purple-300 hover:underline">⚙️ 编辑 AI 配乐提示词</button>
+          <div id="bgmAutoStatus" class="text-xs text-warn">上传音乐后点击按钮；已上传的音乐可以直接使用。</div>
+          <div id="bgmAutoSummary" class="text-xs text-ink-secondary whitespace-pre-line"></div>
+          <button type="button" onclick="toggleBgmModal(); openProducerPromptsModal().then(() => switchProducerPromptStage('P6_bgm_director'));" class="text-[11px] text-accent hover:underline">⚙️ 编辑 AI 配乐提示词</button>
         </div>
         <!-- 步骤 1：台词情绪起伏与节奏曲线 -->
-        <details class="rounded-xl border border-gray-800"><summary class="p-3 text-xs text-gray-400 cursor-pointer">高级：查看情绪分段</summary>
-        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2.5">
+        <details class="rounded-xl border border-line"><summary class="p-3 text-xs text-ink-muted cursor-pointer">高级：查看情绪分段</summary>
+        <div class="p-3.5 rounded-xl bg-subtle border border-line space-y-2.5">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <span class="text-xs font-bold text-gray-200 flex items-center gap-1.5">
+              <span class="text-xs font-bold text-ink flex items-center gap-1.5">
                 <span>📈 步骤一：全片台词情绪起伏与分段电平曲线</span>
               </span>
-              <span id="bgmAnalyzeStatus" class="text-[11px] text-gray-400 block mt-0.5">读取当前工程镜头与台词时间轴...</span>
+              <span id="bgmAnalyzeStatus" class="text-[11px] text-ink-muted block mt-0.5">读取当前工程镜头与台词时间轴...</span>
             </div>
-            <button type="button" id="btnAnalyzeBgm" onclick="analyzeBgmWithAi()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-purple-600/30 hover:bg-purple-600/60 text-purple-100 border border-purple-400/50 transition cursor-pointer shrink-0">
+            <button type="button" id="btnAnalyzeBgm" onclick="analyzeBgmWithAi()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-accent-soft hover:bg-accent-soft text-accent border border-accent-line transition cursor-pointer shrink-0">
               🤖 AI 分析全片情绪弧度
             </button>
           </div>
           <div id="bgmSegmentsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
-            <div class="col-span-full p-3 rounded-xl bg-gray-900/70 border border-gray-800 text-gray-400 text-center">
+            <div class="col-span-full p-3 rounded-xl bg-subtle border border-line text-ink-muted text-center">
               正在加载当前工程情绪分段...
             </div>
           </div>
@@ -61,136 +61,136 @@
 
         </details>
         <!-- 步骤 2：本地授权 BGM 曲库与真实试听 -->
-        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 space-y-2.5">
+        <div class="p-3.5 rounded-xl bg-subtle border border-line space-y-2.5">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <span class="text-xs font-bold text-gray-200">🎼 已上传音乐</span>
-              <span class="text-[10px] text-gray-400 block mt-0.5">全局曲库共享，上传一次后所有工程均可直接使用；支持一次选择多首 .mp3 / .wav / .m4a / .ogg / .aac（或直接放入 <code class="text-amber-300">public/audio/bgm/</code>）</span>
+              <span class="text-xs font-bold text-ink">🎼 已上传音乐</span>
+              <span class="text-[10px] text-ink-muted block mt-0.5">全局曲库共享，上传一次后所有工程均可直接使用；支持一次选择多首 .mp3 / .wav / .m4a / .ogg / .aac（或直接放入 <code class="text-warn">public/audio/bgm/</code>）</span>
             </div>
             <div>
               <input type="file" id="bgmFileInput" accept=".mp3,.wav,.m4a,.ogg,.aac,audio/*" multiple class="hidden" onchange="handleBgmFileUpload(this)" />
-              <button type="button" id="btnUploadBgm" onclick="document.getElementById('bgmFileInput').click()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-500/20 hover:bg-amber-500/40 text-amber-200 border border-amber-400/50 transition cursor-pointer">
+              <button type="button" id="btnUploadBgm" onclick="document.getElementById('bgmFileInput').click()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-warn-soft hover:bg-warn-soft text-warn border border-warn-line transition cursor-pointer">
                 📤 上传本地 BGM
               </button>
             </div>
           </div>
 
-          <details class="text-xs text-gray-400"><summary class="cursor-pointer">高级：手动选择或规则轮换</summary>
-          <label class="flex items-center gap-2 text-xs text-amber-200 cursor-pointer">
+          <details class="text-xs text-ink-muted"><summary class="cursor-pointer">高级：手动选择或规则轮换</summary>
+          <label class="flex items-center gap-2 text-xs text-warn cursor-pointer">
             <input type="checkbox" id="bgmMultiTrackToggle" onchange="bgmWorkbenchState.config.multi_track = this.checked; renderBgmModal();" class="accent-amber-400" />
             自动轮换曲库中的音乐（保存后生效）
           </label>
-          <div class="text-[10px] text-gray-400">未生成 AI 方案时，规则轮换仅参考时长和 BPM；生成后使用 AI 的选曲顺序。关闭轮换可手动单选。</div>
-          <div id="bgmPlaylistPreview" class="text-[11px] text-amber-200 whitespace-pre-line"></div>
+          <div class="text-[10px] text-ink-muted">未生成 AI 方案时，规则轮换仅参考时长和 BPM；生成后使用 AI 的选曲顺序。关闭轮换可手动单选。</div>
+          <div id="bgmPlaylistPreview" class="text-[11px] text-warn whitespace-pre-line"></div>
           </details>
           <div id="bgmTracksList" class="space-y-2">
-            <div class="p-3 rounded-xl bg-gray-900/60 border border-gray-800 text-xs text-gray-400 text-center">
+            <div class="p-3 rounded-xl bg-subtle border border-line text-xs text-ink-muted text-center">
               正在读取工程本地 BGM 音轨...
             </div>
           </div>
 
-          <div id="bgmAudioPlayerWrap" class="hidden p-3 rounded-xl bg-gray-900/90 border border-amber-500/30 space-y-1.5">
-            <div id="bgmNowPlayingLabel" class="text-[11px] text-amber-300 font-semibold">正在试听...</div>
+          <div id="bgmAudioPlayerWrap" class="hidden p-3 rounded-xl bg-subtle border border-warn-line space-y-1.5">
+            <div id="bgmNowPlayingLabel" class="text-[11px] text-warn font-semibold">正在试听...</div>
             <audio id="bgmPreviewAudio" controls class="w-full h-9"></audio>
           </div>
 
           <div id="bgmRecommendationsBox" class="hidden pt-1 space-y-1.5" style="display:none">
-            <div class="text-[11px] font-bold text-purple-300">💡 AI 配乐选曲方向参考（可按此关键词挑选本地授权配乐）：</div>
+            <div class="text-[11px] font-bold text-accent">💡 AI 配乐选曲方向参考（可按此关键词挑选本地授权配乐）：</div>
             <div id="bgmRecommendationsList" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
           </div>
         </div>
 
         <!-- 步骤 3：混音与人声避让参数 + 实时审查报告 -->
-        <details class="rounded-xl border border-gray-800"><summary class="p-3 text-xs text-gray-400 cursor-pointer">高级：混音与旁白避让</summary>
-        <div class="p-3.5 rounded-xl bg-gradient-to-br from-gray-950 via-purple-950/20 to-gray-900 border border-purple-500/30 space-y-3">
+        <details class="rounded-xl border border-line"><summary class="p-3 text-xs text-ink-muted cursor-pointer">高级：混音与旁白避让</summary>
+        <div class="p-3.5 rounded-xl border border-accent-line space-y-3 bg-subtle">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <span class="text-xs font-bold text-purple-200 flex items-center gap-1.5">
+            <span class="text-xs font-bold text-accent flex items-center gap-1.5">
               <span>🎛️ 混音参数与旁白避让</span>
             </span>
-            <span id="bgmAuditGradeBadge" class="px-2 py-0.5 rounded text-[10px] font-black bg-gray-800 text-gray-300 border border-gray-700">
+            <span id="bgmAuditGradeBadge" class="px-2 py-0.5 rounded text-[10px] font-black bg-subtle text-ink-secondary border border-line">
               待检测
             </span>
           </div>
 
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-black/30 p-3 rounded-xl border border-gray-800/80">
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs bg-subtle p-3 rounded-xl border border-line">
             <div>
               <div class="flex items-center justify-between mb-1">
-                <label class="text-gray-300 font-semibold">基准音量 (Base Gain)</label>
-                <span id="bgmBaseVolVal" class="font-mono text-amber-300 font-bold">-16 dB</span>
+                <label class="text-ink-secondary font-semibold">基准音量 (Base Gain)</label>
+                <span id="bgmBaseVolVal" class="font-mono text-warn font-bold">-16 dB</span>
               </div>
               <input type="range" id="bgmBaseVolSlider" min="-30" max="-6" step="1" value="-16" oninput="onBgmSettingsInput()" class="w-full accent-amber-400 cursor-pointer" />
             </div>
 
             <div>
               <div class="flex items-center justify-between mb-1">
-                <label class="flex items-center gap-1.5 text-gray-300 font-semibold cursor-pointer">
+                <label class="flex items-center gap-1.5 text-ink-secondary font-semibold cursor-pointer">
                   <input type="checkbox" id="bgmDuckingToggle" onchange="onBgmSettingsInput()" class="accent-emerald-400 cursor-pointer" checked />
                   <span>人声避让深度 (Ducking)</span>
                 </label>
-                <span id="bgmDuckingDbVal" class="font-mono text-emerald-300 font-bold">-8 dB</span>
+                <span id="bgmDuckingDbVal" class="font-mono text-ok font-bold">-8 dB</span>
               </div>
               <input type="range" id="bgmDuckingDbSlider" min="-18" max="0" step="1" value="-8" oninput="onBgmSettingsInput()" class="w-full accent-emerald-400 cursor-pointer" />
             </div>
 
             <div>
               <div class="flex items-center justify-between mb-1">
-                <label class="text-gray-300 font-semibold">片头淡入 (Fade In)</label>
-                <span id="bgmFadeInVal" class="font-mono text-blue-300 font-bold">1.2s</span>
+                <label class="text-ink-secondary font-semibold">片头淡入 (Fade In)</label>
+                <span id="bgmFadeInVal" class="font-mono text-info font-bold">1.2s</span>
               </div>
               <input type="range" id="bgmFadeInSlider" min="0" max="5000" step="200" value="1200" oninput="onBgmSettingsInput()" class="w-full accent-blue-400 cursor-pointer" />
             </div>
 
             <div>
               <div class="flex items-center justify-between mb-1">
-                <label class="text-gray-300 font-semibold">片尾淡出 (Fade Out)</label>
-                <span id="bgmFadeOutVal" class="font-mono text-blue-300 font-bold">2.0s</span>
+                <label class="text-ink-secondary font-semibold">片尾淡出 (Fade Out)</label>
+                <span id="bgmFadeOutVal" class="font-mono text-info font-bold">2.0s</span>
               </div>
               <input type="range" id="bgmFadeOutSlider" min="0" max="5000" step="200" value="2000" oninput="onBgmSettingsInput()" class="w-full accent-blue-400 cursor-pointer" />
             </div>
 
-            <div class="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-gray-800/80 text-[11px]">
-              <label class="flex items-center gap-1.5 text-gray-300 cursor-pointer">
+            <div class="sm:col-span-2 flex flex-wrap items-center justify-between gap-2 pt-1 border-t border-line text-[11px]">
+              <label class="flex items-center gap-1.5 text-ink-secondary cursor-pointer">
                 <input type="checkbox" id="bgmLoopToggle" onchange="onBgmSettingsInput()" class="accent-amber-400 cursor-pointer" checked />
                 <span>BGM 短于成片时自动循环播放 (Loop)</span>
               </label>
-              <div class="flex items-center gap-3 text-gray-400">
+              <div class="flex items-center gap-3 text-ink-muted">
                 <label class="flex items-center gap-1">起音(ms)
-                  <input type="number" id="bgmAttackMsInput" min="20" max="2000" step="20" value="180" oninput="onBgmSettingsInput()" class="w-16 px-1.5 py-0.5 rounded bg-gray-900 border border-gray-700 text-white font-mono text-[11px]" />
+                  <input type="number" id="bgmAttackMsInput" min="20" max="2000" step="20" value="180" oninput="onBgmSettingsInput()" class="w-16 px-1.5 py-0.5 rounded bg-input border border-line text-ink font-mono text-[11px]" />
                 </label>
                 <label class="flex items-center gap-1">释放(ms)
-                  <input type="number" id="bgmReleaseMsInput" min="50" max="3000" step="20" value="420" oninput="onBgmSettingsInput()" class="w-16 px-1.5 py-0.5 rounded bg-gray-900 border border-gray-700 text-white font-mono text-[11px]" />
+                  <input type="number" id="bgmReleaseMsInput" min="50" max="3000" step="20" value="420" oninput="onBgmSettingsInput()" class="w-16 px-1.5 py-0.5 rounded bg-input border border-line text-ink font-mono text-[11px]" />
                 </label>
               </div>
             </div>
           </div>
 
-          <div id="bgmAuditSummary" class="text-[11px] text-gray-300"></div>
+          <div id="bgmAuditSummary" class="text-[11px] text-ink-secondary"></div>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px]">
-            <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
-              <div class="text-[10px] text-gray-400">人声避让 (Ducking)</div>
-              <div id="bgmAuditDucking" class="font-semibold text-emerald-300 mt-0.5">-</div>
+            <div class="p-2 rounded-lg bg-subtle border border-accent-line">
+              <div class="text-[10px] text-ink-muted">人声避让 (Ducking)</div>
+              <div id="bgmAuditDucking" class="font-semibold text-ok mt-0.5">-</div>
             </div>
-            <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
-              <div class="text-[10px] text-gray-400">节奏与分段曲线</div>
-              <div id="bgmAuditPacing" class="font-semibold text-blue-300 mt-0.5">-</div>
+            <div class="p-2 rounded-lg bg-subtle border border-accent-line">
+              <div class="text-[10px] text-ink-muted">节奏与分段曲线</div>
+              <div id="bgmAuditPacing" class="font-semibold text-info mt-0.5">-</div>
             </div>
-            <div class="p-2 rounded-lg bg-black/40 border border-purple-500/20">
-              <div class="text-[10px] text-gray-400">听觉疲劳度控制</div>
-              <div id="bgmAuditFatigue" class="font-semibold text-amber-300 mt-0.5">-</div>
+            <div class="p-2 rounded-lg bg-subtle border border-accent-line">
+              <div class="text-[10px] text-ink-muted">听觉疲劳度控制</div>
+              <div id="bgmAuditFatigue" class="font-semibold text-warn mt-0.5">-</div>
             </div>
           </div>
-          <ul id="bgmAuditWarnings" class="hidden space-y-1 text-[11px] text-amber-300 bg-amber-950/30 border border-amber-500/30 rounded-lg p-2.5 list-disc list-inside"></ul>
+          <ul id="bgmAuditWarnings" class="hidden space-y-1 text-[11px] text-warn bg-warn-soft border border-warn-line rounded-lg p-2.5 list-disc list-inside"></ul>
         </div>
         </details>
       </div>
 
-      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-gray-800">
-        <span id="bgmFooterHint" class="text-[11px] text-gray-400">💡 保存后将自动编译至 Remotion <code class="text-amber-300">audio_track.bgm</code> 音轨</span>
+      <div class="flex flex-wrap items-center justify-between gap-2 pt-3 border-t border-line">
+        <span id="bgmFooterHint" class="text-[11px] text-ink-muted">💡 保存后将自动编译至 Remotion <code class="text-warn">audio_track.bgm</code> 音轨</span>
         <div class="flex items-center gap-2">
-          <button type="button" onclick="toggleBgmModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+          <button type="button" onclick="toggleBgmModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-line-strong text-ink-secondary cursor-pointer">
             关闭
           </button>
-          <button type="button" id="btnSaveBgm" onclick="applyBgmToProject()" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-500 hover:brightness-110 text-gray-950 transition shadow-lg cursor-pointer">
+          <button type="button" id="btnSaveBgm" onclick="applyBgmToProject()" class="px-5 py-2 text-xs font-bold rounded-xl text-ink-inverse transition shadow-lg cursor-pointer bg-action hover:bg-action-hover">
             💾 保存并同步至 Remotion
           </button>
         </div>

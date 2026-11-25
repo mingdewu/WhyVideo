@@ -62,13 +62,50 @@ export async function fetchWikipediaExtract(query) {
   return '';
 }
 
-export function getWriterTavilyKey(projectDir) {
-  const configPath = path.join(projectDir, 'data', 'prompt-config.json');
-  let config = {};
-  if (fs.existsSync(configPath)) {
-    try { config = JSON.parse(fs.readFileSync(configPath, 'utf8')); } catch (e) {}
+function normalizeSecretKey(value) {
+  const s = String(value || '').trim();
+  return s && !/^•+$/.test(s) ? s : '';
+}
+
+export function getWriterTavilyKey(projectDir, explicitKey = '', { projectsRoot } = {}) {
+  const direct = normalizeSecretKey(explicitKey);
+  if (direct) return direct;
+
+  if (projectDir) {
+    const configPath = path.join(projectDir, 'data', 'prompt-config.json');
+    if (fs.existsSync(configPath)) {
+      try {
+        const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+        const localKey = normalizeSecretKey(config.tavilyApiKey);
+        if (localKey) return localKey;
+      } catch (e) {}
+    }
   }
-  return String(config.tavilyApiKey || process.env.TAVILY_API_KEY || '').trim();
+
+  const envKey = normalizeSecretKey(process.env.TAVILY_API_KEY);
+  if (envKey) return envKey;
+
+  try {
+    const projDir = projectsRoot ? path.resolve(projectsRoot) : path.resolve(rootDir, 'projects');
+    if (fs.existsSync(projDir)) {
+      const candidates = [];
+      for (const sub of fs.readdirSync(projDir)) {
+        const cfgPath = path.join(projDir, sub, 'data', 'prompt-config.json');
+        if (!fs.existsSync(cfgPath)) continue;
+        try {
+          const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+          const candidateKey = normalizeSecretKey(cfg.tavilyApiKey);
+          if (!candidateKey) continue;
+          const parsedTime = Date.parse(cfg.updated_at || '');
+          const ts = Number.isFinite(parsedTime) ? parsedTime : fs.statSync(cfgPath).mtimeMs;
+          candidates.push({ key: candidateKey, ts: ts || 0 });
+        } catch (e) {}
+      }
+      candidates.sort((a, b) => b.ts - a.ts);
+      if (candidates.length > 0) return candidates[0].key;
+    }
+  } catch (e) {}
+  return '';
 }
 
 export function getMeowloadApiKey(projectDir, explicitKey = '') {

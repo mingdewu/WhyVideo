@@ -78,28 +78,28 @@ window._voiceInputState = window._voiceInputState || {
           btn.setAttribute('aria-pressed', 'true');
           btn.textContent = btnLabel || '⏹️ 0:00';
           btn.title = '点击结束录音并转为文字（按 Esc 取消）';
-          btn.className = 'px-2 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 border border-rose-400 text-white font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition flex items-center gap-1 voice-recording-pulse';
+          btn.className = 'px-2 py-1.5 rounded-lg bg-danger-solid hover:bg-danger-hover border border-danger-line text-ink-inverse font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition flex items-center gap-1 voice-recording-pulse';
         } else if (mode === 'transcribing') {
           btn.disabled = true;
           btn.setAttribute('aria-pressed', 'false');
           btn.textContent = btnLabel || '⏳ 识别中';
           btn.title = '正在将录音转换为文字...';
-          btn.className = 'px-2 py-1.5 rounded-lg bg-amber-600/80 border border-amber-400/70 text-white font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-wait transition flex items-center gap-1 opacity-90';
+          btn.className = 'px-2 py-1.5 rounded-lg bg-warn-soft border border-warn-line text-ink font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-wait transition flex items-center gap-1 opacity-90';
         } else {
           btn.disabled = false;
           btn.setAttribute('aria-pressed', 'false');
           btn.textContent = '🎤 语音';
           btn.title = '点击开始语音输入口语指令（再次点击结束并转文字）';
-          btn.className = 'px-2 py-1.5 rounded-lg bg-gray-900 hover:bg-rose-600/25 border border-sky-500/50 hover:border-rose-400/70 text-sky-200 hover:text-rose-100 font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition flex items-center gap-1';
+          btn.className = 'px-2 py-1.5 rounded-lg bg-surface hover:bg-danger-soft border border-info-line hover:border-danger-line text-info hover:text-danger font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition flex items-center gap-1';
         }
       }
 
       if (statusWrap && statusEl) {
         if (mode === 'recording') {
-          statusWrap.className = 'flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-rose-950/60 border border-rose-500/40 text-[10px] text-rose-200';
+          statusWrap.className = 'flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-danger-soft border border-danger-line text-[10px] text-danger';
           statusEl.textContent = statusText || '🔴 正在录音... 说完后点红色按钮结束（Esc 取消）';
         } else if (mode === 'transcribing') {
-          statusWrap.className = 'flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-amber-950/60 border border-amber-500/40 text-[10px] text-amber-200';
+          statusWrap.className = 'flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-warn-soft border border-warn-line text-[10px] text-warn';
           statusEl.textContent = statusText || '⏳ 正在将语音转为文字...';
         } else {
           statusWrap.classList.add('hidden');
@@ -162,8 +162,8 @@ window._voiceInputState = window._voiceInputState || {
       if (typeof input.setSelectionRange === 'function') {
         input.setSelectionRange(nextVal.length, nextVal.length);
       }
-      input.classList.add('ring-2', 'ring-emerald-400');
-      setTimeout(() => input.classList.remove('ring-2', 'ring-emerald-400'), 900);
+      input.classList.add('ring-2', 'ring-line-strong');
+      setTimeout(() => input.classList.remove('ring-2', 'ring-line-strong'), 900);
       const preview = cleanText.length > 24 ? cleanText.slice(0, 24) + '...' : cleanText;
       showToast('🎙️ 已填入语音指令：「' + preview + '」（按回车或点「✨ 编译」）');
     }
@@ -544,8 +544,8 @@ window._voiceInputState = window._voiceInputState || {
           if (typeof curInput.setSelectionRange === 'function') {
             curInput.setSelectionRange(finalVal.length, finalVal.length);
           }
-          curInput.classList.add('ring-2', 'ring-emerald-400');
-          setTimeout(() => curInput.classList.remove('ring-2', 'ring-emerald-400'), 900);
+          curInput.classList.add('ring-2', 'ring-line-strong');
+          setTimeout(() => curInput.classList.remove('ring-2', 'ring-line-strong'), 900);
           const preview = spoken.length > 24 ? spoken.slice(0, 24) + '...' : spoken;
           showToast('🎙️ 已填入语音指令：「' + preview + '」（按回车或点「✨ 编译」）');
         } else if (!hadFatalError) {

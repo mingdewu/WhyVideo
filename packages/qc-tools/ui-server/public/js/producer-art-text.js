@@ -9,17 +9,17 @@ let artTextDraft = [];
     function artOptions(values, selected) { return values.map(([v, label]) => `<option value="${v}" ${v === selected ? 'selected' : ''}>${label}</option>`).join(''); }
     function renderArtTextDraft() {
       const el = document.getElementById('artTextItems');
-      el.innerHTML = artTextDraft.map((item, i) => `<div class="rounded-lg bg-gray-900 border border-gray-700 p-3 space-y-2 text-xs">
-        <div class="flex items-center gap-2"><input type="checkbox" data-art="enabled" data-i="${i}" ${item.enabled ? 'checked' : ''}><strong class="text-fuchsia-200">${artEsc(item.scene_id)}</strong><span class="text-gray-400">对应旁白：${artEsc(item.anchor)}</span></div>
-        <div class="flex flex-wrap gap-2 items-center"><label>文字 <input data-art="text" data-i="${i}" maxlength="40" value="${artEsc(item.text)}" class="bg-gray-950 border border-gray-600 rounded p-1 text-white"></label>
-        <label>镜头内第 <input type="number" min="0" step="0.1" data-art="start_sec" data-i="${i}" value="${item.start_sec}" class="w-16 bg-gray-950 border border-gray-600 rounded p-1"> 秒</label>
-        <label>持续 <input type="number" min="0.1" step="0.1" data-art="duration_sec" data-i="${i}" value="${item.duration_sec}" class="w-16 bg-gray-950 border border-gray-600 rounded p-1"> 秒</label>
-        <label>字号 <input type="number" min="28" max="130" data-design="font_size" data-i="${i}" value="${item.design.font_size}" class="w-16 bg-gray-950 border border-gray-600 rounded p-1"></label>
+      el.innerHTML = artTextDraft.map((item, i) => `<div class="rounded-lg bg-surface border border-line p-3 space-y-2 text-xs">
+        <div class="flex items-center gap-2"><input type="checkbox" data-art="enabled" data-i="${i}" ${item.enabled ? 'checked' : ''}><strong class="text-accent">${artEsc(item.scene_id)}</strong><span class="text-ink-muted">对应旁白：${artEsc(item.anchor)}</span></div>
+        <div class="flex flex-wrap gap-2 items-center"><label>文字 <input data-art="text" data-i="${i}" maxlength="40" value="${artEsc(item.text)}" class="bg-input border border-line-strong rounded p-1 text-ink"></label>
+        <label>镜头内第 <input type="number" min="0" step="0.1" data-art="start_sec" data-i="${i}" value="${item.start_sec}" class="w-16 bg-input border border-line-strong rounded p-1"> 秒</label>
+        <label>持续 <input type="number" min="0.1" step="0.1" data-art="duration_sec" data-i="${i}" value="${item.duration_sec}" class="w-16 bg-input border border-line-strong rounded p-1"> 秒</label>
+        <label>字号 <input type="number" min="28" max="130" data-design="font_size" data-i="${i}" value="${item.design.font_size}" class="w-16 bg-input border border-line-strong rounded p-1"></label>
         <label>文字颜色 <input type="color" data-design="text_color" data-i="${i}" value="${artEsc(item.design.text_color)}"></label>
-        <label>横向 % <input type="number" min="8" max="92" data-design="x" data-i="${i}" value="${item.design.x}" class="w-16 bg-gray-950 border border-gray-600 rounded p-1"></label>
-        <label>纵向 % <input type="number" min="10" max="78" data-design="y" data-i="${i}" value="${item.design.y}" class="w-16 bg-gray-950 border border-gray-600 rounded p-1"></label></div>
-        <p class="text-gray-400">AI 设计：${artEsc(item.reason || '根据旁白设计动态文字')}</p>
-        <details><summary class="cursor-pointer text-fuchsia-300">查看和修改完整设计与动画关键帧</summary><textarea data-art="designJson" data-i="${i}" rows="8" class="w-full mt-2 p-2 bg-gray-950 border border-gray-600 rounded text-gray-200 font-mono">${artEsc(JSON.stringify(item.design, null, 2))}</textarea></details></div>`).join('');
+        <label>横向 % <input type="number" min="8" max="92" data-design="x" data-i="${i}" value="${item.design.x}" class="w-16 bg-input border border-line-strong rounded p-1"></label>
+        <label>纵向 % <input type="number" min="10" max="78" data-design="y" data-i="${i}" value="${item.design.y}" class="w-16 bg-input border border-line-strong rounded p-1"></label></div>
+        <p class="text-ink-muted">AI 设计：${artEsc(item.reason || '根据旁白设计动态文字')}</p>
+        <details><summary class="cursor-pointer text-accent">查看和修改完整设计与动画关键帧</summary><textarea data-art="designJson" data-i="${i}" rows="8" class="w-full mt-2 p-2 bg-input border border-line-strong rounded text-ink font-mono">${artEsc(JSON.stringify(item.design, null, 2))}</textarea></details></div>`).join('');
       document.getElementById('artApplyBtn').classList.toggle('hidden', !artTextDraft.length);
     }
     document.getElementById('artTextItems').addEventListener('input', event => {

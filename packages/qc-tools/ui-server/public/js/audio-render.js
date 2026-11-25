@@ -160,7 +160,7 @@
       if (!apiKey && !window._elevenlabsKeyConfigured) {
         if (statusEl) {
           statusEl.textContent = '请先输入 API Key';
-          statusEl.className = 'text-[11px] text-amber-400';
+          statusEl.className = 'text-[11px] text-warn';
         }
         if (showNotice) showToast('⚠️ 请先输入 ElevenLabs API Key');
         return;
@@ -172,7 +172,7 @@
       }
       if (statusEl) {
         statusEl.textContent = '正在拉取音色列表...';
-        statusEl.className = 'text-[11px] text-gray-400';
+        statusEl.className = 'text-[11px] text-ink-muted';
       }
 
       try {
@@ -198,7 +198,7 @@
           select.appendChild(emptyOpt);
           if (statusEl) {
             statusEl.textContent = '0 个音色';
-            statusEl.className = 'text-[11px] text-amber-400';
+            statusEl.className = 'text-[11px] text-warn';
           }
           updateElevenlabsPreviewButton();
           return;
@@ -260,7 +260,7 @@
 
         if (statusEl) {
           statusEl.textContent = '共 ' + voices.length + ' 个（我的 ' + customVoices.length + ' 个）';
-          statusEl.className = 'text-[11px] text-emerald-300';
+          statusEl.className = 'text-[11px] text-ok';
         }
         if (showNotice) {
           showToast('✅ 已拉取 ' + voices.length + ' 个 ElevenLabs 音色（含你的 ' + customVoices.length + ' 个自定义音色）');
@@ -268,7 +268,7 @@
       } catch (err) {
         if (statusEl) {
           statusEl.textContent = err.message;
-          statusEl.className = 'text-[11px] text-rose-400';
+          statusEl.className = 'text-[11px] text-danger';
         }
         if (showNotice) {
           alert('拉取 ElevenLabs 音色失败: ' + err.message);
@@ -288,10 +288,10 @@
       const fullText = scenes.map((s) => String(s.narration_text || '')).join('').trim();
       if (!scenes.length || !fullText) {
         box.textContent = '⚠️ 当前工程暂无分镜旁白，请先导入文案或创建分镜后再生成全片旁白';
-        box.className = 'px-3 py-2 rounded-xl bg-amber-950/35 border border-amber-500/30 text-xs text-amber-200';
+        box.className = 'px-3 py-2 rounded-xl bg-warn-soft border border-warn-line text-xs text-warn';
       } else {
         box.textContent = '📄 当前工程全片旁白：共 ' + scenes.length + ' 镜 · 约 ' + fullText.length + ' 字（点右下角「✅ 确认保存设置」后，在主界面点击「🎙️ 生成音频」即可生成整条成片音频并对齐时间轴）';
-        box.className = 'px-3 py-2 rounded-xl bg-emerald-950/35 border border-emerald-500/30 text-xs text-emerald-200';
+        box.className = 'px-3 py-2 rounded-xl bg-ok-soft border border-ok-line text-xs text-ok';
       }
     }
 
@@ -334,8 +334,8 @@
       const lblEl = document.getElementById('labelAudioProviderElevenlabs');
       const lblVb = document.getElementById('labelAudioProviderVoicebox');
       if (lblEl && lblVb) {
-        const activeClasses = ['border-rose-500', 'bg-rose-500/10', 'text-rose-200'];
-        const inactiveClasses = ['border-gray-700', 'bg-gray-900', 'text-gray-400'];
+        const activeClasses = ['border-danger-line', 'bg-danger-soft', 'text-danger'];
+        const inactiveClasses = ['border-line', 'bg-surface', 'text-ink-muted'];
         if (provider === 'elevenlabs') {
           lblEl.classList.add(...activeClasses);
           lblEl.classList.remove(...inactiveClasses);

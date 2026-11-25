@@ -95,7 +95,7 @@
         window._producerHasVideo = true;
         if (c) {
           c.innerHTML = `
-            <div class="w-full max-w-xl rounded-xl overflow-hidden border border-gray-700 bg-black aspect-video flex items-center justify-center">
+            <div class="w-full max-w-xl rounded-xl overflow-hidden border border-line bg-media aspect-video flex items-center justify-center">
               <video src="${data.videoUrl}" controls playsinline class="w-full h-full object-contain"></video>
             </div>
           `;
@@ -177,8 +177,8 @@
       const badgeEl = document.getElementById(`videoDurBadge_${idx}`);
       if (badgeEl) {
         badgeEl.className = info.isTooShort
-          ? 'text-[10px] text-rose-400 font-mono font-bold shrink-0'
-          : 'text-[10px] text-emerald-400 font-mono font-bold shrink-0';
+          ? 'text-[10px] text-danger font-mono font-bold shrink-0'
+          : 'text-[10px] text-ok font-mono font-bold shrink-0';
         badgeEl.textContent = info.isTooShort
           ? `🚨 视频 ${info.playableSec.toFixed(1)}s / 需 ${durSecStr}s`
           : `⏱️ 本地 ${info.rawDur.toFixed(1)}s / 需 ${durSecStr}s`;
@@ -187,11 +187,11 @@
       const dropzoneEl = document.getElementById(`dropzone_${idx}`);
       if (dropzoneEl && dropzoneEl.tagName === 'DIV') {
         if (info.isTooShort) {
-          dropzoneEl.classList.remove('border-sky-500/40', 'bg-sky-950/30');
-          dropzoneEl.classList.add('border-rose-500/80', 'bg-rose-950/35');
+          dropzoneEl.classList.remove('border-info-line', 'bg-info-soft');
+          dropzoneEl.classList.add('border-danger-line', 'bg-danger-soft');
         } else {
-          dropzoneEl.classList.remove('border-rose-500/80', 'bg-rose-950/35');
-          dropzoneEl.classList.add('border-sky-500/40', 'bg-sky-950/30');
+          dropzoneEl.classList.remove('border-danger-line', 'bg-danger-soft');
+          dropzoneEl.classList.add('border-info-line', 'bg-info-soft');
         }
       }
 

@@ -9,13 +9,13 @@ let pendingRevisionPlan = null;
       currentRevisionQuickChips = Array.isArray(chips) ? chips.map((c) => ({ ...c })) : [];
       const bar = document.getElementById('wRevisionQuickChipsBar');
       if (!bar) return;
-      const labelHtml = '<span class="text-gray-400 font-semibold">快捷指令：</span>';
+      const labelHtml = '<span class="text-ink-muted font-semibold">快捷指令：</span>';
       if (currentRevisionQuickChips.length === 0) {
-        bar.innerHTML = labelHtml + '<span class="text-gray-500">点击右侧可配置快捷指令</span>';
+        bar.innerHTML = labelHtml + '<span class="text-ink-muted">点击右侧可配置快捷指令</span>';
         return;
       }
       bar.innerHTML = labelHtml + currentRevisionQuickChips
-        .map((c, idx) => `<button type="button" data-chip-idx="${idx}" onclick="applyRevisionQuickChipByIndex(Number(this.dataset.chipIdx))" title="${escapeHtml(c.prompt)}" class="px-2 py-0.5 rounded-lg bg-gray-900 hover:bg-gray-800 border border-gray-700 text-amber-200 transition cursor-pointer">${escapeHtml(c.label)}</button>`)
+        .map((c, idx) => `<button type="button" data-chip-idx="${idx}" onclick="applyRevisionQuickChipByIndex(Number(this.dataset.chipIdx))" title="${escapeHtml(c.prompt)}" class="px-2 py-0.5 rounded-lg bg-surface hover:bg-muted border border-line text-warn transition cursor-pointer">${escapeHtml(c.label)}</button>`)
         .join('');
     }
 
@@ -71,20 +71,20 @@ let pendingRevisionPlan = null;
 
       if (btnInput) {
         btnInput.className = target === 'input'
-          ? 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer bg-amber-500 text-gray-950'
-          : 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer text-gray-300 hover:text-white';
+          ? 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer bg-action text-ink-inverse'
+          : 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer text-ink-secondary hover:text-ink';
       }
       if (btnPlan) {
         btnPlan.disabled = !pendingRevisionPlan;
         btnPlan.className = target === 'plan'
-          ? 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer bg-amber-500 text-gray-950'
-          : 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed';
+          ? 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer bg-action text-ink-inverse'
+          : 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer text-ink-secondary hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed';
       }
       if (btnDiff) {
         btnDiff.disabled = !pendingRevisionResult;
         btnDiff.className = target === 'diff'
-          ? 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer bg-emerald-500 text-gray-950'
-          : 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer text-gray-300 hover:text-white disabled:opacity-40 disabled:cursor-not-allowed';
+          ? 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer bg-ok-solid text-ink-inverse'
+          : 'px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer text-ink-secondary hover:text-ink disabled:opacity-40 disabled:cursor-not-allowed';
       }
 
       if (target === 'diff') {
@@ -179,13 +179,13 @@ let pendingRevisionPlan = null;
       if (!box) return;
       const segs = getClientOrderedSegments();
       if (segs.length === 0) {
-        box.innerHTML = '<span class="text-gray-500">当前暂无已拆分的章节，请先生成或保存定稿文案。</span>';
+        box.innerHTML = '<span class="text-ink-muted">当前暂无已拆分的章节，请先生成或保存定稿文案。</span>';
         return;
       }
       box.innerHTML = segs
         .map(
           (s) => `
-          <label class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-gray-900 border border-gray-800 text-gray-200 cursor-pointer select-none">
+          <label class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-surface border border-line text-ink cursor-pointer select-none">
             <input type="checkbox" class="w-revision-seg-cb accent-amber-500" value="${escapeHtml(s.seg_id)}" />
             <span>${escapeHtml(s.title)}</span>
           </label>
@@ -360,12 +360,12 @@ let pendingRevisionPlan = null;
         factsList.innerHTML = pendingRevisionFacts
           .map(
             (f, i) => `
-            <div class="p-1.5 rounded bg-gray-950 border border-gray-800">
+            <div class="p-1.5 rounded bg-subtle border border-line">
               <div class="flex items-center justify-between gap-2">
-                <span class="font-semibold text-cyan-200 truncate">${i + 1}. ${escapeHtml(f.title)}</span>
-                <a href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer" class="text-sky-400 hover:underline shrink-0">打开来源</a>
+                <span class="font-semibold text-info truncate">${i + 1}. ${escapeHtml(f.title)}</span>
+                <a href="${escapeHtml(f.url)}" target="_blank" rel="noopener noreferrer" class="text-info hover:underline shrink-0">打开来源</a>
               </div>
-              <div class="text-gray-400 text-[10px] mt-0.5 line-clamp-2">${escapeHtml(f.snippet)}</div>
+              <div class="text-ink-muted text-[10px] mt-0.5 line-clamp-2">${escapeHtml(f.snippet)}</div>
             </div>
           `
           )
@@ -386,21 +386,21 @@ let pendingRevisionPlan = null;
       rowsEl.innerHTML = (pendingRevisionPlan.segment_plans || [])
         .map(
           (sp, idx) => `
-          <div class="p-2 rounded-lg bg-gray-900/90 border border-gray-800 space-y-1.5 text-[11px]" data-rev-seg-idx="${idx}">
+          <div class="p-2 rounded-lg bg-subtle border border-line space-y-1.5 text-[11px]" data-rev-seg-idx="${idx}">
             <div class="flex flex-wrap items-center justify-between gap-2">
               <div class="flex items-center gap-2 min-w-0">
-                <span class="font-bold text-white truncate">${escapeHtml(sp.title)}</span>
-                <span class="text-[10px] text-gray-500 font-mono">(${sp.char_count || 0}字)</span>
+                <span class="font-bold text-ink truncate">${escapeHtml(sp.title)}</span>
+                <span class="text-[10px] text-ink-muted font-mono">(${sp.char_count || 0}字)</span>
               </div>
-              <select data-rev-field="action" style="color-scheme: dark;" class="bg-gray-950 text-xs px-2 py-0.5 rounded border border-gray-700 font-bold text-amber-200">
+              <select data-rev-field="action" style="color-scheme: light;" class="bg-input text-xs px-2 py-0.5 rounded border border-line font-bold text-warn">
                 <option value="rewrite" ${sp.action === 'rewrite' ? 'selected' : ''}>✍️ 重写本段</option>
                 <option value="light_edit" ${sp.action === 'light_edit' ? 'selected' : ''}>🪄 微调融入</option>
                 <option value="keep" ${sp.action === 'keep' ? 'selected' : ''}>🔒 保持不动</option>
               </select>
             </div>
-            <div class="text-[10px] text-gray-400">判断理由：${escapeHtml(sp.reason)}</div>
+            <div class="text-[10px] text-ink-muted">判断理由：${escapeHtml(sp.reason)}</div>
             <input type="text" data-rev-field="edit_instructions" value="${escapeHtml(sp.edit_instructions || '')}" placeholder="保持不动时可留空；需要改动请写明要求..."
-              class="w-full bg-gray-950 text-gray-200 text-[11px] px-2 py-1 rounded border border-gray-800 focus:outline-none focus:border-amber-400" />
+              class="w-full bg-input text-ink text-[11px] px-2 py-1 rounded border border-line focus:outline-none focus:border-ink" />
           </div>
         `
         )
@@ -508,11 +508,11 @@ let pendingRevisionPlan = null;
       const btnS = document.getElementById('btnRevDiffSplit');
       if (btnU && btnS) {
         btnU.className = mode === 'unified'
-          ? 'px-2.5 py-0.5 rounded bg-amber-600 text-white font-bold cursor-pointer'
-          : 'px-2.5 py-0.5 rounded text-gray-400 hover:text-white font-bold cursor-pointer';
+          ? 'px-2.5 py-0.5 rounded bg-action text-ink-inverse font-bold cursor-pointer'
+          : 'px-2.5 py-0.5 rounded text-ink-muted hover:text-ink font-bold cursor-pointer';
         btnS.className = mode === 'split'
-          ? 'px-2.5 py-0.5 rounded bg-amber-600 text-white font-bold cursor-pointer'
-          : 'px-2.5 py-0.5 rounded text-gray-400 hover:text-white font-bold cursor-pointer';
+          ? 'px-2.5 py-0.5 rounded bg-action text-ink-inverse font-bold cursor-pointer'
+          : 'px-2.5 py-0.5 rounded text-ink-muted hover:text-ink font-bold cursor-pointer';
       }
       renderRevisionDiffView();
     }

@@ -1,42 +1,42 @@
   <!-- 最终渲染确认弹窗 -->
-  <div id="artTextPanel" onclick="if(event.target===this) openArtTextPanel()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 hidden" role="dialog" aria-modal="true" aria-labelledby="artTextTitle">
-    <section class="w-full max-w-5xl max-h-[90vh] flex flex-col rounded-2xl border border-fuchsia-700/50 bg-gray-900 shadow-2xl overflow-hidden">
-      <div class="flex items-start justify-between gap-4 p-5 border-b border-gray-700"><div><h2 id="artTextTitle" class="text-lg font-bold text-fuchsia-200">✨ AI 重点艺术字</h2><p class="text-xs text-gray-400 mt-1">AI 结合全文与创意要求设计文字、排版、颜色和关键帧动作。时间为估算，请结合旁白检查。</p></div><button type="button" onclick="openArtTextPanel()" aria-label="关闭艺术字弹窗" class="text-gray-400 hover:text-white text-xl px-2">✕</button></div>
-      <div class="p-5 overflow-y-auto space-y-3"><label class="block text-xs text-gray-300">本次创意要求（选填）<textarea id="artCreativeRequest" rows="2" maxlength="1000" class="block w-full mt-1 p-2 rounded-lg bg-gray-950 border border-gray-700 text-white" placeholder="例如：电影预告片风格，关键数据从远处飞入，颜色与旁白情绪呼应"></textarea></label><p class="text-xs text-gray-400">完整提示词可在右上角「提示词设置 → 7. AI 重点艺术字」中查看和修改。</p><div class="flex flex-wrap items-center gap-3"><button id="artGenerateBtn" type="button" onclick="generateArtText()" class="px-3 py-2 rounded-lg bg-fuchsia-700 hover:bg-fuchsia-600 text-white text-xs font-bold">生成提案</button><p id="artTextStatus" class="text-xs text-gray-300" aria-live="polite">先生成提案，再修改文字、动画和时间。</p></div><div id="artTextItems" class="space-y-2"></div></div>
-      <div class="p-4 border-t border-gray-700 flex justify-end gap-2"><button type="button" onclick="openArtTextPanel()" class="px-3 py-2 rounded-lg bg-gray-700 text-white text-xs">关闭</button><button id="artApplyBtn" type="button" onclick="applyArtText()" class="hidden px-3 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold">应用所选并同步 Remotion</button></div>
+  <div id="artTextPanel" onclick="if(event.target===this) openArtTextPanel()" class="studio-modal fixed inset-0 bg-backdrop backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-5 hidden" role="dialog" aria-modal="true" aria-labelledby="artTextTitle">
+    <section class="w-full max-w-5xl max-h-[90vh] flex flex-col rounded-2xl border border-accent-line bg-surface shadow-2xl overflow-hidden">
+      <div class="flex items-start justify-between gap-4 p-5 border-b border-line"><div><h2 id="artTextTitle" class="text-lg font-bold text-accent">✨ AI 重点艺术字</h2><p class="text-xs text-ink-muted mt-1">AI 结合全文与创意要求设计文字、排版、颜色和关键帧动作。时间为估算，请结合旁白检查。</p></div><button type="button" onclick="openArtTextPanel()" aria-label="关闭艺术字弹窗" class="text-ink-muted hover:text-ink text-xl px-2">✕</button></div>
+      <div class="p-5 overflow-y-auto space-y-3"><label class="block text-xs text-ink-secondary">本次创意要求（选填）<textarea id="artCreativeRequest" rows="2" maxlength="1000" class="block w-full mt-1 p-2 rounded-lg bg-input border border-line text-ink" placeholder="例如：电影预告片风格，关键数据从远处飞入，颜色与旁白情绪呼应"></textarea></label><p class="text-xs text-ink-muted">完整提示词可在右上角「提示词设置 → 7. AI 重点艺术字」中查看和修改。</p><div class="flex flex-wrap items-center gap-3"><button id="artGenerateBtn" type="button" onclick="generateArtText()" class="px-3 py-2 rounded-lg bg-action hover:bg-action-hover text-ink-inverse text-xs font-bold">生成提案</button><p id="artTextStatus" class="text-xs text-ink-secondary" aria-live="polite">先生成提案，再修改文字、动画和时间。</p></div><div id="artTextItems" class="space-y-2"></div></div>
+      <div class="p-4 border-t border-line flex justify-end gap-2"><button type="button" onclick="openArtTextPanel()" class="px-3 py-2 rounded-lg bg-muted text-ink text-xs">关闭</button><button id="artApplyBtn" type="button" onclick="applyArtText()" class="hidden px-3 py-2 rounded-lg bg-ok-solid hover:bg-ok-hover text-ink-inverse text-xs font-bold">应用所选并同步 Remotion</button></div>
     </section>
   </div>
 
-  <div id="finalRenderConfirmModal" onclick="if(event.target===this) closeFinalRenderConfirmModal()" class="studio-modal fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 hidden" role="dialog" aria-modal="true" aria-labelledby="finalRenderConfirmTitle">
-    <div class="card w-full max-w-md p-5 rounded-2xl border border-emerald-500/40 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between pb-2.5 border-b border-gray-800">
-        <h3 id="finalRenderConfirmTitle" class="text-base font-black text-white flex items-center gap-2">
+  <div id="finalRenderConfirmModal" onclick="if(event.target===this) closeFinalRenderConfirmModal()" class="studio-modal fixed inset-0 bg-backdrop backdrop-blur-md z-50 flex items-center justify-center p-3 sm:p-4 hidden" role="dialog" aria-modal="true" aria-labelledby="finalRenderConfirmTitle">
+    <div class="card w-full max-w-md p-5 rounded-2xl border border-ok-line shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-2.5 border-b border-line">
+        <h3 id="finalRenderConfirmTitle" class="text-base font-black text-ink flex items-center gap-2">
           🎬 确认开始最终渲染
         </h3>
-        <button type="button" onclick="closeFinalRenderConfirmModal()" class="w-8 h-8 rounded-lg bg-gray-900 hover:bg-gray-800 text-gray-400 hover:text-white flex items-center justify-center transition cursor-pointer" aria-label="关闭">✕</button>
+        <button type="button" onclick="closeFinalRenderConfirmModal()" class="w-8 h-8 rounded-lg bg-surface hover:bg-muted text-ink-muted hover:text-ink flex items-center justify-center transition cursor-pointer" aria-label="关闭">✕</button>
       </div>
 
-      <div class="space-y-2.5 text-xs text-gray-300">
-        <div class="p-3 rounded-xl bg-gray-950/90 border border-gray-800 space-y-1.5">
+      <div class="space-y-2.5 text-xs text-ink-secondary">
+        <div class="p-3 rounded-xl bg-subtle border border-line space-y-1.5">
           <div class="flex items-center justify-between gap-2">
-            <span class="text-gray-400">当前工程</span>
-            <span id="finalRenderProjectName" class="font-bold text-amber-300 truncate">-</span>
+            <span class="text-ink-muted">当前工程</span>
+            <span id="finalRenderProjectName" class="font-bold text-warn truncate">-</span>
           </div>
           <div class="flex items-center justify-between gap-2">
-            <span class="text-gray-400">镜头规模</span>
-            <span id="finalRenderSceneSummary" class="font-semibold text-white">-</span>
+            <span class="text-ink-muted">镜头规模</span>
+            <span id="finalRenderSceneSummary" class="font-semibold text-ink">-</span>
           </div>
         </div>
-        <p class="text-[11px] text-gray-400 leading-relaxed">
+        <p class="text-[11px] text-ink-muted leading-relaxed">
           将使用当前已保存的镜头配置、配音及 BGM 进行 1080p 后台渲染。渲染期间切换工程或刷新页面不会中断任务。
         </p>
       </div>
 
-      <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-gray-800">
-        <button type="button" onclick="closeFinalRenderConfirmModal()" class="px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 text-gray-300 border border-gray-700 text-xs font-bold transition cursor-pointer">
+      <div class="flex items-center justify-end gap-2.5 pt-2 border-t border-line">
+        <button type="button" onclick="closeFinalRenderConfirmModal()" class="px-3.5 py-1.5 rounded-xl bg-surface hover:bg-muted text-ink-secondary border border-line text-xs font-bold transition cursor-pointer">
           取消
         </button>
-        <button type="button" id="confirmStartFinalRenderBtn" onclick="confirmStartFinalRender()" class="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg transition cursor-pointer">
+        <button type="button" id="confirmStartFinalRenderBtn" onclick="confirmStartFinalRender()" class="px-4 py-1.5 rounded-xl bg-ok-solid hover:bg-ok-hover text-ink-inverse text-xs font-bold shadow-lg transition cursor-pointer">
           🚀 确认并开始渲染
         </button>
       </div>

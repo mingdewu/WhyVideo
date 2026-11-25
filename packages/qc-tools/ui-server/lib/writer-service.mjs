@@ -581,6 +581,48 @@ function splitIntoSentencesWithSeparators(text) {
   return tokens;
 }
 
+const EDITORIAL_META_COMMENTARY_PATTERNS = [
+  /(?:正式制作[前后时]|正式使用.{0,12}前|制作前必须补充)/,
+  /(?:现有(?:证据)?卡库|现有证据卡|本(?:次)?证据卡|(?:这|那)张证据卡|证据卡(?:中|里)?(?:没有|缺少|未提供)|补充(?:统计)?卡)/,
+  /(?:待核验原文|尚待核验原文|仍需核对原文|尚未依据原文|待补证|须补证|需补证|\[需要人工核查\]|\[需要人工决策\])/,
+  /(?:等这些资料补上|把这些资料补齐后|补齐这些原始证据后)/,
+];
+
+/**
+ * 剥离泄露进旁白正文中的内部制作/考证元话语，仅移除明确面向创作者或审稿流程的句子。
+ */
+export function stripEditorialMetaCommentary(text) {
+  const raw = String(text || '');
+  if (!raw.trim()) {
+    return { text: '', removed: [] };
+  }
+
+  const tokens = splitIntoSentencesWithSeparators(raw);
+  const removed = [];
+  const keptTokens = [];
+
+  for (const tok of tokens) {
+    if (tok.type !== 'sentence') {
+      keptTokens.push(tok);
+      continue;
+    }
+    const trimmed = tok.text.trim();
+    if (trimmed && EDITORIAL_META_COMMENTARY_PATTERNS.some((re) => re.test(trimmed))) {
+      removed.push(trimmed);
+      continue;
+    }
+    keptTokens.push(tok);
+  }
+
+  const cleaned = keptTokens
+    .map((t) => t.text)
+    .join('')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+  return { text: cleaned, removed };
+}
+
 /**
  * 确定性跨章节去重与去伪结尾清洗器（Deterministic Cross-Segment Deduplicator）
  * 1. 自动剥离并合并把「开篇导引」「单片终局结尾」混入 chapters 数组导致的双倍开篇/结尾；
@@ -651,6 +693,20 @@ export function deduplicateAndCleanScriptSegments(finalScript) {
   });
   if (ending) {
     orderedBlocks.push({ kind: 'ending', label: '全片终局结尾', text: ending });
+  }
+
+  // 1.5 剥离混入正文的制作/考证元话语（如“正式制作前需补充”“现有证据卡”“待核验原文”等）
+  const removedMetaCommentary = [];
+  for (const block of orderedBlocks) {
+    const metaCleaned = stripEditorialMetaCommentary(block.text);
+    if (metaCleaned.removed.length > 0) {
+      block.text = metaCleaned.text;
+      for (const sent of metaCleaned.removed) {
+        const preview = sent.slice(0, 26);
+        removedMetaCommentary.push(preview);
+        removedDuplicates.push(`移除「${block.label}」中泄露的制作/考证元话语：“${preview}…”`);
+      }
+    }
   }
 
   // 2. 检查相邻章节是否存在“上一章末尾抢写下一章开头”的整段/多句重复
@@ -813,9 +869,13 @@ export function deduplicateAndCleanScriptSegments(finalScript) {
   const prevRemovedArgs = Array.isArray(existingLog.removed_duplicate_arguments)
     ? existingLog.removed_duplicate_arguments
     : [];
+  const prevRemovedMeta = Array.isArray(existingLog.removed_meta_commentary)
+    ? existingLog.removed_meta_commentary
+    : [];
   finalScript.editorial_changes_log = {
     ...existingLog,
     removed_duplicate_arguments: [...new Set([...prevRemovedArgs, ...removedDuplicates])].slice(0, 20),
+    removed_meta_commentary: [...new Set([...prevRemovedMeta, ...removedMetaCommentary])].slice(0, 20),
     removed_duplicate_examples: Array.isArray(existingLog.removed_duplicate_examples)
       ? existingLog.removed_duplicate_examples
       : [],

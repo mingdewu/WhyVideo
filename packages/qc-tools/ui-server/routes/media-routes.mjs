@@ -105,9 +105,13 @@ export async function handleMediaRoutes(req, res, { url, pathname, queryProject 
     const normalizedCfg = normalizePromptConfig(promptCfg);
 
     if (globalPrompt !== undefined) {
-      normalizedCfg.global_ai_visual_prompt = globalPrompt;
-      normalizedCfg.updated_at = new Date().toISOString();
-      fs.writeFileSync(curPaths.promptConfigPath, JSON.stringify(normalizedCfg, null, 2), 'utf8');
+      const mergedCfg = {
+        ...promptCfg,
+        ...normalizedCfg,
+        global_ai_visual_prompt: globalPrompt,
+        updated_at: new Date().toISOString(),
+      };
+      fs.writeFileSync(curPaths.promptConfigPath, JSON.stringify(mergedCfg, null, 2), 'utf8');
     }
 
     const targetManifest = manifest || JSON.parse(fs.readFileSync(curPaths.manifestPath, 'utf8'));

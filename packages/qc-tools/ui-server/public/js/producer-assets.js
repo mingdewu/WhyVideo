@@ -337,8 +337,8 @@ function onFileDragOver(e, idx) {
         const input = document.getElementById('prompt_input_' + idx);
         if (input) {
           input.value = generated;
-          input.classList.add('ring-2', 'ring-purple-400');
-          setTimeout(() => input.classList.remove('ring-2', 'ring-purple-400'), 1000);
+          input.classList.add('ring-2', 'ring-line-strong');
+          setTimeout(() => input.classList.remove('ring-2', 'ring-line-strong'), 1000);
         }
         showToast('✨ [' + (data.usedModel || 'AI智能提炼') + '] 提示词已更新！');
       } catch (err) {
@@ -703,7 +703,7 @@ function onFileDragOver(e, idx) {
         try {
           studioWin.document.title = '正在同步并打开 Remotion Studio (:3100)...';
           studioWin.document.body.innerHTML =
-            '<div style="font-family:sans-serif;background:#0f1419;color:#f3f4f6;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:18px;">💾 正在保存并同步工程「' +
+            '<div style="font-family:sans-serif;background:#F5F6F8;color:#111827;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:18px;">💾 正在保存并同步工程「' +
             escapeHtml(activeProjectId) +
             '」到 Remotion (:3100)，请稍候...</div>';
         } catch (e) {}
@@ -779,7 +779,7 @@ function onFileDragOver(e, idx) {
         try {
           win.document.title = '正在切换 Remotion Studio (:3100)...';
           win.document.body.innerHTML =
-            '<div style="font-family:sans-serif;background:#0f1419;color:#f3f4f6;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:18px;">🎬 正在将 Remotion (:3100) 切换到工程「' +
+            '<div style="font-family:sans-serif;background:#F5F6F8;color:#111827;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;font-size:18px;">🎬 正在将 Remotion (:3100) 切换到工程「' +
             escapeHtml(activeProjectId) +
             '」，请稍候...</div>';
         } catch (e) {}

@@ -13,7 +13,7 @@ import {
   buildProjectTimingSummary,
 } from '../lib/project-store.mjs';
 import { extractVisualKeywordsMap, syncLocalProjectAssets } from '../lib/media-gateway.mjs';
-import { getMeowloadApiKey, callOpenRouterText, extractJsonFromText } from '../lib/llm-gateway.mjs';
+import { getMeowloadApiKey, getWriterTavilyKey, callOpenRouterText, extractJsonFromText } from '../lib/llm-gateway.mjs';
 import {
   getProducerPromptsState,
   renderProducerPrompt,
@@ -223,7 +223,7 @@ export async function handleProducerRoutes(req, res, { url, pathname, queryProje
           global_ai_visual_prompt:
             '作为 16:9 纪录片视觉总监，结合旁白片段与关键词，在 16:9 画幅中央提炼一个醒目标志大字（不超过 14 字），搭配 1 条副级阐述，用于动效视觉传达。',
         };
-    promptConfig.tavilyKeyConfigured = Boolean(promptConfig.tavilyApiKey || process.env.TAVILY_API_KEY);
+    promptConfig.tavilyKeyConfigured = Boolean(getWriterTavilyKey(paths.projectDir));
     delete promptConfig.tavilyApiKey;
     promptConfig.meowloadKeyConfigured = Boolean(getMeowloadApiKey(paths.projectDir));
     delete promptConfig.meowloadApiKey;

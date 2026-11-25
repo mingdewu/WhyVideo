@@ -5,44 +5,106 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>WhyVideo Studio - 视觉模型配置与生成工作台</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            canvas: 'rgb(var(--bg-canvas-rgb) / <alpha-value>)',
+            surface: 'rgb(var(--bg-surface-rgb) / <alpha-value>)',
+            subtle: 'rgb(var(--bg-subtle-rgb) / <alpha-value>)',
+            muted: 'rgb(var(--bg-muted-rgb) / <alpha-value>)',
+            input: 'rgb(var(--bg-input-rgb) / <alpha-value>)',
+            backdrop: 'var(--bg-backdrop)',
+            media: 'rgb(var(--bg-media-rgb) / <alpha-value>)',
+            ink: {
+              DEFAULT: 'rgb(var(--text-primary-rgb) / <alpha-value>)',
+              secondary: 'rgb(var(--text-secondary-rgb) / <alpha-value>)',
+              muted: 'rgb(var(--text-muted-rgb) / <alpha-value>)',
+              inverse: 'rgb(var(--text-inverse-rgb) / <alpha-value>)',
+            },
+            line: {
+              DEFAULT: 'rgb(var(--border-default-rgb) / <alpha-value>)',
+              strong: 'rgb(var(--border-strong-rgb) / <alpha-value>)',
+            },
+            action: {
+              DEFAULT: 'rgb(var(--action-bg-rgb) / <alpha-value>)',
+              hover: 'rgb(var(--action-bg-hover-rgb) / <alpha-value>)',
+            },
+            ok: {
+              DEFAULT: 'rgb(var(--tone-ok-text-rgb) / <alpha-value>)',
+              soft: 'rgb(var(--tone-ok-bg-rgb) / <alpha-value>)',
+              line: 'rgb(var(--tone-ok-border-rgb) / <alpha-value>)',
+              solid: 'rgb(var(--tone-ok-solid-rgb) / <alpha-value>)',
+              hover: 'rgb(var(--tone-ok-solid-hover-rgb) / <alpha-value>)',
+            },
+            warn: {
+              DEFAULT: 'rgb(var(--tone-warn-text-rgb) / <alpha-value>)',
+              soft: 'rgb(var(--tone-warn-bg-rgb) / <alpha-value>)',
+              line: 'rgb(var(--tone-warn-border-rgb) / <alpha-value>)',
+              solid: 'rgb(var(--tone-warn-solid-rgb) / <alpha-value>)',
+            },
+            danger: {
+              DEFAULT: 'rgb(var(--tone-danger-text-rgb) / <alpha-value>)',
+              soft: 'rgb(var(--tone-danger-bg-rgb) / <alpha-value>)',
+              line: 'rgb(var(--tone-danger-border-rgb) / <alpha-value>)',
+              solid: 'rgb(var(--tone-danger-solid-rgb) / <alpha-value>)',
+              hover: 'rgb(var(--tone-danger-solid-hover-rgb) / <alpha-value>)',
+            },
+            info: {
+              DEFAULT: 'rgb(var(--tone-info-text-rgb) / <alpha-value>)',
+              soft: 'rgb(var(--tone-info-bg-rgb) / <alpha-value>)',
+              line: 'rgb(var(--tone-info-border-rgb) / <alpha-value>)',
+              solid: 'rgb(var(--tone-info-solid-rgb) / <alpha-value>)',
+            },
+            accent: {
+              DEFAULT: 'rgb(var(--tone-accent-text-rgb) / <alpha-value>)',
+              soft: 'rgb(var(--tone-accent-bg-rgb) / <alpha-value>)',
+              line: 'rgb(var(--tone-accent-border-rgb) / <alpha-value>)',
+            },
+          },
+        },
+      },
+    };
+  </script>
   <link rel="stylesheet" href="/studio/styles.css">
 </head>
 <body class="studio-page min-h-screen p-3 sm:p-5">
   <div id="appRootShell" class="max-w-[1720px] mx-auto space-y-3">
 
     <!-- 顶部导航栏与工程选择 -->
-    <header id="appHeader" class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] items-start gap-x-6 gap-y-2.5 pb-3 border-b border-gray-800">
+    <header id="appHeader" class="grid grid-cols-1 xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)] items-start gap-x-6 gap-y-2.5 pb-3 border-b border-line">
       <div class="min-w-0 space-y-2.5">
-        <!-- 第一行：左上角黄色标牌 + 制作工程黄色框 -->
+        <!-- 第一行：左上角品牌标牌 + 制作工程选择框 -->
         <div class="flex flex-wrap items-center gap-2.5">
-          <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 shrink-0">
+          <span class="px-2.5 py-1 rounded-full text-xs font-bold bg-action text-ink-inverse shrink-0">
             WhyVideo Studio
           </span>
           
-          <!-- 制作工程黄色选择框 -->
-          <div class="project-picker flex items-center gap-2 bg-gray-900 px-3 py-1.5 rounded-xl border border-amber-500/40 shadow-inner relative z-20 shrink-0">
-            <label for="projectSelect" class="text-xs font-bold text-amber-300 shrink-0">📁 制作工程：</label>
-            <select id="projectSelect" onchange="onProjectSelectChange(this.value)" style="color-scheme: dark;" class="relative z-30 bg-gray-950 text-white font-extrabold text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400 cursor-pointer min-w-[180px] max-w-[300px]">
+          <!-- 制作工程选择框 -->
+          <div class="project-picker flex items-center gap-2 bg-surface px-3 py-1.5 rounded-xl border border-line-strong shadow-sm relative z-20 shrink-0">
+            <label for="projectSelect" class="text-xs font-bold text-ink shrink-0">📁 制作工程：</label>
+            <select id="projectSelect" onchange="onProjectSelectChange(this.value)" style="color-scheme: light;" class="relative z-30 bg-input text-ink font-extrabold text-xs px-2.5 py-1.5 rounded-lg border border-line-strong focus:outline-none focus:border-ink cursor-pointer min-w-[180px] max-w-[300px]">
               <!--SERVER_PROJECT_OPTIONS-->
             </select>
-            <button id="btnConfirmProject" onclick="confirmSwitchProject()" class="px-3 py-1 rounded-lg bg-gradient-to-r from-amber-500 to-amber-400 hover:brightness-110 text-gray-950 font-black text-xs shadow transition cursor-pointer shrink-0">确定</button>
-            <button id="btnDeleteProject" onclick="deleteCurrentProject()" class="px-2.5 py-1 rounded-lg bg-rose-950/70 hover:bg-rose-600 border border-rose-500/50 text-rose-300 hover:text-white text-xs font-bold transition cursor-pointer shrink-0" title="删除当前工程">🗑️ 删除</button>
+            <button id="btnConfirmProject" onclick="confirmSwitchProject()" class="px-3 py-1 rounded-lg text-ink-inverse font-black text-xs shadow transition cursor-pointer shrink-0 bg-action hover:bg-action-hover">确定</button>
+            <button id="btnDeleteProject" onclick="deleteCurrentProject()" class="px-2.5 py-1 rounded-lg bg-danger-soft hover:bg-danger-hover border border-danger-line text-danger hover:text-ink-inverse text-xs font-bold transition cursor-pointer shrink-0" title="删除当前工程">🗑️ 删除</button>
           </div>
         </div>
 
         <!-- 第二行：【文案创作台 / 视觉分镜台】导航切换胶囊 与 页面大标题 -->
         <div class="flex flex-wrap sm:flex-nowrap items-center gap-3 pt-0.5 min-w-0">
-          <div class="workspace-tabs inline-flex p-1 bg-gray-950/90 rounded-xl border border-purple-500/40 shadow-inner shrink-0">
-            <button id="navTabWriter" type="button" onclick="switchWorkspaceTab('writer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
+          <div class="workspace-tabs inline-flex p-1 bg-subtle rounded-xl border border-line-strong shadow-inner shrink-0">
+            <button id="navTabWriter" type="button" onclick="switchWorkspaceTab('writer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-ink-muted hover:text-ink cursor-pointer">
               ✍️ 文案创作台 (Writer)
             </button>
-            <button id="navTabProducer" type="button" onclick="switchWorkspaceTab('producer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow cursor-pointer">
+            <button id="navTabProducer" type="button" onclick="switchWorkspaceTab('producer')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-ink-inverse shadow cursor-pointer bg-action hover:bg-action-hover">
               🎬 视觉分镜台 (Producer)
             </button>
-            <button id="navTabPublish" type="button" onclick="switchWorkspaceTab('publish')" class="px-3.5 py-1.5 text-xs font-black rounded-lg text-gray-400 hover:text-white">🚀 发布台</button>
+            <button id="navTabPublish" type="button" onclick="switchWorkspaceTab('publish')" class="px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-ink-muted hover:text-ink cursor-pointer">🚀 发布台</button>
           </div>
 
-          <h1 id="projectHeaderTitle" class="text-base sm:text-lg font-black text-white truncate min-w-0">
+          <h1 id="projectHeaderTitle" class="text-base sm:text-lg font-black text-ink truncate min-w-0">
             视觉镜头工作台
           </h1>
         </div>
@@ -54,48 +116,48 @@
         <div class="min-h-[56px] w-full flex items-start justify-end">
           <!-- 视觉分镜制作台快捷操作组 -->
           <div id="producerHeaderActions" class="w-full flex flex-wrap content-start justify-end items-center gap-2">
-            <button type="button" id="producerPromptsModalBtn" onclick="openProducerPromptsModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-teal-600/20 hover:bg-teal-600/35 text-teal-300 border border-teal-500/40 transition shadow flex items-center gap-1.5 cursor-pointer" title="查看并全量自定义当前工程的视觉分镜台 AI 提示词模板（关键词、视频、实景图、卡片、口语剪辑）">
-              ⚙️ 提示词设置: <span id="producerPromptsBtnStatus" class="text-teal-200 font-extrabold">出厂默认</span>
+            <button type="button" id="producerPromptsModalBtn" onclick="openProducerPromptsModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-surface hover:bg-subtle text-ink border border-line-strong transition shadow-sm flex items-center gap-1.5 cursor-pointer" title="查看并全量自定义当前工程的视觉分镜台 AI 提示词模板（关键词、视频、实景图、卡片、口语剪辑）">
+              ⚙️ 提示词设置: <span id="producerPromptsBtnStatus" class="text-info font-extrabold">出厂默认</span>
             </button>
-            <button type="button" onclick="toggleVisualModelModal('video')" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="查看与切换文案、视频、分镜、生图与关键词模型">
+            <button type="button" onclick="toggleVisualModelModal('video')" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-surface hover:bg-subtle text-ink border border-line-strong transition shadow-sm flex items-center gap-1.5 cursor-pointer" title="查看与切换文案、视频、分镜、生图与关键词模型">
               🪐 AI 全流程模型调度中心
             </button>
-            <button onclick="toggleAudioModal()" id="btnOpenAudioModal" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-pink-600 to-rose-600 hover:from-pink-500 hover:to-rose-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="配置 AI 配音引擎（ElevenLabs 云端 / Voicebox 本地）">
-              🎙️ 配音引擎配置 <span id="audioProviderHeaderBadge" class="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-black/25 text-rose-100">Voicebox本地</span>
+            <button onclick="toggleAudioModal()" id="btnOpenAudioModal" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-surface hover:bg-subtle text-ink border border-line-strong transition shadow-sm flex items-center gap-1.5 cursor-pointer" title="配置 AI 配音引擎（ElevenLabs 云端 / Voicebox 本地）">
+              🎙️ 配音引擎配置 <span id="audioProviderHeaderBadge" class="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-subtle text-ink border border-line">Voicebox本地</span>
             </button>
-            <button type="button" id="btnOpenBgmModal" onclick="toggleBgmModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-amber-600 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-gray-950 transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="配置 AI 自适应 BGM 与自动人声避让 (Ducking)">
-              🎵 AI 自适应 BGM <span id="bgmHeaderBadge" class="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-black/20 text-gray-950">未启用</span>
+            <button type="button" id="btnOpenBgmModal" onclick="toggleBgmModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-surface hover:bg-subtle text-ink border border-line-strong transition shadow-sm flex items-center gap-1.5 cursor-pointer" title="配置 AI 自适应 BGM 与自动人声避让 (Ducking)">
+              🎵 AI 自适应 BGM <span id="bgmHeaderBadge" class="px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-subtle text-ink border border-line">未启用</span>
             </button>
-            <button type="button" onclick="openArtTextPanel()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-fuchsia-700 hover:bg-fuchsia-600 text-white transition shadow cursor-pointer">✨ AI 重点艺术字</button>
-            <button onclick="saveAll()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-amber-500 hover:bg-amber-400 text-gray-950 transition shadow-lg cursor-pointer">
+            <button type="button" onclick="openArtTextPanel()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-surface hover:bg-subtle text-ink border border-line-strong transition shadow-sm cursor-pointer">✨ AI 重点艺术字</button>
+            <button onclick="saveAll()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-action hover:bg-action-hover text-ink-inverse transition shadow-md cursor-pointer">
               💾 保存并同步 Remotion
             </button>
-            <button type="button" id="startFinalRenderBtn" onclick="openFinalRenderConfirmModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="开始当前工程最终渲染（含已配置音频）">
+            <button type="button" id="startFinalRenderBtn" onclick="openFinalRenderConfirmModal()" class="px-3 py-1.5 text-xs font-bold rounded-xl bg-ok-solid hover:bg-ok-hover text-ink-inverse transition shadow-md flex items-center gap-1.5 cursor-pointer" title="开始当前工程最终渲染（含已配置音频）">
               🎬 最终渲染
             </button>
-            <button type="button" id="btnOpenRemotionStudio" onclick="openRemotionStudioForCurrentProject()" class="px-3 py-1.5 text-xs font-semibold rounded-xl card hover:border-blue-500 text-blue-300 transition cursor-pointer">
+            <button type="button" id="btnOpenRemotionStudio" onclick="openRemotionStudioForCurrentProject()" class="px-3 py-1.5 text-xs font-semibold rounded-xl bg-surface hover:bg-subtle border border-line-strong hover:border-ink text-ink transition cursor-pointer">
               🎬 Remotion (:3100) ↗
             </button>
           </div>
 
           <!-- 文案创作台快捷操作组 (初始隐藏，切换到 Writer 时激活) -->
           <div id="writerHeaderActions" class="hidden w-full flex flex-wrap content-start justify-end items-center gap-2.5">
-            <button type="button" onclick="openCreateBlankProjectModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 text-emerald-300 border border-emerald-500/40 transition shadow flex items-center gap-1.5 cursor-pointer" title="创建一个全新的空白文案工程（不影响当前工程）">
+            <button type="button" onclick="openCreateBlankProjectModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-surface hover:bg-subtle text-ink border border-line-strong transition shadow-sm flex items-center gap-1.5 cursor-pointer" title="创建一个全新的空白文案工程（不影响当前工程）">
               ✨ 新建空白工程
             </button>
-            <button type="button" id="writerPromptsModalBtn" onclick="openWriterPromptsModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-teal-600/20 hover:bg-teal-600/35 text-teal-300 border border-teal-500/40 transition shadow flex items-center gap-1.5 cursor-pointer" title="查看并全量自定义当前工程的文案提示词模板与风格预设（仅对本工程生效）">
-              ⚙️ 提示词设置: <span id="writerPromptsBtnStatus" class="text-teal-200 font-extrabold">出厂默认</span>
+            <button type="button" id="writerPromptsModalBtn" onclick="openWriterPromptsModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-surface hover:bg-subtle text-ink border border-line-strong transition shadow-sm flex items-center gap-1.5 cursor-pointer" title="查看并全量自定义当前工程的文案提示词模板与风格预设（仅对本工程生效）">
+              ⚙️ 提示词设置: <span id="writerPromptsBtnStatus" class="text-info font-extrabold">出厂默认</span>
             </button>
-            <button type="button" onclick="openWriterModelModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer" title="点击随时查看、输入 Key，自由切换网关与文案大模型">
+            <button type="button" onclick="openWriterModelModal()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-surface hover:bg-subtle text-ink border border-line-strong transition shadow-sm flex items-center gap-1.5 cursor-pointer" title="点击随时查看、输入 Key，自由切换网关与文案大模型">
               ⚙️ AI 写作模型与网关配置
             </button>
-            <button type="button" onclick="openWriterImportDirectly()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
+            <button type="button" onclick="openWriterImportDirectly()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-surface hover:bg-subtle text-ink border border-line-strong transition shadow-sm flex items-center gap-1.5 cursor-pointer">
               📥 导入已有文案 (exports/)
             </button>
-            <button type="button" onclick="saveCurrentWriterPart()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-gray-900 hover:bg-gray-800 text-amber-300 border border-amber-500/40 transition shadow flex items-center gap-1.5 cursor-pointer">
+            <button type="button" onclick="saveCurrentWriterPart()" class="px-3.5 py-1.5 text-xs font-bold rounded-xl bg-surface hover:bg-subtle text-ink border border-line-strong transition shadow-sm flex items-center gap-1.5 cursor-pointer">
               💾 保存当前草稿
             </button>
-            <button type="button" onclick="syncWriterToProducerUI()" class="px-4 py-1.5 text-xs font-extrabold rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 transition shadow-xl flex items-center gap-1.5 cursor-pointer">
+            <button type="button" onclick="syncWriterToProducerUI()" class="px-4 py-1.5 text-xs font-extrabold rounded-xl text-ink-inverse transition shadow-md flex items-center gap-1.5 cursor-pointer bg-action hover:bg-action-hover">
               🚀 文案定稿 · 一键流转至制作台
             </button>
           </div>
@@ -120,27 +182,27 @@
   <!--PARTIAL:writer-tools-->
 
   <!-- 统一操作完成提示弹窗 (Producer & Writer 通用) -->
-  <div id="studioCompletionModal" onclick="if(event.target===this) closeCompletionModal()" role="dialog" aria-modal="true" aria-labelledby="completionModalTitle" class="studio-modal fixed inset-0 bg-black/75 backdrop-blur-sm z-[60] flex items-center justify-center p-4 hidden">
-    <div class="card w-full max-w-md p-5 rounded-2xl border border-emerald-500/40 bg-gray-950 shadow-2xl space-y-4">
-      <div class="flex items-start justify-between gap-3 pb-3 border-b border-gray-800">
+  <div id="studioCompletionModal" onclick="if(event.target===this) closeCompletionModal()" role="dialog" aria-modal="true" aria-labelledby="completionModalTitle" class="studio-modal fixed inset-0 bg-backdrop backdrop-blur-sm z-[60] flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-md p-5 rounded-2xl border border-ok-line bg-subtle shadow-2xl space-y-4">
+      <div class="flex items-start justify-between gap-3 pb-3 border-b border-line">
         <div class="flex items-center gap-2.5 min-w-0">
-          <span id="completionModalIcon" class="w-9 h-9 rounded-xl bg-emerald-500/15 border border-emerald-500/35 flex items-center justify-center text-lg shrink-0">✅</span>
+          <span id="completionModalIcon" class="w-9 h-9 rounded-xl bg-ok-soft border border-ok-line flex items-center justify-center text-lg shrink-0">✅</span>
           <div class="min-w-0">
-            <h3 id="completionModalTitle" class="text-base font-black text-white truncate">已完成</h3>
-            <p id="completionModalTime" class="text-[11px] font-mono text-gray-400 mt-0.5"></p>
+            <h3 id="completionModalTitle" class="text-base font-black text-ink truncate">已完成</h3>
+            <p id="completionModalTime" class="text-[11px] font-mono text-ink-muted mt-0.5"></p>
           </div>
         </div>
-        <button type="button" onclick="closeCompletionModal()" aria-label="关闭完成提示" class="w-8 h-8 rounded-lg flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800 transition cursor-pointer shrink-0">✕</button>
+        <button type="button" onclick="closeCompletionModal()" aria-label="关闭完成提示" class="w-8 h-8 rounded-lg flex items-center justify-center text-ink-muted hover:text-ink hover:bg-muted transition cursor-pointer shrink-0">✕</button>
       </div>
       <div class="space-y-2.5">
-        <p id="completionModalMessage" class="text-sm font-semibold text-gray-100 leading-relaxed whitespace-pre-wrap"></p>
-        <div id="completionModalDetail" class="hidden p-3 rounded-xl bg-gray-900/90 border border-gray-800 text-xs text-gray-300 leading-relaxed whitespace-pre-wrap"></div>
+        <p id="completionModalMessage" class="text-sm font-semibold text-ink leading-relaxed whitespace-pre-wrap"></p>
+        <div id="completionModalDetail" class="hidden p-3 rounded-xl bg-subtle border border-line text-xs text-ink-secondary leading-relaxed whitespace-pre-wrap"></div>
       </div>
-      <div class="flex justify-end gap-2 pt-2 border-t border-gray-800">
-        <a id="completionModalActionLink" href="http://localhost:3100" target="whyvideo_remotion_studio" class="hidden px-4 py-2 text-xs font-black rounded-xl bg-blue-600 hover:bg-blue-500 text-white shadow-lg transition">
+      <div class="flex justify-end gap-2 pt-2 border-t border-line">
+        <a id="completionModalActionLink" href="http://localhost:3100" target="whyvideo_remotion_studio" class="hidden px-4 py-2 text-xs font-black rounded-xl bg-info-solid hover:bg-info-solid text-ink-inverse shadow-lg transition">
           🎬 打开 Remotion (:3100) ↗
         </a>
-        <button type="button" id="completionModalConfirmBtn" onclick="closeCompletionModal()" class="px-5 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:brightness-110 text-gray-950 shadow-lg cursor-pointer transition">
+        <button type="button" id="completionModalConfirmBtn" onclick="closeCompletionModal()" class="px-5 py-2 text-xs font-black rounded-xl text-ink-inverse shadow-lg cursor-pointer transition bg-ok-solid hover:bg-ok-hover">
           知道了
         </button>
       </div>
@@ -148,7 +210,7 @@
   </div>
 
   <!-- Toast 提示 -->
-  <div id="toast" class="fixed bottom-6 right-6 px-4 py-2.5 rounded-xl bg-amber-500 text-gray-950 font-extrabold text-xs shadow-2xl transition duration-300 hidden z-50">
+  <div id="toast" class="fixed bottom-6 right-6 px-4 py-2.5 rounded-xl bg-action text-ink-inverse font-extrabold text-xs shadow-2xl transition duration-300 hidden z-50">
   </div>
 
   <!--SERVER_DEFAULT_PROJECT-->

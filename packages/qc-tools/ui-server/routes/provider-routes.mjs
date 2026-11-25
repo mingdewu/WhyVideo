@@ -483,7 +483,7 @@ export async function handleProviderRoutes(req, res, { url, pathname, queryProje
       baseUrl: body.baseUrl || existing.baseUrl || 'https://openrouter.ai/api/v1',
       apiKey: body.apiKey !== undefined ? body.apiKey : (existing.apiKey || ''),
       tavilyApiKey: (rawTavily && !/^•+$/.test(rawTavily))
-        ? rawTavily : (existing.tavilyApiKey || ''),
+        ? rawTavily : (existing.tavilyApiKey || getWriterTavilyKey(curPaths.projectDir)),
       meowloadApiKey: typeof body.meowloadApiKey === 'string' && body.meowloadApiKey.trim()
         ? body.meowloadApiKey.trim() : (existing.meowloadApiKey || ''),
       writerModel: body.writerModel || existing.writerModel || 'deepseek/deepseek-chat',
@@ -504,7 +504,7 @@ export async function handleProviderRoutes(req, res, { url, pathname, queryProje
       config: {
         ...updated,
         tavilyApiKey: undefined,
-        tavilyKeyConfigured: Boolean(updated.tavilyApiKey || process.env.TAVILY_API_KEY),
+        tavilyKeyConfigured: Boolean(getWriterTavilyKey(curPaths.projectDir, updated.tavilyApiKey)),
         meowloadApiKey: undefined,
         meowloadKeyConfigured: Boolean(getMeowloadApiKey(curPaths.projectDir, updated.meowloadApiKey)),
       },

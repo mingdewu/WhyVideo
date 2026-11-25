@@ -64,6 +64,7 @@ export function normalizePromptConfig(cfg = {}) {
     iModel = 'black-forest-labs/flux-3-image';
   }
   return {
+    ...cfg,
     provider: 'openrouter',
     baseUrl: cfg.baseUrl || 'https://openrouter.ai/api/v1',
     apiKey: cfg.apiKey || '',

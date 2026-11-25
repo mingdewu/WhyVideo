@@ -26,15 +26,15 @@ let bgmWorkbenchState = {
       if (!badge) return;
       if (summary && summary.enabled && summary.trackTitle) {
         badge.textContent = '已挂载';
-        badge.className = 'px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-emerald-950/80 text-emerald-300 border border-emerald-500/40';
+        badge.className = 'px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-ok-soft text-ok border border-ok-line';
         if (btn) btn.title = '已挂载 BGM：' + summary.trackTitle;
       } else if (summary && summary.tracksCount > 0) {
         badge.textContent = '待启用';
-        badge.className = 'px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-black/25 text-gray-950';
+        badge.className = 'px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-subtle text-ink';
         if (btn) btn.title = '本地已有 ' + summary.tracksCount + ' 首 BGM，点击配置启用';
       } else {
         badge.textContent = '未启用';
-        badge.className = 'px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-black/20 text-gray-950';
+        badge.className = 'px-1.5 py-0.2 rounded text-[10px] font-extrabold bg-subtle text-ink';
         if (btn) btn.title = '配置 AI 自适应 BGM 与自动人声避让 (Ducking)';
       }
     }
@@ -154,7 +154,7 @@ let bgmWorkbenchState = {
         if (cfg.enabled && cfg.multi_track) {
           hintEl.textContent = '💡 将按曲库时长自动轮换，保存后同步到成片';
         } else if (cfg.enabled && selected) {
-          hintEl.innerHTML = '💡 已选 <strong class="text-amber-300">' + escapeHtml(selected.title) + '</strong>，保存后将写入 <code class="text-amber-300">audio_track.bgm</code>';
+          hintEl.innerHTML = '💡 已选 <strong class="text-warn">' + escapeHtml(selected.title) + '</strong>，保存后将写入 <code class="text-warn">audio_track.bgm</code>';
         } else if (selected) {
           hintEl.innerHTML = '💡 当前已选音轨但未开启总开关；勾选上方「启用 BGM 音轨」并保存即可挂载';
         } else {
@@ -168,30 +168,30 @@ let bgmWorkbenchState = {
       if (!box) return;
       const segs = bgmWorkbenchState.config?.segments || [];
       if (segs.length === 0) {
-        box.innerHTML = '<div class="col-span-full p-3.5 rounded-xl bg-gray-900/70 border border-dashed border-gray-700 text-gray-400 text-center">暂无情绪曲线。点击右上角「🤖 AI 分析全片情绪弧度」将读取当前工程真实台词生成分段电平方案。</div>';
+        box.innerHTML = '<div class="col-span-full p-3.5 rounded-xl bg-subtle border border-dashed border-line text-ink-muted text-center">暂无情绪曲线。点击右上角「🤖 AI 分析全片情绪弧度」将读取当前工程真实台词生成分段电平方案。</div>';
         return;
       }
 
       box.innerHTML = segs.map((seg, idx) => {
         const energyColor = seg.energy === 'high'
-          ? 'text-amber-300 border-amber-500/40 bg-amber-500/10'
+          ? 'text-warn border-warn-line bg-warn-soft'
           : (seg.energy === 'low'
-            ? 'text-emerald-300 border-emerald-500/30 bg-emerald-500/10'
-            : 'text-blue-300 border-blue-500/30 bg-blue-500/10');
+            ? 'text-ok border-ok-line bg-ok-soft'
+            : 'text-info border-info-line bg-info-soft');
         const energyBadge = seg.energy === 'high' ? '高潮/张力' : (seg.energy === 'low' ? '沉静/铺垫' : '稳健推进');
-        return '<div class="p-3 rounded-xl bg-gray-900/90 border border-gray-800 space-y-1.5">' +
+        return '<div class="p-3 rounded-xl bg-subtle border border-line space-y-1.5">' +
           '<div class="flex items-center justify-between gap-2">' +
-            '<span class="font-bold text-white truncate">' + escapeHtml(seg.label || ('段落 ' + (idx + 1))) + '</span>' +
+            '<span class="font-bold text-ink truncate">' + escapeHtml(seg.label || ('段落 ' + (idx + 1))) + '</span>' +
             '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold border ' + energyColor + ' shrink-0">' + escapeHtml(energyBadge) + '</span>' +
           '</div>' +
-          '<div class="text-[11px] text-gray-400 font-mono">' + formatBgmTime(seg.start_ms) + ' ~ ' + formatBgmTime(seg.end_ms) + ' · <span class="text-amber-300 font-sans font-semibold">' + escapeHtml(seg.mood || '') + '</span></div>' +
-          (seg.music_style_hint ? '<div class="text-[10px] text-purple-300/90">🎼 ' + escapeHtml(seg.music_style_hint) + '</div>' : '') +
-          (seg.reason ? '<div class="text-[10px] text-gray-400 line-clamp-2">' + escapeHtml(seg.reason) + '</div>' : '') +
-          '<div class="flex items-center justify-between gap-2 pt-1 border-t border-gray-800/80">' +
-            '<span class="text-[10px] text-gray-400">目标电平</span>' +
+          '<div class="text-[11px] text-ink-muted font-mono">' + formatBgmTime(seg.start_ms) + ' ~ ' + formatBgmTime(seg.end_ms) + ' · <span class="text-warn font-sans font-semibold">' + escapeHtml(seg.mood || '') + '</span></div>' +
+          (seg.music_style_hint ? '<div class="text-[10px] text-accent">🎼 ' + escapeHtml(seg.music_style_hint) + '</div>' : '') +
+          (seg.reason ? '<div class="text-[10px] text-ink-muted line-clamp-2">' + escapeHtml(seg.reason) + '</div>' : '') +
+          '<div class="flex items-center justify-between gap-2 pt-1 border-t border-line">' +
+            '<span class="text-[10px] text-ink-muted">目标电平</span>' +
             '<div class="flex items-center gap-2 flex-1 max-w-[180px]">' +
               '<input type="range" min="-28" max="-6" step="1" value="' + Number(seg.target_db ?? -16) + '" oninput="onBgmSegmentDbChange(' + idx + ', this.value)" class="flex-1 accent-amber-400 cursor-pointer" />' +
-              '<span id="bgmSegDbVal_' + idx + '" class="font-mono text-[11px] font-bold text-amber-300 w-12 text-right">' + Number(seg.target_db ?? -16) + ' dB</span>' +
+              '<span id="bgmSegDbVal_' + idx + '" class="font-mono text-[11px] font-bold text-warn w-12 text-right">' + Number(seg.target_db ?? -16) + ' dB</span>' +
             '</div>' +
           '</div>' +
         '</div>';
@@ -204,50 +204,50 @@ let bgmWorkbenchState = {
       const tracks = bgmWorkbenchState.config?.tracks || [];
       const selectedId = bgmWorkbenchState.config?.selected_track_id;
       if (tracks.length === 0) {
-        box.innerHTML = '<div class="p-4 rounded-xl bg-gray-900/50 border border-dashed border-gray-700 text-xs text-gray-400 text-center">当前工程暂无 BGM 音轨。请点击右上角「📤 上传本地 BGM」导入授权音乐。</div>';
+        box.innerHTML = '<div class="p-4 rounded-xl bg-subtle border border-dashed border-line text-xs text-ink-muted text-center">当前工程暂无 BGM 音轨。请点击右上角「📤 上传本地 BGM」导入授权音乐。</div>';
         return;
       }
 
       box.innerHTML = tracks.map((tr) => {
         const isSelected = !bgmWorkbenchState.config?.multi_track && tr.track_id === selectedId;
         const cardCls = isSelected
-          ? 'bg-amber-500/10 border-amber-400 shadow'
-          : 'bg-gray-900/60 border-gray-800 hover:border-gray-700';
+          ? 'bg-warn-soft border-warn-line shadow'
+          : 'bg-subtle border-line hover:border-line-strong';
         const durLabel = tr.duration_ms ? formatBgmTime(tr.duration_ms) : '未知时长';
         const safeId = escapeHtml(tr.track_id);
-        let tagHtml = '<div class="mt-1 text-[10px] text-gray-500"><span class="px-1.5 py-0.2 rounded bg-gray-800/80 text-gray-400 border border-gray-700">未标记（首次配乐时分析一次）</span></div>';
+        let tagHtml = '<div class="mt-1 text-[10px] text-ink-muted"><span class="px-1.5 py-0.2 rounded bg-subtle text-ink-muted border border-line">未标记（首次配乐时分析一次）</span></div>';
         if (tr.analysis) {
           const energyText = tr.analysis.energy === 'high' ? '高能量' : (tr.analysis.energy === 'low' ? '低能量' : '中能量');
           const energyBadgeCls = tr.analysis.energy === 'high'
-            ? 'bg-amber-500/15 text-amber-300 border-amber-500/30'
-            : (tr.analysis.energy === 'low' ? 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30' : 'bg-blue-500/15 text-blue-300 border-blue-500/30');
+            ? 'bg-warn-soft text-warn border-warn-line'
+            : (tr.analysis.energy === 'low' ? 'bg-ok-soft text-ok border-ok-line' : 'bg-info-soft text-info border-info-line');
           const metaParts = [
             tr.analysis.suitable ? ('适合：' + tr.analysis.suitable) : '',
             tr.analysis.instruments ? ('乐器：' + tr.analysis.instruments) : '',
           ].filter(Boolean);
           tagHtml = '<div class="mt-1 flex flex-wrap items-center gap-1.5 text-[10px]">' +
-            '<span class="px-1.5 py-0.2 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 shrink-0">🏷️ 已标记</span>' +
+            '<span class="px-1.5 py-0.2 rounded bg-ok-soft text-ok border border-ok-line shrink-0">🏷️ 已标记</span>' +
             '<span class="px-1.5 py-0.2 rounded border shrink-0 ' + energyBadgeCls + '">' + energyText + '</span>' +
-            '<span class="text-amber-200/90 truncate">' + escapeHtml(tr.analysis.mood || '') + '</span>' +
+            '<span class="text-warn truncate">' + escapeHtml(tr.analysis.mood || '') + '</span>' +
           '</div>' +
-          (metaParts.length ? '<div class="text-[10px] text-gray-400/90 mt-0.5 line-clamp-1">' + escapeHtml(metaParts.join(' · ')) + '</div>' : '');
+          (metaParts.length ? '<div class="text-[10px] text-ink-muted mt-0.5 line-clamp-1">' + escapeHtml(metaParts.join(' · ')) + '</div>' : '');
         }
         return '<div data-track-id="' + safeId + '" ' + (!bgmWorkbenchState.config?.multi_track ? 'onclick="selectBgmTrack(this.dataset.trackId)"' : '') + ' class="flex items-center justify-between gap-3 p-3 rounded-xl border transition ' + cardCls + '">' +
           '<div class="flex items-center gap-2.5 min-w-0">' +
             (!bgmWorkbenchState.config?.multi_track ? '<input type="radio" name="bgmTrackRadio" data-track-id="' + safeId + '" ' + (isSelected ? 'checked' : '') + ' onclick="event.stopPropagation(); selectBgmTrack(this.dataset.trackId)" class="accent-amber-400 w-4 h-4 shrink-0 cursor-pointer" />' : '') +
             '<div class="min-w-0">' +
-              '<div class="text-xs font-bold text-white truncate flex items-center gap-2">' +
+              '<div class="text-xs font-bold text-ink truncate flex items-center gap-2">' +
                 '<span>' + escapeHtml(tr.title || tr.file_name) + '</span>' +
-                (isSelected ? '<span class="px-1.5 py-0.2 rounded text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/40 shrink-0">当前选中</span>' : '') +
+                (isSelected ? '<span class="px-1.5 py-0.2 rounded text-[9px] bg-warn-soft text-warn border border-warn-line shrink-0">当前选中</span>' : '') +
               '</div>' +
-              '<div class="text-[10px] text-gray-400 font-mono mt-0.5 truncate">' + escapeHtml(tr.file_name) + ' · ' + durLabel + ' · ' + formatFileSize(tr.size_bytes) + '</div>' +
+              '<div class="text-[10px] text-ink-muted font-mono mt-0.5 truncate">' + escapeHtml(tr.file_name) + ' · ' + durLabel + ' · ' + formatFileSize(tr.size_bytes) + '</div>' +
               tagHtml +
             '</div>' +
           '</div>' +
           '<div class="flex items-center gap-1.5 shrink-0">' +
-            '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); previewBgmTrack(this.dataset.trackId)" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-gray-800 hover:bg-gray-700 text-amber-300 border border-gray-700 transition cursor-pointer">▶ 试听</button>' +
-            (tr.analysis ? '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); clearBgmTrackAnalysis(this.dataset.trackId)" class="px-2 py-1 text-xs font-semibold rounded-lg bg-gray-800 hover:bg-purple-900/60 text-purple-300 border border-gray-700 hover:border-purple-500/50 transition cursor-pointer" title="清除标签，下次自动配乐时重新听歌分析">🔄</button>' : '') +
-            '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); deleteBgmTrack(this.dataset.trackId)" class="px-2 py-1 text-xs font-semibold rounded-lg bg-gray-800 hover:bg-rose-900/60 text-rose-300 border border-gray-700 hover:border-rose-500/50 transition cursor-pointer" title="从当前工程删除该 BGM">🗑</button>' +
+            '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); previewBgmTrack(this.dataset.trackId)" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-subtle hover:bg-muted text-warn border border-line transition cursor-pointer">▶ 试听</button>' +
+            (tr.analysis ? '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); clearBgmTrackAnalysis(this.dataset.trackId)" class="px-2 py-1 text-xs font-semibold rounded-lg bg-subtle hover:bg-accent-soft text-accent border border-line hover:border-ink transition cursor-pointer" title="清除标签，下次自动配乐时重新听歌分析">🔄</button>' : '') +
+            '<button type="button" data-track-id="' + safeId + '" onclick="event.stopPropagation(); deleteBgmTrack(this.dataset.trackId)" class="px-2 py-1 text-xs font-semibold rounded-lg bg-subtle hover:bg-danger-soft text-danger border border-line hover:border-danger-line transition cursor-pointer" title="从当前工程删除该 BGM">🗑</button>' +
           '</div>' +
         '</div>';
       }).join('');
@@ -265,10 +265,10 @@ let bgmWorkbenchState = {
       }
       wrap.classList.remove('hidden');
       list.innerHTML = recs.map((r) =>
-        '<div class="p-2.5 rounded-xl bg-gray-900/70 border border-purple-500/25 space-y-0.5">' +
-          '<div class="text-[11px] font-bold text-purple-200">' + escapeHtml(r.title) + ' <span class="text-[10px] font-mono text-amber-300">(' + escapeHtml(r.bpm_range || '') + ')</span></div>' +
-          (r.instrumentation ? '<div class="text-[10px] text-gray-300">乐器：' + escapeHtml(r.instrumentation) + '</div>' : '') +
-          (r.fit_reason ? '<div class="text-[10px] text-gray-400">' + escapeHtml(r.fit_reason) + '</div>' : '') +
+        '<div class="p-2.5 rounded-xl bg-subtle border border-accent-line space-y-0.5">' +
+          '<div class="text-[11px] font-bold text-accent">' + escapeHtml(r.title) + ' <span class="text-[10px] font-mono text-warn">(' + escapeHtml(r.bpm_range || '') + ')</span></div>' +
+          (r.instrumentation ? '<div class="text-[10px] text-ink-secondary">乐器：' + escapeHtml(r.instrumentation) + '</div>' : '') +
+          (r.fit_reason ? '<div class="text-[10px] text-ink-muted">' + escapeHtml(r.fit_reason) + '</div>' : '') +
         '</div>'
       ).join('');
     }
@@ -350,10 +350,10 @@ let bgmWorkbenchState = {
       if (badge) {
         badge.textContent = '参数检查（未试听成片）';
         badge.className = audit.grade === 'A+' || audit.grade === 'A'
-          ? 'px-2 py-0.5 rounded text-[10px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+          ? 'px-2 py-0.5 rounded text-[10px] font-black bg-ok-soft text-ok border border-ok-line'
           : (audit.grade === '待配置'
-            ? 'px-2 py-0.5 rounded text-[10px] font-black bg-gray-800 text-gray-300 border border-gray-700'
-            : 'px-2 py-0.5 rounded text-[10px] font-black bg-amber-500/20 text-amber-300 border border-amber-500/40');
+            ? 'px-2 py-0.5 rounded text-[10px] font-black bg-subtle text-ink-secondary border border-line'
+            : 'px-2 py-0.5 rounded text-[10px] font-black bg-warn-soft text-warn border border-warn-line');
       }
       const sumEl = document.getElementById('bgmAuditSummary');
       const dEl = document.getElementById('bgmAuditDucking');

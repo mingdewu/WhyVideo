@@ -2,22 +2,22 @@
   <div id="viewWriterContainer" class="space-y-5 hidden">
 
     <!-- 顶部五阶段导航与人工审核门禁指示条 (单屏紧凑版) -->
-    <div class="card p-2.5 rounded-2xl border border-purple-500/30 bg-gradient-to-r from-gray-950 via-purple-950/20 to-gray-950 shrink-0">
-      <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-gray-800/80">
+    <div class="card p-2.5 rounded-2xl border border-accent-line shrink-0">
+      <div class="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-line">
         <div class="flex items-center gap-2">
-          <span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-purple-500/20 text-purple-300 border border-purple-500/40" title="遵循知识型纪录片规范 · 零编造 · 证据卡核验 · 5~7章大纲 · 四段式单章受控撰写 · 单一终局结尾">
+          <span class="px-2.5 py-0.5 rounded-full text-xs font-black bg-accent-soft text-accent border border-accent-line" title="遵循知识型纪录片规范 · 零编造 · 证据卡核验 · 5~7章大纲 · 四段式单章受控撰写 · 单一终局结尾">
             ✍️ 文案策划工作流
           </span>
-          <span class="hidden xl:inline text-[11px] text-gray-400">
+          <span class="hidden xl:inline text-[11px] text-ink-muted">
             零编造 · 证据卡核验 · 5~7章大纲 · 四段式单章 · 单一终局结尾
           </span>
         </div>
         <div class="flex items-center gap-2 text-xs flex-wrap">
-          <span id="writerPersistenceStatusBadge" class="px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30" title="显示当前文案创作台内容是否已写入本地 projects/<projectId>/data/">
+          <span id="writerPersistenceStatusBadge" class="px-2.5 py-0.5 rounded-full font-bold bg-ok-soft text-ok border border-ok-line" title="显示当前文案创作台内容是否已写入本地 projects/<projectId>/data/">
             ✅ 已同步本地
           </span>
-          <span class="text-gray-400">当前阶段：</span>
-          <span id="writerCurrentStepBadge" class="px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+          <span class="text-ink-muted">当前阶段：</span>
+          <span id="writerCurrentStepBadge" class="px-2.5 py-0.5 rounded-full font-bold bg-warn-soft text-warn border border-warn-line">
             Step 1 · 立项与资料输入
           </span>
         </div>
@@ -25,28 +25,28 @@
 
       <!-- 五阶段按钮指示器 (单行紧凑胶囊) -->
       <div id="writerSteps" class="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-2">
-        <button type="button" onclick="setWriterStep(1, true)" id="stepBtn1" aria-current="step" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow cursor-pointer">
-          <span class="w-5 h-5 rounded-full bg-purple-600 text-white font-bold flex items-center justify-center text-[11px] shrink-0">1</span>
+        <button type="button" onclick="setWriterStep(1, true)" id="stepBtn1" aria-current="step" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-accent-soft border-accent-line text-ink shadow cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-action text-ink-inverse font-bold flex items-center justify-center text-[11px] shrink-0">1</span>
           <div class="text-xs font-bold truncate">立项与资料</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(2, true)" id="stepBtn2" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
-          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">2</span>
+        <button type="button" onclick="setWriterStep(2, true)" id="stepBtn2" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-surface border-line text-ink-muted hover:text-ink cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-subtle text-ink-secondary font-bold flex items-center justify-center text-[11px] shrink-0">2</span>
           <div class="text-xs font-bold truncate">证据卡提取核验</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(3, true)" id="stepBtn3" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
-          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">3</span>
+        <button type="button" onclick="setWriterStep(3, true)" id="stepBtn3" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-surface border-line text-ink-muted hover:text-ink cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-subtle text-ink-secondary font-bold flex items-center justify-center text-[11px] shrink-0">3</span>
           <div class="text-xs font-bold truncate">完整大纲策划</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(4, true)" id="stepBtn4" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
-          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">4</span>
+        <button type="button" onclick="setWriterStep(4, true)" id="stepBtn4" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-surface border-line text-ink-muted hover:text-ink cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-subtle text-ink-secondary font-bold flex items-center justify-center text-[11px] shrink-0">4</span>
           <div class="text-xs font-bold truncate">逐章撰写与润色</div>
         </button>
 
-        <button type="button" onclick="setWriterStep(5, true)" id="stepBtn5" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer">
-          <span class="w-5 h-5 rounded-full bg-gray-800 text-gray-300 font-bold flex items-center justify-center text-[11px] shrink-0">5</span>
+        <button type="button" onclick="setWriterStep(5, true)" id="stepBtn5" class="px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-surface border-line text-ink-muted hover:text-ink cursor-pointer">
+          <span class="w-5 h-5 rounded-full bg-subtle text-ink-secondary font-bold flex items-center justify-center text-[11px] shrink-0">5</span>
           <div class="text-xs font-bold truncate">全文统稿与定稿</div>
         </button>
       </div>
@@ -59,52 +59,52 @@
       <div id="writerLeftCol" class="lg:col-span-2 lg:h-full lg:overflow-y-auto pr-0.5 space-y-2.5">
 
         <!-- 模式 A：已有文案工程 · 工程文案实况摘要卡 (Project Script Inspector · 紧凑版) -->
-        <div id="wInspectorCard" class="hidden card p-3 rounded-2xl border border-purple-500/40 bg-gradient-to-b from-purple-950/30 via-gray-950 to-gray-950 space-y-2.5 shadow-xl">
-          <div class="flex flex-wrap items-center justify-between gap-1.5 pb-2 border-b border-gray-800/90">
-            <span class="text-xs font-black text-purple-300 flex items-center gap-1">
+        <div id="wInspectorCard" class="hidden card p-3 rounded-2xl border border-accent-line space-y-2.5 shadow-xl">
+          <div class="flex flex-wrap items-center justify-between gap-1.5 pb-2 border-b border-line">
+            <span class="text-xs font-black text-accent flex items-center gap-1">
               <span>📊 实况概览</span>
             </span>
-            <span id="wInspectorStatusPill" class="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-bold truncate max-w-full">
+            <span id="wInspectorStatusPill" class="text-[10px] px-1.5 py-0.5 rounded-full bg-ok-soft text-ok border border-ok-line font-bold truncate max-w-full">
               已有文案 · 审阅模式
             </span>
           </div>
 
           <div class="space-y-0.5 min-w-0">
-            <div class="text-[10px] font-mono text-gray-400 truncate" id="wInspectorProjectId">why_project</div>
-            <div class="text-xs font-black text-white leading-snug break-words" id="wInspectorTitle">加载中...</div>
+            <div class="text-[10px] font-mono text-ink-muted truncate" id="wInspectorProjectId">why_project</div>
+            <div class="text-xs font-black text-ink leading-snug break-words" id="wInspectorTitle">加载中...</div>
           </div>
 
           <!-- 紧凑单列工程统计 -->
           <div class="space-y-1.5">
-            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-gray-900/90 border border-gray-800">
-              <span class="text-[11px] text-gray-400">📝 字数</span>
-              <span class="text-xs font-black text-white font-mono" id="wInspectorWords">-</span>
+            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-subtle border border-line">
+              <span class="text-[11px] text-ink-muted">📝 字数</span>
+              <span class="text-xs font-black text-ink font-mono" id="wInspectorWords">-</span>
             </div>
-            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-gray-900/90 border border-gray-800">
-              <span class="text-[11px] text-gray-400">⏱️ 时长</span>
-              <span class="text-xs font-black text-amber-300 font-mono" id="wInspectorDuration">-</span>
+            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-subtle border border-line">
+              <span class="text-[11px] text-ink-muted">⏱️ 时长</span>
+              <span class="text-xs font-black text-warn font-mono" id="wInspectorDuration">-</span>
             </div>
-            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-gray-900/90 border border-gray-800">
-              <span class="text-[11px] text-gray-400">📑 章节</span>
-              <span class="text-xs font-black text-purple-300 font-mono" id="wInspectorChapters">-</span>
+            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-subtle border border-line">
+              <span class="text-[11px] text-ink-muted">📑 章节</span>
+              <span class="text-xs font-black text-accent font-mono" id="wInspectorChapters">-</span>
             </div>
-            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-gray-900/90 border border-gray-800">
-              <span class="text-[11px] text-gray-400">🗂️ 资料</span>
-              <span class="text-xs font-black text-cyan-300 font-mono" id="wInspectorEvidence">-</span>
+            <div class="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-subtle border border-line">
+              <span class="text-[11px] text-ink-muted">🗂️ 资料</span>
+              <span class="text-xs font-black text-info font-mono" id="wInspectorEvidence">-</span>
             </div>
           </div>
 
           <!-- 展开立项参数与资料抽屉 + 安全新建/重置操作 -->
-          <div class="pt-2 border-t border-gray-800 space-y-1.5">
-            <button type="button" onclick="toggleWriterSetupDrawer()" id="btnToggleWriterSetupDrawer" class="w-full py-1.5 px-2.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-gray-700 text-[11px] font-semibold text-gray-300 flex items-center justify-between gap-1 transition cursor-pointer">
+          <div class="pt-2 border-t border-line space-y-1.5">
+            <button type="button" onclick="toggleWriterSetupDrawer()" id="btnToggleWriterSetupDrawer" class="w-full py-1.5 px-2.5 rounded-xl bg-surface hover:bg-muted border border-line text-[11px] font-semibold text-ink-secondary flex items-center justify-between gap-1 transition cursor-pointer">
               <span class="truncate">⚙️ 参数与资料</span>
-              <span id="wSetupDrawerArrow" class="text-[10px] text-gray-400 shrink-0">▼ 展开</span>
+              <span id="wSetupDrawerArrow" class="text-[10px] text-ink-muted shrink-0">▼ 展开</span>
             </button>
 
-            <button type="button" onclick="openCreateBlankProjectModal()" class="w-full py-1.5 px-2.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer">
+            <button type="button" onclick="openCreateBlankProjectModal()" class="w-full py-1.5 px-2.5 rounded-xl bg-ok-soft hover:bg-ok-soft border border-ok-line text-ok text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer">
               <span>✨ 新建空白工程</span>
             </button>
-            <button type="button" onclick="openResetWriterConfirmModal()" class="w-full py-1.5 px-2.5 rounded-xl bg-rose-950/40 hover:bg-rose-900/50 border border-rose-500/40 text-rose-300 text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer">
+            <button type="button" onclick="openResetWriterConfirmModal()" class="w-full py-1.5 px-2.5 rounded-xl bg-danger-soft hover:bg-danger-soft border border-danger-line text-danger text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer">
               <span>🔄 清零重写文案</span>
             </button>
           </div>
@@ -114,43 +114,43 @@
         <div id="wWriterSetupDrawer" class="space-y-4">
 
         <!-- 工程基础卡片 -->
-        <div id="wWriterBasicCard" class="card p-4 rounded-2xl border border-gray-800 space-y-3">
-          <div class="flex items-center justify-between pb-2 border-b border-gray-800">
-            <span class="text-xs font-bold text-white flex items-center gap-1.5">
+        <div id="wWriterBasicCard" class="card p-4 rounded-2xl border border-line space-y-3">
+          <div class="flex items-center justify-between pb-2 border-b border-line">
+            <span class="text-xs font-bold text-ink flex items-center gap-1.5">
               <span>📌 当前工程信息</span>
             </span>
-            <span id="writerProjectIdBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-gray-800 text-purple-300 font-bold">
+            <span id="writerProjectIdBadge" class="text-[10px] font-mono px-2 py-0.5 rounded bg-subtle text-accent font-bold">
               why_project
             </span>
           </div>
 
           <div>
-            <label class="block text-xs font-bold text-gray-300 mb-1">🏷️ 视频核心标题（提问形式）</label>
+            <label class="block text-xs font-bold text-ink-secondary mb-1">🏷️ 视频核心标题（提问形式）</label>
             <input type="text" id="wInputTitle" placeholder="例如：为什么日本温泉旅馆的晚餐常常是一小碟一小碟？"
-              class="w-full bg-gray-950 text-white font-bold text-xs px-3 py-2 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+              class="w-full bg-input text-ink font-bold text-xs px-3 py-2 rounded-xl border border-line focus:outline-none focus:border-ink" />
           </div>
 
           <div class="grid grid-cols-2 gap-2">
             <div>
-              <label class="block text-[11px] text-gray-400 mb-1">⏱️ 目标时长 (分钟)</label>
+              <label class="block text-[11px] text-ink-muted mb-1">⏱️ 目标时长 (分钟)</label>
               <input type="number" id="wInputDuration" value="25" min="5" max="60"
-                class="w-full bg-gray-950 text-white font-mono text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+                class="w-full bg-input text-ink font-mono text-xs px-2.5 py-1.5 rounded-lg border border-line focus:outline-none focus:border-ink" />
             </div>
             <div>
-              <label class="block text-[11px] text-gray-400 mb-1">📑 规划章节数</label>
+              <label class="block text-[11px] text-ink-muted mb-1">📑 规划章节数</label>
               <input type="number" id="wInputChapterCount" value="6" min="5" max="7"
-                class="w-full bg-gray-950 text-white font-mono text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+                class="w-full bg-input text-ink font-mono text-xs px-2.5 py-1.5 rounded-lg border border-line focus:outline-none focus:border-ink" />
             </div>
           </div>
 
           <div>
             <div class="flex items-center justify-between mb-1">
-              <label class="block text-[11px] text-gray-400">🤖 写作所用大模型 (OpenRouter / 统一网关)</label>
-              <button type="button" onclick="openWriterModelModal()" class="text-[10px] text-purple-400 hover:text-purple-300 underline flex items-center gap-0.5 cursor-pointer">
+              <label class="block text-[11px] text-ink-muted">🤖 写作所用大模型 (OpenRouter / 统一网关)</label>
+              <button type="button" onclick="openWriterModelModal()" class="text-[10px] text-accent hover:text-accent underline flex items-center gap-0.5 cursor-pointer">
                 ⚙️ 配置网关与 Key
               </button>
             </div>
-            <select id="wInputModel" onchange="syncWriterModelToConfig(this.value)" class="w-full bg-gray-950 text-white text-xs px-2.5 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500">
+            <select id="wInputModel" onchange="syncWriterModelToConfig(this.value)" class="w-full bg-input text-ink text-xs px-2.5 py-2 rounded-lg border border-line focus:outline-none focus:border-ink">
               <option value="deepseek/deepseek-chat" selected>DeepSeek V3 / Chat (逻辑严谨 · 证据卡推荐)</option>
               <option value="anthropic/claude-sonnet-4">Claude Sonnet 4 (纪录片文学文风)</option>
               <option value="google/gemini-2.5-pro">Gemini 2.5 Pro (超长上下文事实考证)</option>
@@ -162,46 +162,46 @@
         </div>
 
         <!-- 文案快速导入入口 (仅新建/空白工程显示) -->
-        <div id="wWriterImportQuickCard" class="card p-3.5 rounded-2xl border border-violet-500/40 bg-gradient-to-r from-violet-950/40 to-indigo-950/30 space-y-2">
+        <div id="wWriterImportQuickCard" class="card p-3.5 rounded-2xl border border-accent-line space-y-2">
           <div class="flex items-center justify-between">
-            <span class="text-xs font-black text-violet-300 flex items-center gap-1.5">
+            <span class="text-xs font-black text-accent flex items-center gap-1.5">
               <span>📥 本地已有文案？</span>
             </span>
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-violet-500/20 text-violet-300 border border-violet-500/30">
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-accent-soft text-accent border border-accent-line">
               免从头生成
             </span>
           </div>
-          <p class="text-[11px] text-gray-300 leading-relaxed">
+          <p class="text-[11px] text-ink-secondary leading-relaxed">
             本地已有定稿文案？一键直接载入并自动切分分镜。
           </p>
-          <button type="button" onclick="switchStep1SubTab('import')" class="w-full py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow flex items-center justify-center gap-1.5 cursor-pointer">
+          <button type="button" onclick="switchStep1SubTab('import')" class="w-full py-2 text-xs font-bold rounded-xl text-ink-inverse transition shadow flex items-center justify-center gap-1.5 cursor-pointer bg-action hover:bg-action-hover">
             📝 打开文案导入中心 (exports/ 库)
           </button>
         </div>
 
         <!-- 原始资料与文献输入区 (半自动事实考证体系：支持自主录入或智能自动调研) -->
-        <div id="wWriterMaterialsCard" class="card p-4 rounded-2xl border border-gray-800 space-y-2.5">
-          <div class="flex items-center justify-between pb-2 border-b border-gray-800">
-            <span class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+        <div id="wWriterMaterialsCard" class="card p-4 rounded-2xl border border-line space-y-2.5">
+          <div class="flex items-center justify-between pb-2 border-b border-line">
+            <span class="text-xs font-bold text-warn flex items-center gap-1.5">
               <span>📚 原始研究资料与考证来源</span>
             </span>
-            <span class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 font-bold">半自动调查 · 真实有据</span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full bg-info-soft text-info border border-info-line font-bold">半自动调查 · 真实有据</span>
           </div>
 
-          <p class="text-[11px] text-gray-400 leading-relaxed">
+          <p class="text-[11px] text-ink-muted leading-relaxed">
             支持手动粘贴历史文献，亦可点击下方一键联网调查事实真相并自动充实资料库，无需每次手动搜集。
           </p>
 
           <textarea id="wInputMaterials" rows="3" placeholder="可手动粘贴文献记载、统计数字，亦可留空——系统将自动联网考证事实真相并补充资料..."
-            class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-cyan-500 font-mono leading-relaxed resize-y"></textarea>
+            class="w-full bg-input text-ink text-xs p-2.5 rounded-xl border border-line focus:outline-none focus:border-ink font-mono leading-relaxed resize-y"></textarea>
 
           <div class="flex flex-wrap items-center justify-between gap-2 pt-1">
-            <span id="wMaterialWordCount" class="text-[11px] text-gray-400">已就绪资料：0 字</span>
+            <span id="wMaterialWordCount" class="text-[11px] text-ink-muted">已就绪资料：0 字</span>
             <div class="flex items-center gap-2">
-              <button type="button" onclick="loadSampleMaterialToWriter()" class="text-xs text-purple-400 hover:underline cursor-pointer">
+              <button type="button" onclick="loadSampleMaterialToWriter()" class="text-xs text-accent hover:underline cursor-pointer">
                 💡 示例资料
               </button>
-              <button type="button" onclick="aiAutoResearchMaterials()" id="btnAutoResearchMaterials" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-cyan-600/30 hover:bg-cyan-600/60 text-cyan-200 border border-cyan-400/50 transition flex items-center gap-1 cursor-pointer shadow-sm">
+              <button type="button" onclick="aiAutoResearchMaterials()" id="btnAutoResearchMaterials" class="px-2.5 py-1 text-xs font-bold rounded-lg bg-info-soft hover:bg-info-soft disabled:opacity-60 disabled:cursor-not-allowed text-info border border-info-line transition flex items-center gap-1 cursor-pointer shadow-sm">
                 <span>🌐 联网调查事实补充资料</span>
               </button>
             </div>
@@ -216,27 +216,27 @@
       <div id="writerRightCol" class="lg:col-span-10 lg:h-full min-h-0 flex flex-col">
 
         <!-- ==================== Step 1 面板：立项与设问定义 (Brief) / 本地文案直接导入 ==================== -->
-        <div id="wPanelStep1" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2.5">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
+        <div id="wPanelStep1" class="writer-step-panel card p-3.5 rounded-2xl border border-line space-y-2.5">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-line shrink-0">
             <div>
-              <h3 class="text-sm font-black text-white flex items-center gap-2">
+              <h3 class="text-sm font-black text-ink flex items-center gap-2">
                 <span>📋 阶段 1：立项设问与文案建项</span>
               </h3>
-              <p class="text-xs text-gray-400 mt-0.5">支持从 0 全新设问立项，或直接从本地 exports/ 库导入已有定稿文案</p>
+              <p class="text-xs text-ink-muted mt-0.5">支持从 0 全新设问立项，或直接从本地 exports/ 库导入已有定稿文案</p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
-              <button type="button" id="btnStep1ResetWriter" onclick="openResetWriterConfirmModal()" class="hidden px-3 py-1.5 rounded-xl bg-rose-950/50 hover:bg-rose-900/60 border border-rose-500/40 text-rose-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="将当前工程的文案表单清零，从第一步空内容重新开始">
+              <button type="button" id="btnStep1ResetWriter" onclick="openResetWriterConfirmModal()" class="hidden px-3 py-1.5 rounded-xl bg-danger-soft hover:bg-danger-soft border border-danger-line text-danger text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="将当前工程的文案表单清零，从第一步空内容重新开始">
                 🔄 清零重做文案
               </button>
-              <button type="button" onclick="openCreateBlankProjectModal()" class="px-3 py-1.5 rounded-xl bg-emerald-600/20 hover:bg-emerald-600/35 border border-emerald-500/40 text-emerald-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="新建一个全新的空白工程（保留当前工程内容）">
+              <button type="button" onclick="openCreateBlankProjectModal()" class="px-3 py-1.5 rounded-xl bg-ok-soft hover:bg-ok-soft border border-ok-line text-ok text-xs font-bold transition flex items-center gap-1 cursor-pointer" title="新建一个全新的空白工程（保留当前工程内容）">
                 ✨ 新建空白工程
               </button>
               <!-- 双模式切换 Tab 胶囊 -->
-              <div class="inline-flex p-1 bg-gray-950 rounded-xl border border-purple-500/30">
-                <button type="button" id="wStep1SubTabCreateBtn" onclick="switchStep1SubTab('create')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-purple-600 text-white shadow cursor-pointer">
+              <div class="inline-flex p-1 bg-subtle rounded-xl border border-accent-line">
+                <button type="button" id="wStep1SubTabCreateBtn" onclick="switchStep1SubTab('create')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-action text-ink-inverse shadow cursor-pointer">
                   ✍️ 全新设问立项
                 </button>
-                <button type="button" id="wStep1SubTabImportBtn" onclick="switchStep1SubTab('import')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer">
+                <button type="button" id="wStep1SubTabImportBtn" onclick="switchStep1SubTab('import')" class="px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-ink-muted hover:text-ink cursor-pointer">
                   📂 导入本地已有文案 (exports/)
                 </button>
               </div>
@@ -245,50 +245,51 @@
 
           <!-- 子模式 1：从 0 全新设问立项 (Brief Setup) -->
           <div id="wStep1SubViewCreate" class="space-y-2.5 flex-1 min-h-0 flex flex-col justify-between overflow-y-auto">
-            <div class="flex flex-wrap items-center justify-between gap-2 bg-purple-950/20 p-2.5 rounded-xl border border-purple-500/30 shrink-0">
-              <div class="text-xs text-purple-200">
+            <div class="flex flex-wrap items-center justify-between gap-2 bg-accent-soft p-2.5 rounded-xl border border-accent-line shrink-0">
+              <div class="text-xs text-accent">
                 <span class="font-bold">🎯 标准 5 步流程：</span>基于左侧考证资料，提炼核心设问与开篇答案
               </div>
               <div class="flex items-center gap-2 flex-wrap">
-                <button type="button" onclick="saveWriterPartManual('brief')" class="px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+                <button type="button" onclick="saveWriterPartManual('brief')" class="px-3.5 py-1.5 rounded-xl bg-surface hover:bg-muted border border-warn-line text-warn text-xs font-bold transition flex items-center gap-1 cursor-pointer">
                   <span>💾 保存立项与资料</span>
                 </button>
-                <button type="button" onclick="aiGenerateBrief()" id="btnAiBrief" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+                <button type="button" onclick="aiGenerateBrief()" id="btnAiBrief" class="px-3.5 py-1.5 rounded-xl bg-action hover:bg-action-hover disabled:opacity-60 disabled:cursor-not-allowed text-ink-inverse text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
                   <span>🤖 AI 分析资料并生成 Brief</span>
                 </button>
               </div>
             </div>
+            <div id="wStep1AiStatus" class="hidden px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 shrink-0" role="status" aria-live="polite"></div>
 
             <div class="space-y-2.5 flex-1 min-h-0 flex flex-col justify-center">
               <div>
-                <label class="block text-xs font-bold text-gray-300 mb-1">🎯 全片核心问题 (Core Question)</label>
+                <label class="block text-xs font-bold text-ink-secondary mb-1">🎯 全片核心问题 (Core Question)</label>
                 <input type="text" id="wBriefCoreQuestion" placeholder="例如：为什么富士山能跨越千年成为日本的国家精神象征，并在全世界享誉盛名？"
-                  class="w-full bg-gray-950 text-white text-xs px-3 py-1.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+                  class="w-full bg-input text-ink text-xs px-3 py-1.5 rounded-xl border border-line focus:outline-none focus:border-ink" />
               </div>
 
               <div>
-                <label class="block text-xs font-bold text-gray-300 mb-1">⚡ 开篇前2分钟简短直接答案 (Immediate Short Answer)</label>
+                <label class="block text-xs font-bold text-ink-secondary mb-1">⚡ 开篇前2分钟简短直接答案 (Immediate Short Answer)</label>
                 <textarea id="wBriefShortAnswer" rows="2" placeholder="先用 2~4 句话给出客观清晰的答案框架，拒绝卖关子拖延，让观众一听就懂核心因果链条..."
-                  class="w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500 font-sans leading-relaxed"></textarea>
+                  class="w-full bg-input text-ink text-xs p-2.5 rounded-xl border border-line focus:outline-none focus:border-ink font-sans leading-relaxed"></textarea>
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                 <div>
-                  <label class="block text-xs font-bold text-gray-300 mb-1">🗺️ 讨论范围与地理/历史跨度</label>
+                  <label class="block text-xs font-bold text-ink-secondary mb-1">🗺️ 讨论范围与地理/历史跨度</label>
                   <input type="text" id="wBriefScope" placeholder="例如：从公元864年贞观喷发至2024年现代过度旅游治理"
-                    class="w-full bg-gray-950 text-white text-xs px-3 py-1.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+                    class="w-full bg-input text-ink text-xs px-3 py-1.5 rounded-xl border border-line focus:outline-none focus:border-ink" />
                 </div>
                 <div>
-                  <label class="block text-xs font-bold text-gray-300 mb-1">🚫 内容禁区与排外排除规范</label>
+                  <label class="block text-xs font-bold text-ink-secondary mb-1">🚫 内容禁区与排外排除规范</label>
                   <input type="text" id="wBriefTaboos" value="严禁模仿特定博主口吻、零编造数据年代、禁用排外与煽情口吻"
-                    class="w-full bg-gray-950 text-white text-xs px-3 py-1.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-500" />
+                    class="w-full bg-input text-ink text-xs px-3 py-1.5 rounded-xl border border-line focus:outline-none focus:border-ink" />
                 </div>
               </div>
             </div>
 
-            <div class="pt-2 border-t border-gray-800 flex items-center justify-between shrink-0">
-              <span class="text-xs text-gray-400">💡 确认立项信息无误后，即可进入证据卡提取</span>
-              <button type="button" onclick="setWriterStep(2)" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer">
+            <div class="pt-2 border-t border-line flex items-center justify-between shrink-0">
+              <span class="text-xs text-ink-muted">💡 确认立项信息无误后，即可进入证据卡提取</span>
+              <button type="button" onclick="setWriterStep(2)" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-action hover:bg-action-hover text-ink-inverse transition flex items-center gap-1 cursor-pointer">
                 <span>👉 进入阶段 2：提取证据卡</span>
               </button>
             </div>
@@ -296,65 +297,65 @@
 
           <!-- 子模式 2：直接导入本地已有文案 (exports/ 库快速切镜建项) -->
           <div id="wStep1SubViewImport" class="space-y-2.5 flex-1 min-h-0 flex flex-col hidden">
-            <div class="p-3 rounded-xl bg-gradient-to-r from-violet-950/40 via-indigo-950/30 to-gray-950 border border-violet-500/40 space-y-1.5 shrink-0">
+            <div class="p-3 rounded-xl border border-accent-line space-y-1.5 shrink-0 bg-subtle">
               <div class="flex items-center justify-between">
-                <div class="text-xs font-black text-violet-300 flex items-center gap-1.5">
+                <div class="text-xs font-black text-accent flex items-center gap-1.5">
                   <span>📂 本地 exports/ 文案库扫描</span>
-                  <span class="px-2 py-0.5 rounded-full text-[10px] bg-violet-500/20 text-violet-200 border border-violet-500/30">
+                  <span class="px-2 py-0.5 rounded-full text-[10px] bg-accent-soft text-accent border border-accent-line">
                     一键切镜建项
                   </span>
                 </div>
-                <button type="button" onclick="loadStep1ScannedScripts()" class="text-xs text-violet-400 hover:text-violet-300 flex items-center gap-1 cursor-pointer">
+                <button type="button" onclick="loadStep1ScannedScripts()" class="text-xs text-accent hover:text-accent flex items-center gap-1 cursor-pointer">
                   🔄 刷新 exports/ 目录
                 </button>
               </div>
-              <p class="text-[11px] text-gray-400 leading-snug">
+              <p class="text-[11px] text-ink-muted leading-snug">
                 无需从头策划，直接选择下方已完成的深度长片文案（包含《富士山》《美国AI改名SI》等），系统将自动进行 4.0 ~ 8.0 秒智能节奏切镜并建立工程：
               </p>
             </div>
 
             <!-- 扫描到的文案列表容器 -->
             <div id="wStep1ScannedList" class="space-y-2 flex-1 min-h-0 overflow-y-auto pr-1">
-              <div class="text-center py-8 text-gray-500 text-xs">正在扫描 exports/ 文案...</div>
+              <div class="text-center py-8 text-ink-muted text-xs">正在扫描 exports/ 文案...</div>
             </div>
 
             <!-- 当前选中导入的文案参数与切镜配置 -->
-            <div id="wStep1ImportConfigBox" class="p-3 rounded-xl bg-gray-950 border border-gray-800 space-y-2 shrink-0 hidden">
-              <div class="flex items-center justify-between pb-2 border-b border-gray-800">
-                <span class="text-xs font-bold text-amber-300 flex items-center gap-1">
+            <div id="wStep1ImportConfigBox" class="p-3 rounded-xl bg-subtle border border-line space-y-2 shrink-0 hidden">
+              <div class="flex items-center justify-between pb-2 border-b border-line">
+                <span class="text-xs font-bold text-warn flex items-center gap-1">
                   <span>⚡ 切镜与建项设定</span>
                 </span>
-                <span id="wStep1SelectedSummary" class="text-xs text-purple-300 font-mono"></span>
+                <span id="wStep1SelectedSummary" class="text-xs text-accent font-mono"></span>
               </div>
 
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label class="block text-xs font-bold text-gray-300 mb-1">🆔 项目英文 ID</label>
-                  <input type="text" id="wStep1ImportProjId" class="w-full bg-gray-900 text-white font-mono text-xs px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-violet-500" />
+                  <label class="block text-xs font-bold text-ink-secondary mb-1">🆔 项目英文 ID</label>
+                  <input type="text" id="wStep1ImportProjId" class="w-full bg-input text-ink font-mono text-xs px-3 py-2 rounded-lg border border-line focus:outline-none focus:border-ink" />
                 </div>
                 <div>
-                  <label class="block text-xs font-bold text-gray-300 mb-1">🏷️ 视频中文标题</label>
-                  <input type="text" id="wStep1ImportProjTitle" class="w-full bg-gray-900 text-white font-bold text-xs px-3 py-2 rounded-lg border border-gray-700 focus:outline-none focus:border-violet-500" />
+                  <label class="block text-xs font-bold text-ink-secondary mb-1">🏷️ 视频中文标题</label>
+                  <input type="text" id="wStep1ImportProjTitle" class="w-full bg-input text-ink font-bold text-xs px-3 py-2 rounded-lg border border-line focus:outline-none focus:border-ink" />
                 </div>
               </div>
 
               <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-2">
                 <div class="flex items-center gap-2">
-                  <span class="text-xs text-gray-400">⏱️ 切镜步长：</span>
-                  <select id="wStep1ImportDuration" onchange="previewStep1ImportSegmentation()" class="bg-gray-900 text-white text-xs px-2 py-1 rounded border border-gray-700">
+                  <span class="text-xs text-ink-muted">⏱️ 切镜步长：</span>
+                  <select id="wStep1ImportDuration" onchange="previewStep1ImportSegmentation()" class="bg-input text-ink text-xs px-2 py-1 rounded border border-line">
                     <option value="5.5" selected>标准长视频节奏 (4.0 ~ 7.5 秒/镜 · 推荐)</option>
                     <option value="4.2">紧凑信息流节奏 (3.5 ~ 5.5 秒/镜)</option>
                     <option value="7.0">沉稳纪录片节奏 (5.5 ~ 9.0 秒/镜)</option>
                   </select>
                 </div>
-                <div id="wStep1ImportPreviewCount" class="text-xs text-emerald-400 font-bold"></div>
+                <div id="wStep1ImportPreviewCount" class="text-xs text-ok font-bold"></div>
               </div>
 
-              <div class="pt-2 flex flex-wrap justify-end gap-2 border-t border-gray-800">
-                <button type="button" onclick="loadSelectedScriptToStep5ForHumanize()" class="px-4 py-2 text-xs font-bold rounded-xl card hover:border-violet-500 text-violet-300 transition flex items-center gap-1.5 cursor-pointer">
+              <div class="pt-2 flex flex-wrap justify-end gap-2 border-t border-line">
+                <button type="button" onclick="loadSelectedScriptToStep5ForHumanize()" class="px-4 py-2 text-xs font-bold rounded-xl card hover:border-ink text-accent transition flex items-center gap-1.5 cursor-pointer">
                   ✨ 载入阶段 5 进行去 AI 味修复 ➔
                 </button>
-                <button type="button" onclick="confirmStep1ImportToProducer()" id="btnStep1ImportExec" class="px-5 py-2 text-xs font-bold rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 cursor-pointer">
+                <button type="button" onclick="confirmStep1ImportToProducer()" id="btnStep1ImportExec" class="px-5 py-2 text-xs font-bold rounded-xl text-ink-inverse transition shadow-lg flex items-center gap-1.5 cursor-pointer bg-action hover:bg-action-hover">
                   🚀 确认切镜并直接进入制作台
                 </button>
               </div>
@@ -363,196 +364,199 @@
         </div>
 
         <!-- ==================== Step 2 面板：证据卡提取与核验 (Evidence Cards) ==================== -->
-        <div id="wPanelStep2" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2.5 hidden">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
+        <div id="wPanelStep2" class="writer-step-panel card p-3.5 rounded-2xl border border-line space-y-2.5 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-line shrink-0">
             <div>
-              <h3 class="text-sm font-black text-white flex items-center gap-2">
+              <h3 class="text-sm font-black text-ink flex items-center gap-2">
                 <span>🗂️ 阶段 2：证据卡提取与事实分型 (Evidence Cards Review)</span>
               </h3>
-              <p class="text-[11px] text-gray-400">单一主张原则 · 严格区分事实(verified_fact)与传说(legend_or_anecdote)</p>
+              <p class="text-[11px] text-ink-muted">单一主张原则 · 严格区分事实(verified_fact)与传说(legend_or_anecdote)</p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
-              <button type="button" onclick="saveStep2EvidenceCards()" class="px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+              <button type="button" onclick="saveStep2EvidenceCards()" class="px-3 py-1.5 rounded-xl bg-surface hover:bg-muted border border-warn-line text-warn text-xs font-bold transition flex items-center gap-1 cursor-pointer">
                 <span>💾 保存证据卡</span>
               </button>
-              <button type="button" onclick="addCustomEvidenceCard()" class="px-3 py-1.5 rounded-xl card hover:border-gray-600 text-xs font-bold text-gray-300 transition flex items-center gap-1 cursor-pointer">
+              <button type="button" onclick="addCustomEvidenceCard()" class="px-3 py-1.5 rounded-xl card hover:border-line-strong text-xs font-bold text-ink-secondary transition flex items-center gap-1 cursor-pointer">
                 <span>➕ 手动添加证据卡</span>
               </button>
-              <button type="button" onclick="aiExtractEvidence()" id="btnAiEvidence" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+              <button type="button" onclick="aiExtractEvidence()" id="btnAiEvidence" class="px-3.5 py-1.5 rounded-xl bg-action hover:bg-action-hover disabled:opacity-60 disabled:cursor-not-allowed text-ink-inverse text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
                 <span>🤖 从资料中提取证据卡</span>
               </button>
             </div>
           </div>
+          <div id="wStep2AiStatus" class="hidden px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 shrink-0" role="status" aria-live="polite"></div>
 
           <!-- 证据卡列表容器 -->
           <div id="wEvidenceCardsList" class="space-y-2.5 flex-1 min-h-0 overflow-y-auto pr-1">
-            <div class="text-center py-10 text-gray-500 text-xs">暂无证据卡，请在左侧填入资料后点击上方「🤖 从资料中提取证据卡」</div>
+            <div class="text-center py-10 text-ink-muted text-xs">暂无证据卡，请在左侧填入资料后点击上方「🤖 从资料中提取证据卡」</div>
           </div>
 
           <!-- 人工审核门禁 (Human Review Gate) -->
-          <div class="p-2.5 rounded-xl bg-gray-950 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
+          <div class="p-2.5 rounded-xl bg-subtle border border-warn-line flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
             <div class="flex items-center gap-2">
               <span class="text-base">🚦</span>
               <div>
-                <div class="text-xs font-bold text-amber-300">人工审核门禁：事实真实性核对</div>
-                <div class="text-[11px] text-gray-400">请逐一核验上述证据卡是否存在编造或存疑，确认无误后方可生成大纲。</div>
+                <div class="text-xs font-bold text-warn">人工审核门禁：事实真实性核对</div>
+                <div class="text-[11px] text-ink-muted">请逐一核验上述证据卡是否存在编造或存疑，确认无误后方可生成大纲。</div>
               </div>
             </div>
-            <button type="button" onclick="approveEvidenceCardsGate()" class="px-4 py-1.5 text-xs font-extrabold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white transition shadow flex items-center gap-1.5 shrink-0 cursor-pointer">
+            <button type="button" onclick="approveEvidenceCardsGate()" class="px-4 py-1.5 text-xs font-extrabold rounded-xl text-ink-inverse transition shadow flex items-center gap-1.5 shrink-0 cursor-pointer bg-ok-solid hover:bg-ok-hover">
               <span>✅ 证据核验无误 · 解锁大纲策划</span>
             </button>
           </div>
         </div>
 
         <!-- ==================== Step 3 面板：完整大纲策划与审核门禁 (Outline) ==================== -->
-        <div id="wPanelStep3" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2 hidden">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
+        <div id="wPanelStep3" class="writer-step-panel card p-3.5 rounded-2xl border border-line space-y-2 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-line shrink-0">
             <div>
-              <h3 class="text-sm font-black text-white flex items-center gap-2">
+              <h3 class="text-sm font-black text-ink flex items-center gap-2">
                 <span>📑 阶段 3：完整大纲策划 (Outline Gate)</span>
               </h3>
-              <p class="text-[11px] text-gray-400">单章单问原则 · 层层递进 · 绑定证据卡 · 严禁未审核即写正文</p>
+              <p class="text-[11px] text-ink-muted">单章单问原则 · 层层递进 · 绑定证据卡 · 严禁未审核即写正文</p>
             </div>
             <div class="flex items-center gap-2">
-              <button type="button" onclick="saveOutlineManual()" class="px-3 py-1.5 rounded-xl card hover:border-purple-500/60 text-xs font-bold text-purple-200 transition flex items-center gap-1 cursor-pointer">
+              <button type="button" onclick="saveOutlineManual()" class="px-3 py-1.5 rounded-xl card hover:border-ink text-xs font-bold text-accent transition flex items-center gap-1 cursor-pointer">
                 <span>💾 保存大纲修改</span>
               </button>
-              <button type="button" onclick="aiBuildOutline()" id="btnAiOutline" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+              <button type="button" onclick="aiBuildOutline()" id="btnAiOutline" class="px-3.5 py-1.5 rounded-xl bg-action hover:bg-action-hover disabled:opacity-60 disabled:cursor-not-allowed text-ink-inverse text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
                 <span>🤖 基于证据卡生成大纲</span>
               </button>
             </div>
           </div>
+          <div id="wStep3AiStatus" class="hidden px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 shrink-0" role="status" aria-live="polite"></div>
 
           <!-- 开篇反差设计 -->
-          <div class="p-2.5 rounded-xl bg-gray-950 border border-gray-800 space-y-1.5 shrink-0">
-            <div class="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+          <div class="p-2.5 rounded-xl bg-subtle border border-line space-y-1.5 shrink-0">
+            <div class="text-xs font-bold text-accent flex items-center gap-1.5">
               <span>🪝 开篇反差切入与直接答案 (Opening Hook)</span>
             </div>
             <input type="text" id="wOutlineOpeningQuestion" placeholder="开篇具体反常矛盾..."
-              class="w-full bg-gray-900 text-white text-xs px-3 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+              class="w-full bg-input text-ink text-xs px-3 py-1 rounded-lg border border-line focus:outline-none focus:border-ink" />
             <textarea id="wOutlineOpeningAnswer" rows="1" placeholder="开篇简短直接结论..."
-              class="w-full bg-gray-900 text-gray-300 text-xs px-3 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500"></textarea>
+              class="w-full bg-input text-ink-secondary text-xs px-3 py-1.5 rounded-lg border border-line focus:outline-none focus:border-ink"></textarea>
           </div>
 
           <!-- 5~7 章列表容器 -->
           <div class="flex-1 min-h-0 flex flex-col space-y-1">
-            <div class="flex items-center justify-between text-xs font-bold text-gray-300 px-1 shrink-0">
+            <div class="flex items-center justify-between text-xs font-bold text-ink-secondary px-1 shrink-0">
               <span>📚 章节规划列表 (严格 5~7 章)：</span>
-              <span id="wOutlineChapterCountBadge" class="text-[10px] text-purple-400 font-mono">0 章</span>
+              <span id="wOutlineChapterCountBadge" class="text-[10px] text-accent font-mono">0 章</span>
             </div>
             <div id="wOutlineChaptersList" class="space-y-2.5 flex-1 min-h-0 overflow-y-auto pr-1">
-              <div class="text-center py-8 text-gray-500 text-xs">暂无大纲数据，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>
+              <div class="text-center py-8 text-ink-muted text-xs">暂无大纲数据，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>
             </div>
           </div>
 
           <!-- 唯一终局结尾规划 -->
-          <div class="p-2.5 rounded-xl bg-gray-950 border border-gray-800 space-y-1 shrink-0">
-            <div class="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+          <div class="p-2.5 rounded-xl bg-subtle border border-line space-y-1 shrink-0">
+            <div class="text-xs font-bold text-warn flex items-center gap-1.5">
               <span>🏁 全片唯一终局收尾规划 (Single Ending Plan)</span>
-              <span class="text-[10px] text-gray-500 font-normal">全片只准保留一个正式结尾，严禁在中间各章作总结</span>
+              <span class="text-[10px] text-ink-muted font-normal">全片只准保留一个正式结尾，严禁在中间各章作总结</span>
             </div>
             <input type="text" id="wOutlineEndingTakeaway" placeholder="回扣核心问题，升华本质运转机制..."
-              class="w-full bg-gray-900 text-white text-xs px-3 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-amber-400" />
+              class="w-full bg-input text-ink text-xs px-3 py-1 rounded-lg border border-line focus:outline-none focus:border-ink" />
           </div>
 
           <!-- 大纲审核门禁 (STOP & REVIEW) -->
-          <div class="p-2.5 rounded-xl bg-purple-950/30 border border-purple-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
+          <div class="p-2.5 rounded-xl bg-accent-soft border border-accent-line flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
             <div>
-              <div class="text-xs font-extrabold text-purple-300 flex items-center gap-1.5">
+              <div class="text-xs font-extrabold text-accent flex items-center gap-1.5">
                 <span>🛑 强制人工审核门禁 (STOP & REVIEW)</span>
               </div>
-              <div class="text-[11px] text-gray-400">
+              <div class="text-[11px] text-ink-muted">
                 请确认上述章节是否条理清晰、因果链条严密。<b>未经明确确认，系统绝不启动正文撰写！</b>
               </div>
             </div>
-            <button type="button" onclick="approveOutlineGate()" id="btnApproveOutline" class="px-4 py-1.5 text-xs font-black rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer">
+            <button type="button" onclick="approveOutlineGate()" id="btnApproveOutline" class="px-4 py-1.5 text-xs font-black rounded-xl text-ink-inverse transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer bg-action hover:bg-action-hover">
               <span>👉 审核通过大纲 · 解锁逐章撰写</span>
             </button>
           </div>
         </div>
 
         <!-- ==================== Step 4 面板：逐章受控撰写与四段式结构 (Chapter Writer) ==================== -->
-        <div id="wPanelStep4" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2 hidden">
-          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
+        <div id="wPanelStep4" class="writer-step-panel card p-3.5 rounded-2xl border border-line space-y-2 hidden">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-line shrink-0">
             <div>
-              <h3 class="text-sm font-black text-white flex items-center gap-2">
+              <h3 class="text-sm font-black text-ink flex items-center gap-2">
                 <span>✍️ 阶段 4：单章受控撰写 (Chapter by Chapter)</span>
               </h3>
-              <p class="text-[11px] text-gray-400">一次只写一章 · 强制四段式结构 · 绑定证据卡 · 最多重写2次防死循环</p>
+              <p class="text-[11px] text-ink-muted">一次只写一章 · 强制四段式结构 · 绑定证据卡 · 最多重写2次防死循环</p>
             </div>
             <div class="flex items-center gap-2 flex-wrap">
-              <button type="button" onclick="saveCurrentChapterDraft()" class="px-3.5 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition flex items-center gap-1 cursor-pointer">
+              <button type="button" onclick="saveCurrentChapterDraft()" class="px-3.5 py-1.5 rounded-xl bg-surface hover:bg-muted border border-warn-line text-warn text-xs font-bold transition flex items-center gap-1 cursor-pointer">
                 <span>💾 保存本章</span>
               </button>
-              <button type="button" onclick="aiWriteCurrentChapter()" id="btnAiWriteChapter" class="px-3.5 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+              <button type="button" onclick="aiWriteCurrentChapter()" id="btnAiWriteChapter" class="px-3.5 py-1.5 rounded-xl bg-action hover:bg-action-hover disabled:opacity-60 disabled:cursor-not-allowed text-ink-inverse text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
                 <span>🤖 AI 撰写当前章节</span>
               </button>
             </div>
           </div>
+          <div id="wStep4AiStatus" class="hidden px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 shrink-0" role="status" aria-live="polite"></div>
 
           <!-- 章节切换 Tabs -->
           <div class="flex items-center gap-1.5 overflow-x-auto pb-0.5 shrink-0" id="wChapterTabsBar">
-            <span class="text-xs text-gray-500">大纲审核后在此切换章节</span>
+            <span class="text-xs text-ink-muted">大纲审核后在此切换章节</span>
           </div>
 
           <!-- 当前章节信息概览（支持直接修改章节标题） -->
-          <div class="p-2.5 rounded-xl bg-gray-950 border border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
+          <div class="p-2.5 rounded-xl bg-subtle border border-line flex flex-col sm:flex-row sm:items-center justify-between gap-2 shrink-0">
             <div class="flex-1 min-w-0 space-y-1">
               <div class="flex items-center gap-2">
-                <span id="wCurChapterPrefix" class="px-2 py-0.5 rounded bg-purple-600/25 text-purple-300 border border-purple-500/30 text-[11px] font-black shrink-0">第 1 章</span>
+                <span id="wCurChapterPrefix" class="px-2 py-0.5 rounded bg-accent-soft text-accent border border-accent-line text-[11px] font-black shrink-0">第 1 章</span>
                 <input type="text" id="wCurChapterTitleInput" placeholder="输入本章标题..."
-                  class="flex-1 min-w-0 bg-gray-900 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+                  class="flex-1 min-w-0 bg-input text-ink font-bold text-xs px-2.5 py-1 rounded-lg border border-line focus:outline-none focus:border-ink" />
               </div>
-              <div class="text-[11px] text-purple-300 truncate" id="wCurChapterSubQuestion">子问题：...</div>
+              <div class="text-[11px] text-accent truncate" id="wCurChapterSubQuestion">子问题：...</div>
             </div>
             <div class="flex items-center gap-2 text-xs shrink-0">
-              <span class="text-gray-400">已写字数: <b id="wCurChapterWordCount" class="text-emerald-400 font-mono">0</b> 字</span>
-              <span id="wCurChapterRevisionBadge" class="text-[10px] px-2 py-0.5 rounded bg-gray-800 text-gray-400">初稿</span>
+              <span class="text-ink-muted">已写字数: <b id="wCurChapterWordCount" class="text-ok font-mono">0</b> 字</span>
+              <span id="wCurChapterRevisionBadge" class="text-[10px] px-2 py-0.5 rounded bg-subtle text-ink-muted">初稿</span>
             </div>
           </div>
 
           <!-- 单章四段式结构编辑器 (2x2 网格一屏全显) -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5 flex-1 min-h-0">
             <div class="flex flex-col min-h-0">
-              <label class="block text-xs font-bold text-amber-300 mb-1 shrink-0">
+              <label class="block text-xs font-bold text-warn mb-1 shrink-0">
                 1️⃣ 章节问题或矛盾 (承接上文悬念，抛出本章反差)
               </label>
               <textarea id="wSec1Question" oninput="updateCurrentChapterLiveWordCount()" placeholder="三五句话点出本章要解决的具体矛盾或反常现象..."
-                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 leading-relaxed resize-none"></textarea>
+                class="flex-1 min-h-[85px] w-full bg-input text-ink text-xs p-2.5 rounded-xl border border-line focus:outline-none focus:border-ink leading-relaxed resize-none"></textarea>
             </div>
 
             <div class="flex flex-col min-h-0">
-              <label class="block text-xs font-bold text-blue-300 mb-1 shrink-0">
+              <label class="block text-xs font-bold text-info mb-1 shrink-0">
                 2️⃣ 形成机制或背景 (拆解气候/运输/技术/商业/制度底层逻辑)
               </label>
               <textarea id="wSec2Mechanism" oninput="updateCurrentChapterLiveWordCount()" placeholder="清晰拆解运作逻辑，把复杂概念拆成听得懂的因果链条..."
-                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-blue-400 leading-relaxed resize-none"></textarea>
+                class="flex-1 min-h-[85px] w-full bg-input text-ink text-xs p-2.5 rounded-xl border border-line focus:outline-none focus:border-ink leading-relaxed resize-none"></textarea>
             </div>
 
             <div class="flex flex-col min-h-0">
-              <label class="block text-xs font-bold text-emerald-300 mb-1 shrink-0">
+              <label class="block text-xs font-bold text-ok mb-1 shrink-0">
                 3️⃣ 有来源的具体例子 (基于证据卡，具象平实，严禁伪造内心戏)
               </label>
               <textarea id="wSec3Examples" oninput="updateCurrentChapterLiveWordCount()" placeholder="具体案例、器物细节、动作或数据对比，必须严格有证据卡支持..."
-                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-emerald-400 leading-relaxed resize-none"></textarea>
+                class="flex-1 min-h-[85px] w-full bg-input text-ink text-xs p-2.5 rounded-xl border border-line focus:outline-none focus:border-ink leading-relaxed resize-none"></textarea>
             </div>
 
             <div class="flex flex-col min-h-0">
-              <label class="block text-xs font-bold text-purple-300 mb-1 shrink-0">
+              <label class="block text-xs font-bold text-accent mb-1 shrink-0">
                 4️⃣ 小结与自然过渡 (收束本章子问题，引出下一章疑问，非终章严禁总结)
               </label>
               <textarea id="wSec4Transition" oninput="updateCurrentChapterLiveWordCount()" placeholder="简短收束本章，并抛出下一章的悬念..."
-                class="flex-1 min-h-[85px] w-full bg-gray-950 text-gray-200 text-xs p-2.5 rounded-xl border border-gray-700 focus:outline-none focus:border-purple-400 leading-relaxed resize-none"></textarea>
+                class="flex-1 min-h-[85px] w-full bg-input text-ink text-xs p-2.5 rounded-xl border border-line focus:outline-none focus:border-ink leading-relaxed resize-none"></textarea>
             </div>
           </div>
 
-          <div class="pt-2 border-t border-gray-800 flex items-center justify-between shrink-0">
-            <span class="text-xs text-gray-400">💡 每一章完成后点击保存，全部写完即可进入全文统稿</span>
+          <div class="pt-2 border-t border-line flex items-center justify-between shrink-0">
+            <span class="text-xs text-ink-muted">💡 每一章完成后点击保存，全部写完即可进入全文统稿</span>
             <div class="flex items-center gap-2">
-              <button type="button" onclick="saveCurrentChapterDraft()" class="px-3.5 py-1.5 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+              <button type="button" onclick="saveCurrentChapterDraft()" class="px-3.5 py-1.5 text-xs font-semibold rounded-xl card hover:border-line-strong text-ink-secondary cursor-pointer">
                 💾 保存本章
               </button>
-              <button type="button" onclick="setWriterStep(5)" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white transition flex items-center gap-1 cursor-pointer">
+              <button type="button" onclick="setWriterStep(5)" class="px-4 py-1.5 text-xs font-bold rounded-xl bg-action hover:bg-action-hover text-ink-inverse transition flex items-center gap-1 cursor-pointer">
                 <span>👉 进入阶段 5：全文统稿与定稿</span>
               </button>
             </div>
@@ -560,43 +564,44 @@
         </div>
 
         <!-- ==================== Step 5 面板：全文统稿去伪结尾与定稿同步 (Finalize) ==================== -->
-        <div id="wPanelStep5" class="writer-step-panel card p-3.5 rounded-2xl border border-gray-800 space-y-2 hidden">
-          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-2 pb-2 border-b border-gray-800 shrink-0">
+        <div id="wPanelStep5" class="writer-step-panel card p-3.5 rounded-2xl border border-line space-y-2 hidden">
+          <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-2 pb-2 border-b border-line shrink-0">
             <div>
-              <h3 class="text-sm font-black text-white flex items-center gap-2">
+              <h3 class="text-sm font-black text-ink flex items-center gap-2">
                 <span>🏁 阶段 5：全文统稿与定稿 (Full Script Finalize & Sync)</span>
               </h3>
-              <p class="text-[11px] text-gray-400">跨章节去重 · 专有名词与年代统一 · 剔除中间伪结尾 · 唯一结尾回扣</p>
+              <p class="text-[11px] text-ink-muted">跨章节去重 · 专有名词与年代统一 · 剔除中间伪结尾 · 唯一结尾回扣</p>
             </div>
             <div class="flex flex-wrap items-center gap-2 shrink-0">
-              <button type="button" onclick="aiFinalizeFullScript()" id="btnAiFinalize" class="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
+              <button type="button" onclick="aiFinalizeFullScript()" id="btnAiFinalize" class="px-3 py-1.5 rounded-xl bg-action hover:bg-action-hover disabled:opacity-60 disabled:cursor-not-allowed text-ink-inverse text-xs font-bold transition flex items-center gap-1 shadow cursor-pointer">
                 <span>🤖 全文统稿</span>
               </button>
-              <button type="button" id="btnOpenEditorialRevision" onclick="openEditorialRevisionWorkbench()" class="px-3 py-1.5 rounded-xl bg-amber-950/60 hover:bg-amber-900/70 border border-amber-500/50 text-amber-200 text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer" title="打开总编审稿与定向改稿窗口（查看历史快照、制定改稿方案、左右对比定稿）">
+              <button type="button" id="btnOpenEditorialRevision" onclick="openEditorialRevisionWorkbench()" class="px-3 py-1.5 rounded-xl bg-warn-soft hover:bg-warn-soft border border-warn-line text-warn text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer" title="打开总编审稿与定向改稿窗口（查看历史快照、制定改稿方案、左右对比定稿）">
                 <span>🧭 总编审稿与定向改稿</span>
-                <span id="wRevisionPendingDot" class="hidden w-2 h-2 rounded-full bg-amber-400"></span>
+                <span id="wRevisionPendingDot" class="hidden w-2 h-2 rounded-full bg-warn-solid"></span>
               </button>
-              <button type="button" id="btnOpenHumanizeModal" onclick="openHumanizeWorkbenchModal()" class="px-3 py-1.5 rounded-xl bg-violet-950/60 hover:bg-violet-900/70 border border-violet-500/50 text-violet-200 text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer" title="打开全篇文案 AI 去AI味与真人化修复弹窗">
+              <button type="button" id="btnOpenHumanizeModal" onclick="openHumanizeWorkbenchModal()" class="px-3 py-1.5 rounded-xl bg-accent-soft hover:bg-accent-soft border border-accent-line text-accent text-xs font-bold transition flex items-center gap-1.5 shadow cursor-pointer" title="打开全篇文案 AI 去AI味与真人化修复弹窗">
                 <span>✨ AI 去AI味修复</span>
               </button>
-              <button type="button" id="btnSaveFinalScript" onclick="saveFinalScriptOnlyUI()" class="hidden px-3 py-1.5 rounded-xl bg-gray-900 hover:bg-gray-800 border border-amber-500/40 text-amber-300 text-xs font-bold transition items-center gap-1 shadow cursor-pointer" title="保存修改后的全文文案">
+              <button type="button" id="btnSaveFinalScript" onclick="saveFinalScriptOnlyUI()" class="hidden px-3 py-1.5 rounded-xl bg-surface hover:bg-muted border border-warn-line text-warn text-xs font-bold transition items-center gap-1 shadow cursor-pointer" title="保存修改后的全文文案">
                 <span>💾 保存文案底稿</span>
               </button>
-              <button type="button" onclick="syncWriterToProducerUI()" class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500 to-yellow-400 hover:brightness-110 text-gray-950 text-xs font-black transition flex items-center gap-1 shadow-lg cursor-pointer">
+              <button type="button" onclick="syncWriterToProducerUI()" class="px-3 py-1.5 rounded-xl text-ink-inverse text-xs font-black transition flex items-center gap-1 shadow-lg cursor-pointer bg-action hover:bg-action-hover">
                 <span>🚀 保存并同步制作台</span>
               </button>
             </div>
           </div>
+          <div id="wStep5AiStatus" class="hidden px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 shrink-0" role="status" aria-live="polite"></div>
 
           <div class="flex-1 min-h-0 overflow-y-auto space-y-2.5 pr-0.5">
 
           <!-- 统稿编辑报告 (可折叠，默认收起节省一屏空间) -->
-          <div id="wEditorialLogContainer" class="px-3 py-1.5 rounded-xl bg-gray-950 border border-gray-800 text-xs shrink-0">
-            <div class="font-bold text-gray-300 flex items-center justify-between cursor-pointer select-none" onclick="toggleEditorialLogDetails()">
-              <span>📊 统稿清洗审计报告 <span id="wEditorialLogToggleHint" class="text-[10px] font-normal text-gray-500 ml-1">[▾ 详情]</span></span>
-              <span id="wRemovedFalseEndingsBadge" class="text-[10px] text-amber-400">已清理伪结尾: 0 处</span>
+          <div id="wEditorialLogContainer" class="px-3 py-1.5 rounded-xl bg-subtle border border-line text-xs shrink-0">
+            <div class="font-bold text-ink-secondary flex items-center justify-between cursor-pointer select-none" onclick="toggleEditorialLogDetails()">
+              <span>📊 统稿清洗审计报告 <span id="wEditorialLogToggleHint" class="text-[10px] font-normal text-ink-muted ml-1">[▾ 详情]</span></span>
+              <span id="wRemovedFalseEndingsBadge" class="text-[10px] text-warn">已清理伪结尾: 0 处</span>
             </div>
-            <div id="wEditorialLogDetails" class="text-gray-400 space-y-1 font-mono text-[11px] mt-1.5 pt-1.5 border-t border-gray-800/80 max-h-[110px] overflow-y-auto hidden">
+            <div id="wEditorialLogDetails" class="text-ink-muted space-y-1 font-mono text-[11px] mt-1.5 pt-1.5 border-t border-line max-h-[110px] overflow-y-auto hidden">
               <div>- 暂无统稿清洗记录，点击上方按钮由 AI 进行跨章去重与格式统稿。</div>
             </div>
           </div>
@@ -606,81 +611,81 @@
             <!-- 视图 A：完整长视频定稿文案（平时编辑态显示，对比审阅时自动隐藏） -->
             <div id="wFinalScriptEditorStage" class="flex flex-col gap-1.5">
               <div class="flex items-center justify-between text-xs shrink-0">
-                <span class="font-bold text-white">📑 完整长视频定稿文案 (Ready for Narration)：</span>
-                <span class="text-purple-300">总字数: <b id="wFinalScriptWords" class="font-mono">0</b> 字 · 预估播讲: <b id="wFinalScriptMin" class="font-mono">0.0</b> 分钟</span>
+                <span class="font-bold text-ink">📑 完整长视频定稿文案 (Ready for Narration)：</span>
+                <span class="text-accent">总字数: <b id="wFinalScriptWords" class="font-mono">0</b> 字 · 预估播讲: <b id="wFinalScriptMin" class="font-mono">0.0</b> 分钟</span>
               </div>
               <textarea id="wFinalScriptFullText" oninput="updateFinalScriptLiveStats()" placeholder="统稿后的完整旁白文案将在此呈现，包含开篇导引、各章正文与唯一定稿结尾..."
-                class="min-h-[480px] w-full bg-gray-950 text-gray-200 text-xs p-3 rounded-xl border border-gray-700 focus:outline-none focus:border-amber-400 font-mono leading-relaxed resize-y"></textarea>
+                class="min-h-[480px] w-full bg-input text-ink text-xs p-3 rounded-xl border border-line focus:outline-none focus:border-ink font-mono leading-relaxed resize-y"></textarea>
             </div>
 
             <!-- 视图 B：AI 修复对比审阅（替代定稿大框展开，确认替换或放弃后自动消失并切回定稿框） -->
-            <div id="wHumanizeAuditBox" class="p-3.5 rounded-xl bg-gray-950 border border-emerald-500/40 space-y-3 hidden">
-              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-gray-800">
+            <div id="wHumanizeAuditBox" class="p-3.5 rounded-xl bg-subtle border border-ok-line space-y-3 hidden">
+              <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-line">
                 <div class="flex items-center gap-2 flex-wrap">
-                  <span class="text-sm font-black text-emerald-400 flex items-center gap-1.5">
+                  <span class="text-sm font-black text-ok flex items-center gap-1.5">
                     <span>🎉 全篇文案修复对比 (Diff Review)</span>
                   </span>
-                  <span id="wHumanizePendingBadge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                  <span id="wHumanizePendingBadge" class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-warn-soft text-warn border border-warn-line">
                     ⏳ 待审阅 · 未覆盖原文件
                   </span>
                 </div>
                 <div class="flex items-center gap-2 flex-wrap">
-                  <button type="button" onclick="acceptHumanizedScript()" id="btnAcceptHumanize" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-black shadow transition cursor-pointer">
+                  <button type="button" onclick="acceptHumanizedScript()" id="btnAcceptHumanize" class="px-3.5 py-1.5 rounded-lg bg-ok-solid hover:bg-ok-hover text-ink-inverse text-xs font-black shadow transition cursor-pointer">
                     ✅ 确认替换定稿文案
                   </button>
-                  <button type="button" onclick="revertHumanizedScript()" id="btnRevertScript" class="px-3 py-1.5 rounded-lg bg-rose-950/60 hover:bg-rose-900/70 border border-rose-500/40 text-xs font-bold text-rose-300 transition cursor-pointer hidden">
+                  <button type="button" onclick="revertHumanizedScript()" id="btnRevertScript" class="px-3 py-1.5 rounded-lg bg-danger-soft hover:bg-danger-soft border border-danger-line text-xs font-bold text-danger transition cursor-pointer hidden">
                     ↩️ 放弃并还原原稿
                   </button>
-                  <button type="button" onclick="copyHumanizedScript()" class="text-xs text-violet-400 hover:underline cursor-pointer">
+                  <button type="button" onclick="copyHumanizedScript()" class="text-xs text-accent hover:underline cursor-pointer">
                     📋 复制文案
                   </button>
                 </div>
               </div>
 
-              <div id="wHumanizeAuditContent" class="text-[11px] text-gray-300 grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div id="wHumanizeAuditContent" class="text-[11px] text-ink-secondary grid grid-cols-2 sm:grid-cols-4 gap-2">
               </div>
-              <div id="wHumanizeAuditSummary" class="text-[11px] text-gray-400 font-mono bg-gray-900/80 p-2 rounded border border-gray-800"></div>
+              <div id="wHumanizeAuditSummary" class="text-[11px] text-ink-muted font-mono bg-subtle p-2 rounded border border-line"></div>
 
               <!-- GitHub 风格对比视图（共用宽大主视区） -->
-              <div id="wHumanizeDiffContainer" class="rounded-xl border border-gray-800 bg-[#0d1117] overflow-hidden">
-                <div class="px-3 py-2 bg-[#161b22] border-b border-gray-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div id="wHumanizeDiffContainer" class="rounded-xl border border-line bg-subtle overflow-hidden">
+                <div class="px-3 py-2 bg-subtle border-b border-line flex flex-wrap items-center justify-between gap-2 text-xs">
                   <div class="flex items-center gap-3 font-mono">
-                    <span class="font-bold text-gray-200">🔍 修复前后对比</span>
-                    <span class="text-emerald-400 font-bold">+<span id="wDiffAddedCount">0</span> 新增/改写</span>
-                    <span class="text-rose-400 font-bold">-<span id="wDiffRemovedCount">0</span> 原文删改</span>
+                    <span class="font-bold text-ink">🔍 修复前后对比</span>
+                    <span class="text-ok font-bold">+<span id="wDiffAddedCount">0</span> 新增/改写</span>
+                    <span class="text-danger font-bold">-<span id="wDiffRemovedCount">0</span> 原文删改</span>
                   </div>
                   <div class="flex items-center gap-3">
-                    <label class="inline-flex items-center gap-1.5 text-gray-300 cursor-pointer select-none">
+                    <label class="inline-flex items-center gap-1.5 text-ink-secondary cursor-pointer select-none">
                       <input type="checkbox" id="wDiffChangesOnlyCheckbox" onchange="renderHumanizeDiffView()" class="accent-violet-500" />
                       <span>仅看改动</span>
                     </label>
-                    <div class="inline-flex p-0.5 bg-gray-900 rounded-lg border border-gray-700">
-                      <button type="button" id="btnDiffSplit" onclick="setHumanizeDiffMode('split')" class="px-2.5 py-0.5 rounded bg-violet-600 text-white font-bold cursor-pointer">
+                    <div class="inline-flex p-0.5 bg-surface rounded-lg border border-line">
+                      <button type="button" id="btnDiffSplit" onclick="setHumanizeDiffMode('split')" class="px-2.5 py-0.5 rounded bg-action text-ink-inverse font-bold cursor-pointer">
                         左右并排 (Split)
                       </button>
-                      <button type="button" id="btnDiffUnified" onclick="setHumanizeDiffMode('unified')" class="px-2.5 py-0.5 rounded text-gray-400 hover:text-white font-bold cursor-pointer">
+                      <button type="button" id="btnDiffUnified" onclick="setHumanizeDiffMode('unified')" class="px-2.5 py-0.5 rounded text-ink-muted hover:text-ink font-bold cursor-pointer">
                         红绿混合 (Unified)
                       </button>
                     </div>
                   </div>
                 </div>
-                <div id="wHumanizeDiffBody" class="min-h-[360px] max-h-[60vh] overflow-y-auto bg-[#0d1117] text-[13px] leading-relaxed divide-y divide-gray-800/50">
+                <div id="wHumanizeDiffBody" class="min-h-[360px] max-h-[60vh] overflow-y-auto bg-subtle text-[13px] leading-relaxed divide-y divide-line">
                 </div>
               </div>
             </div>
 
             <!-- 视图 C：AI 全文统稿对比审阅（同样共用主大框） -->
-            <section id="wFinalizeReview" class="hidden rounded-xl border border-purple-500/50 bg-gray-950 p-3.5 space-y-3" aria-label="AI 统稿结果审阅">
+            <section id="wFinalizeReview" class="hidden rounded-xl border border-accent-line bg-subtle p-3.5 space-y-3" aria-label="AI 统稿结果审阅">
               <div class="flex flex-wrap items-center justify-between gap-2">
-                <div><h4 class="text-sm font-bold text-purple-200">🔍 AI 统稿结果 · 待审阅</h4>
-                  <p id="wFinalizeReviewNote" class="text-xs text-gray-400 mt-1">左侧为生成前定稿，右侧为 AI 统稿结果；红色为原文删改，绿色为新增或改写。确认前不会覆盖已保存的定稿。</p></div>
-                <div class="flex gap-2"><button type="button" id="btnAcceptFinalize" onclick="acceptFinalizedScript()" class="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold cursor-pointer">✅ 确认替换并保存</button>
-                  <button type="button" id="btnDiscardFinalize" onclick="discardFinalizedScript()" class="px-3.5 py-1.5 rounded-lg border border-gray-600 text-gray-200 text-xs font-bold cursor-pointer">放弃结果</button></div>
+                <div><h4 class="text-sm font-bold text-accent">🔍 AI 统稿结果 · 待审阅</h4>
+                  <p id="wFinalizeReviewNote" class="text-xs text-ink-muted mt-1">左侧为生成前定稿，右侧为 AI 统稿结果；红色为原文删改，绿色为新增或改写。确认前不会覆盖已保存的定稿。</p></div>
+                <div class="flex gap-2"><button type="button" id="btnAcceptFinalize" onclick="acceptFinalizedScript()" class="px-3.5 py-1.5 rounded-lg bg-ok-solid hover:bg-ok-hover text-ink-inverse text-xs font-bold cursor-pointer">✅ 确认替换并保存</button>
+                  <button type="button" id="btnDiscardFinalize" onclick="discardFinalizedScript()" class="px-3.5 py-1.5 rounded-lg border border-line-strong text-ink text-xs font-bold cursor-pointer">放弃结果</button></div>
               </div>
-              <div class="flex flex-wrap items-center gap-4 text-xs"><span class="text-rose-300">−<span id="wFinalizeRemovedCount">0</span> 原文删改</span><span class="text-emerald-300">+<span id="wFinalizeAddedCount">0</span> 新增或改写</span>
-                <label class="text-gray-300"><input id="wFinalizeChangesOnly" type="checkbox" onchange="renderFinalizeDiffView()" class="accent-purple-500"> 仅看改动</label></div>
-              <div id="wFinalizeDiffBody" class="min-h-[360px] max-h-[60vh] overflow-auto rounded-lg border border-gray-800 bg-[#0d1117] text-[13px] leading-relaxed divide-y divide-gray-800/60"></div>
-              <p class="text-[11px] text-gray-400">对比按句子显示；刷新或切换工程后，未确认的结果不会保留。统稿依据章节稿生成，可能与当前定稿不同。</p>
+              <div class="flex flex-wrap items-center gap-4 text-xs"><span class="text-danger">−<span id="wFinalizeRemovedCount">0</span> 原文删改</span><span class="text-ok">+<span id="wFinalizeAddedCount">0</span> 新增或改写</span>
+                <label class="text-ink-secondary"><input id="wFinalizeChangesOnly" type="checkbox" onchange="renderFinalizeDiffView()" class="accent-purple-500"> 仅看改动</label></div>
+              <div id="wFinalizeDiffBody" class="min-h-[360px] max-h-[60vh] overflow-auto rounded-lg border border-line bg-subtle text-[13px] leading-relaxed divide-y divide-line"></div>
+              <p class="text-[11px] text-ink-muted">对比按句子显示；刷新或切换工程后，未确认的结果不会保留。统稿依据章节稿生成，可能与当前定稿不同。</p>
             </section>
           </div>
           </div>

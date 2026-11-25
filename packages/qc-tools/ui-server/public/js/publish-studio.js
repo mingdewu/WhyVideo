@@ -196,7 +196,8 @@ let youtubeTokenExpiresAt = 0;
 let youtubeCheckVersion = 0;
 
 function getYoutubeRedirectUri() {
-  return window.location.origin + '/api/publish/youtube/oauth/callback';
+  const origin = (typeof window !== 'undefined' && window.location?.origin) ? window.location.origin : '';
+  return origin + '/api/publish/youtube/oauth/callback';
 }
 
 function syncYoutubeRedirectUriField() {
@@ -210,7 +211,7 @@ function setYoutubeStatus(state, message) {
   const summary = document.getElementById('youtubeConnectionStatus');
   const button = document.getElementById('youtubeConnect');
   badge.textContent = state === 'connected' ? '🟢 YouTube · 已连接' : state === 'checking' ? '⏳ YouTube · 验证中' : state === 'expired' ? '🟠 YouTube · 需重新授权' : '⚙️ YouTube · 未连接';
-  badge.className = 'px-4 py-2 rounded-lg border ' + (state === 'connected' ? 'bg-emerald-950 border-emerald-500 text-emerald-300' : 'bg-gray-800 border-gray-600');
+  badge.className = 'px-4 py-2 rounded-lg border ' + (state === 'connected' ? 'bg-ok-soft border-ok-line text-ok' : 'bg-subtle border-line-strong');
   status.textContent = message;
   summary.textContent = message;
   if (button) button.textContent = state === 'connected' && youtubeAuthMode === 'manual' ? '重新验证' : '验证并连接';
@@ -372,20 +373,22 @@ async function startYoutubeOAuth() {
   }
 }
 
-window.addEventListener('message', (event) => {
-  if (event.origin !== window.location.origin) return;
-  if (!event.data || event.data.type !== 'whyvideo-youtube-oauth') return;
-  const fallback = document.getElementById('youtubeOAuthFallbackLink');
-  if (fallback) fallback.classList.add('hidden');
-  if (event.data.ok) {
-    const secretField = document.getElementById('youtubeClientSecret');
-    if (secretField) secretField.value = '';
-    void refreshYoutubeOAuthStatus(false);
-    showToast('✅ YouTube 长期授权已连接：' + (event.data.channelTitle || '频道'));
-  } else {
-    setYoutubeStatus('disconnected', '授权未完成：' + (event.data.error || '未知错误'));
-  }
-});
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('message', (event) => {
+    if (event.origin !== window.location.origin) return;
+    if (!event.data || event.data.type !== 'whyvideo-youtube-oauth') return;
+    const fallback = document.getElementById('youtubeOAuthFallbackLink');
+    if (fallback) fallback.classList.add('hidden');
+    if (event.data.ok) {
+      const secretField = document.getElementById('youtubeClientSecret');
+      if (secretField) secretField.value = '';
+      if (typeof window !== 'undefined') void refreshYoutubeOAuthStatus(false);
+      showToast('✅ YouTube 长期授权已连接：' + (event.data.channelTitle || '频道'));
+    } else {
+      setYoutubeStatus('disconnected', '授权未完成：' + (event.data.error || '未知错误'));
+    }
+  });
+}
 
 async function connectYoutube() {
   const input = document.getElementById('youtubeToken');
@@ -440,7 +443,7 @@ async function disconnectYoutube() {
   setYoutubeStatus('disconnected', '已断开连接并清除保存的授权令牌。');
 }
 
-void refreshYoutubeOAuthStatus(false);
+if (typeof window !== 'undefined') void refreshYoutubeOAuthStatus(false);
 
 let youtubeUploadBusy = false;
 var youtubeAssetVideo = null;
@@ -643,7 +646,7 @@ function displayLocalization() {
   document.getElementById('localizationMasterStatus').textContent = localizationData.master ? '已保存字幕母版；更换母版后请重新检查译文。' : '尚未保存母版';
 }
 function setLocalizationStatus(message, { tone = 'muted', toast = false, includeGenerate = false } = {}) {
-  const toneClass = tone === 'error' ? 'text-red-400' : tone === 'success' ? 'text-emerald-300' : 'text-gray-400';
+  const toneClass = tone === 'error' ? 'text-danger' : tone === 'success' ? 'text-ok' : 'text-ink-muted';
   const statusEl = document.getElementById('localizationStatus');
   if (statusEl) {
     statusEl.textContent = message;

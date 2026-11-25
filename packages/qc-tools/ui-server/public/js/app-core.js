@@ -16,9 +16,11 @@
 
     function showToast(msg) {
       const t = document.getElementById('toast');
+      if (!t) return;
       t.textContent = msg;
       t.classList.remove('hidden');
-      setTimeout(() => t.classList.add('hidden'), 3000);
+      clearTimeout(window._toastTimer);
+      window._toastTimer = setTimeout(() => t.classList.add('hidden'), 3000);
     }
 
     function showCompletionModal({
@@ -99,7 +101,6 @@
       const isWriter = tab === 'writer';
       const isPublish = tab === 'publish';
       document.getElementById('viewPublishContainer').classList.toggle('hidden', !isPublish);
-      document.getElementById('navTabPublish').classList.toggle('bg-emerald-700', isPublish);
       document.body.classList.toggle('writer-compact-mode', isWriter);
       document.getElementById('viewProducerContainer').classList.toggle('hidden', !isProducer);
       document.getElementById('viewWriterContainer').classList.toggle('hidden', !isWriter);
@@ -109,14 +110,12 @@
 
       const navP = document.getElementById('navTabProducer');
       const navW = document.getElementById('navTabWriter');
-
-      if (isProducer) {
-        navP.className = 'px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow cursor-pointer';
-        navW.className = 'px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer';
-      } else {
-        navW.className = 'px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow cursor-pointer';
-        navP.className = 'px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer';
-      }
+      const navPub = document.getElementById('navTabPublish');
+      const activeTabCls = 'px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-ink-inverse shadow cursor-pointer bg-action hover:bg-action-hover';
+      const inactiveTabCls = 'px-3.5 py-1.5 text-xs font-black rounded-lg transition flex items-center gap-1.5 text-ink-muted hover:text-ink cursor-pointer';
+      if (navP) navP.className = isProducer ? activeTabCls : inactiveTabCls;
+      if (navW) navW.className = isWriter ? activeTabCls : inactiveTabCls;
+      if (navPub) navPub.className = isPublish ? activeTabCls : inactiveTabCls;
 
       const curProj = projectsList.find((p) => p.id === activeProjectId);
       const titleStr = curProj ? curProj.title : activeProjectId;
@@ -170,16 +169,16 @@
           if (isCurrentlyOpen && !forceOpen) {
             bodyEl.classList.add('hidden');
             if (arrowEl) arrowEl.textContent = '▶';
-            if (headerEl) headerEl.classList.remove('bg-gray-800/80', 'border-purple-500/60');
+            if (headerEl) headerEl.classList.remove('bg-subtle', 'border-accent-line');
           } else {
             bodyEl.classList.remove('hidden');
             if (arrowEl) arrowEl.textContent = '▼';
-            if (headerEl) headerEl.classList.add('bg-gray-800/80', 'border-purple-500/60');
+            if (headerEl) headerEl.classList.add('bg-subtle', 'border-accent-line');
           }
         } else {
           bodyEl.classList.add('hidden');
           if (arrowEl) arrowEl.textContent = '▶';
-          if (headerEl) headerEl.classList.remove('bg-gray-800/80', 'border-purple-500/60');
+          if (headerEl) headerEl.classList.remove('bg-subtle', 'border-accent-line');
         }
       }
       updateModelHeaderBadges();
@@ -345,7 +344,7 @@
       btn.innerHTML = '<span>⏳ 正在连接测试...</span>';
       if (statusEl) {
         statusEl.classList.remove('hidden');
-        statusEl.innerHTML = '<span class="text-amber-400">正在与服务网关通信...</span>';
+        statusEl.innerHTML = '<span class="text-warn">正在与服务网关通信...</span>';
       }
 
       try {
@@ -357,16 +356,16 @@
         });
         const data = await res.json();
         if (data.ok) {
-          if (statusEl) statusEl.innerHTML = '<span class="text-emerald-400 font-bold">✅ ' + data.message + '</span>';
+          if (statusEl) statusEl.innerHTML = '<span class="text-ok font-bold">✅ ' + data.message + '</span>';
           showToast('✅ ' + data.message);
         } else {
           const errMsg = data.error || '连接失败';
-          if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ ' + errMsg + '</span>';
+          if (statusEl) statusEl.innerHTML = '<span class="text-danger font-bold">❌ ' + errMsg + '</span>';
           showToast('❌ ' + errMsg);
         }
       } catch (e) {
         const msg = (e?.name === 'TimeoutError' || e?.name === 'AbortError') ? '请求超时（20秒），请检查网络或代理设置' : e.message;
-        if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 请求失败: ' + msg + '</span>';
+        if (statusEl) statusEl.innerHTML = '<span class="text-danger font-bold">❌ 请求失败: ' + msg + '</span>';
         showToast('❌ 请求失败: ' + msg);
       } finally {
         btn.disabled = false;
@@ -384,7 +383,7 @@
       }
       if (statusEl) {
         statusEl.classList.remove('hidden');
-        statusEl.innerHTML = '<span class="text-amber-400">正在测试 ' + label + ' 连接...</span>';
+        statusEl.innerHTML = '<span class="text-warn">正在测试 ' + label + ' 连接...</span>';
       }
       try {
         const res = await fetch(endpoint, {
@@ -395,16 +394,16 @@
         });
         const data = await res.json();
         if (data.ok) {
-          if (statusEl) statusEl.innerHTML = '<span class="text-emerald-400 font-bold">✅ ' + data.message + '</span>';
+          if (statusEl) statusEl.innerHTML = '<span class="text-ok font-bold">✅ ' + data.message + '</span>';
           showToast('✅ ' + data.message);
         } else {
           const errMsg = data.error || (label + ' 连接失败');
-          if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ ' + errMsg + '</span>';
+          if (statusEl) statusEl.innerHTML = '<span class="text-danger font-bold">❌ ' + errMsg + '</span>';
           showToast('❌ ' + errMsg);
         }
       } catch (e) {
         const msg = (e?.name === 'TimeoutError' || e?.name === 'AbortError') ? '请求超时（20秒）' : e.message;
-        if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 请求失败: ' + msg + '</span>';
+        if (statusEl) statusEl.innerHTML = '<span class="text-danger font-bold">❌ 请求失败: ' + msg + '</span>';
         showToast('❌ ' + label + ' 请求失败: ' + msg);
       } finally {
         if (btn) {
@@ -783,18 +782,18 @@
       const i = modelCatalogMeta.image;
       if (!t && !v && !i) {
         el.textContent = '⏳ 正在拉取实时模型列表...';
-        el.className = 'text-[10px] font-mono font-normal text-gray-400';
+        el.className = 'text-[10px] font-mono font-normal text-ink-muted';
         return;
       }
       const anyFallback = (t && t.source !== 'live') || (v && v.source !== 'live') || (i && i.source !== 'live');
       const summary = '文本 ' + (t ? t.count : '?') + ' · 视频 ' + (v ? v.count : '?') + ' · 生图 ' + (i ? i.count : '?');
       if (anyFallback) {
         el.textContent = '⚠️ 部分使用本地兜底（' + summary + '）';
-        el.className = 'text-[10px] font-mono font-bold text-amber-300';
+        el.className = 'text-[10px] font-mono font-bold text-warn';
       } else {
         const gwLabel = t?.gateway === 'gemini' ? 'Gemini网关' : (t?.gateway === 'custom' ? '自定义网关' : 'OpenRouter');
         el.textContent = '✅ 已在线拉取 (' + gwLabel + '): ' + summary;
-        el.className = 'text-[10px] font-mono font-bold text-emerald-300';
+        el.className = 'text-[10px] font-mono font-bold text-ok';
       }
     }
 

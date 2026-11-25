@@ -10,6 +10,7 @@ import {
   markWriterEvidencePending,
   verifyWriterEvidenceCard,
   getWriterChapterNarration,
+  stripEditorialMetaCommentary,
   deduplicateAndCleanScriptSegments,
   saveWriterProjectData,
   syncWriterToProducer,
@@ -27,6 +28,61 @@ import {
   executeEditorialRevision,
   applyEditorialRevision,
 } from '../lib/writer-revision.mjs';
+
+/**
+ * 针对总—分—总结构，基于大纲与各章核心内容独立合成完整的开篇（opening）与统筹终局（ending）。
+ */
+async function synthesizeOpeningAndEnding({ title, brief, outline, chapters, modelOptions }) {
+  const outlineByNumber = new Map(
+    (Array.isArray(outline?.chapters) ? outline.chapters : []).map((ch, idx) => [
+      Number(ch?.chapter_number || idx + 1),
+      ch,
+    ])
+  );
+  const chaptersSummary = (Array.isArray(chapters) ? chapters : []).map((ch, idx) => {
+    const num = Number(ch?.chapter_number || idx + 1);
+    const outCh = outlineByNumber.get(num);
+    const narration = String(ch?.narration_text || ch?.full_chapter_narration || '').trim();
+    return {
+      chapter_number: num,
+      chapter_title: ch?.chapter_title || outCh?.chapter_title || `第${num}章`,
+      direct_reason_to_title: outCh?.direct_reason_to_title || ch?.direct_reason_to_title || '',
+      head: narration.slice(0, 220),
+      tail: narration.length > 220 ? narration.slice(-220) : '',
+    };
+  });
+
+  const sys = `你是知识型长视频总编审，专精【总—分—总】结构的纯口播开篇与终局统领写作。
+请严格依据提供的全片总论点与各分章摘要，撰写可直接用于真人配音（TTS）的完整开篇（opening）与完整收尾（ending）：
+1. opening（300~450 中文字）：先用日常反差或常见误区抓住观众，再直接亮出全片总论点与各分章原因路线图，让观众开篇即看懂全片结构。
+2. ending（300~500 中文字）：严禁只写一两句空洞总结！必须按逻辑主线逐条回收前面全部正文章节拆解出的核心原因，说明它们如何共同拼出总标题“为什么”的答案，最后用 1~2 句有力、不鸡汤的结论干净收束。
+3. 严禁泄露制作/审稿元话语（如“现有卡库”“现有证据卡”“正式制作前”“待补证”“待核验原文”“等这些资料补上”），严禁新增任何正文未出现的新事实或数据。
+4. 严禁出现章节标题、Markdown 符号（# / **）或分隔线。必须且仅输出合法 JSON：{"opening": "...", "ending": "..."}`;
+
+  const user = JSON.stringify(
+    {
+      title,
+      short_answer: brief?.short_answer || outline?.opening_hook?.immediate_short_answer || '',
+      opening_hook: outline?.opening_hook || {},
+      single_ending_plan: outline?.single_ending_plan || {},
+      chapters_summary: chaptersSummary,
+    },
+    null,
+    2
+  );
+
+  const aiText = await callOpenRouterText(sys, user, {
+    model: modelOptions?.model,
+    apiKey: modelOptions?.apiKey,
+    baseUrl: modelOptions?.baseUrl,
+    maxTokens: 2500,
+  });
+  const parsed = extractJsonFromText(aiText);
+  return {
+    opening: String(parsed?.opening || '').trim(),
+    ending: String(parsed?.ending || '').trim(),
+  };
+}
 
 export async function handleWriterRoutes(req, res, { url, pathname, queryProject, paths }) {
   // 0.1 扫描本地 exports/ 文案库
@@ -617,9 +673,18 @@ export async function handleWriterRoutes(req, res, { url, pathname, queryProject
       }));
     }
 
-    // 显式带上现有开篇与终局结尾（若有），防止模型只看 chapters 把开篇/结尾又重复塞入正文章节
-    const existingOpening = String(stored.finalScript?.script_segments?.opening || outline.opening_hook?.immediate_short_answer || stored.brief?.short_answer || '').trim();
-    const existingEnding = String(stored.finalScript?.script_segments?.ending || outline.single_ending_plan?.final_takeaway || '').trim();
+    const savedOpening = String(stored.finalScript?.script_segments?.opening || '').trim();
+    const savedEnding = String(stored.finalScript?.script_segments?.ending || '').trim();
+    const hasSavedOpening = savedOpening.length >= 120;
+    const hasSavedEnding = savedEnding.length >= 120;
+    const openingRef = [
+      outline.opening_hook?.opening_question,
+      outline.opening_hook?.immediate_short_answer || stored.brief?.short_answer,
+    ].filter(Boolean).join('\n');
+    const endingRef = [
+      outline.single_ending_plan?.revisit_core_question,
+      outline.single_ending_plan?.final_takeaway,
+    ].filter(Boolean).join('\n');
 
     const briefJson = JSON.stringify(stored.brief || {}, null, 2);
     const outlineJson = JSON.stringify(outline, null, 2);
@@ -634,16 +699,20 @@ export async function handleWriterRoutes(req, res, { url, pathname, queryProject
     const user = [
       `【立项 Brief（全片核心设问与总因果结论）】\n${briefJson}`,
       `【大纲结构】\n${outlineJson}`,
-      existingOpening ? `【现有开篇导引（对应 script_segments.opening，须确保包含全片核心原因路线图）】\n${existingOpening}` : '',
+      hasSavedOpening
+        ? `【现有开篇导引（对应 script_segments.opening，须确保符合总—分—总开篇要求并点出全片原因路线图）】\n${savedOpening}`
+        : (openingRef ? `【开篇提纲参考（仅作要点参考，请据此写作 300~450 字完整纯口播开篇 opening）】\n${openingRef}` : ''),
       `【全部正文章节稿（对应 script_segments.chapters）】\n${chaptersJson}`,
-      existingEnding ? `【现有终局结尾（对应 script_segments.ending，须汇总回扣全片各层真实原因）】\n${existingEnding}` : '',
+      hasSavedEnding
+        ? `【现有终局结尾（对应 script_segments.ending，须统筹回扣全片所有分章核心原因）】\n${savedEnding}`
+        : (endingRef ? `【结尾提纲参考（仅作要点参考，请据此扩写为 300~500 字统筹全片的完整终局收尾 ending）】\n${endingRef}` : ''),
       `【完整证据卡与出处】\n${evidenceCardsJson}`,
-      '请严格执行【因果主线串联 + 全文去重与去伪结尾】：',
-      '1. 【开篇必须亮出总原因】：opening 抛出反差后，必须在末尾明确点出全片的核心原因路线图（对照 Brief 的 short_answer，涵盖内在驱动原因与外部成立条件）；若开篇与第1章开头有重复铺垫，保留 opening 中的总答案，删去第1章开头的重复铺垫！',
-      '2. 【章间必须锁紧因果桥】：若多个章节的末尾反复出现相同的总结套话或同一热点事件，必须将中间章节末尾的车轱辘话删掉，但必须保留并顺滑衔接“钉死本章原因 + 引出下一章子问题”的因果递进过渡句！',
-      '3. 【结尾必须回扣具体原因】：ending 必须清晰汇总回扣各章拆解出的真实原因与边界，严禁写成空洞的鸡汤口号，严禁新增无证据支持的事实。',
+      '请严格执行【总—分—总结构定稿 + 跨章去重与去伪结尾】：',
+      '1. 【总起开篇（300~450 字）】：opening 抛出反差后，必须明确点出全片核心总论点与各分章原因路线图；若开篇与第1章开头有重复铺垫，保留 opening 中的总答案，删去第1章开头的重复铺垫！',
+      '2. 【分述主线与章间因果桥】：紧扣全片总论点，删掉机械报数腔和中间章节末尾的重复伪结尾，保留并顺滑衔接自然过渡句。',
+      '3. 【总收结尾（300~500 字，严禁一句敷衍）】：ending 必须按主线逐条回收全部正文章节拆解出的核心原因，说明它们如何共同回答总标题的“为什么”，严禁写成空洞鸡汤或只写一两句概括，严禁新增无证据支持的事实。',
     ].filter(Boolean).join('\n\n');
-    const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 8192 });
+    const aiText = await callOpenRouterText(sys, user, { model, apiKey, baseUrl, maxTokens: 16384 });
     let finalScript = extractJsonFromText(aiText);
     const modelChapters = finalScript?.script_segments?.chapters;
     const modelByNumber = new Map((Array.isArray(modelChapters) ? modelChapters : []).map((chapter) => [
@@ -670,15 +739,39 @@ export async function handleWriterRoutes(req, res, { url, pathname, queryProject
         revision_count: 1,
         _merged_from_drafts: true,
         script_segments: {
-          opening: existingOpening,
+          opening: hasSavedOpening ? savedOpening : '',
           chapters: mergedChapters,
-          ending: existingEnding,
+          ending: hasSavedEnding ? savedEnding : '',
         },
       };
     } else {
       finalScript.script_segments.chapters = chapterNumbers.map((number) => ({
         ...modelByNumber.get(number), chapter_number: number,
       }));
+    }
+
+    const curOpening = String(finalScript?.script_segments?.opening || '').trim();
+    const curEnding = String(finalScript?.script_segments?.ending || '').trim();
+    const needsOpening = useDraftMerge || curOpening.length < 120;
+    const needsEnding = useDraftMerge || curEnding.length < 150;
+    if (needsOpening || needsEnding) {
+      const synth = await synthesizeOpeningAndEnding({
+        title: outline.title || stored.brief?.title || queryProject,
+        brief: stored.brief,
+        outline,
+        chapters: finalScript.script_segments.chapters,
+        modelOptions: { model, apiKey, baseUrl },
+      });
+      if (needsOpening) {
+        finalScript.script_segments.opening = synth.opening.length >= 120
+          ? synth.opening
+          : (curOpening || savedOpening || outline.opening_hook?.immediate_short_answer || stored.brief?.short_answer || '');
+      }
+      if (needsEnding) {
+        finalScript.script_segments.ending = synth.ending.length >= 150
+          ? synth.ending
+          : (curEnding || savedEnding || [outline.single_ending_plan?.revisit_core_question, outline.single_ending_plan?.final_takeaway].filter(Boolean).join('\n\n') || '');
+      }
     }
     // 无论模型返回还是兜底合并，统一走确定性跨章去重与去伪结尾清洗器，确保100%消除重复段落和车轱辘话
     finalScript = deduplicateAndCleanScriptSegments(finalScript);
@@ -749,12 +842,13 @@ export async function handleWriterRoutes(req, res, { url, pathname, queryProject
     if (chunks.length === 0) chunks.push(content.trim());
 
     const sanitizeLeakedPrompt = (txt) => {
-      return String(txt || '')
+      const cleaned = String(txt || '')
         .replace(/<<<SCRIPT_CONTENT>>>|<<<END_SCRIPT_CONTENT>>>/g, '')
         .replace(/(?:^|\n)(?:【第\s*\d+\s*章：风格定位】\n?)?:?【(?:幽默风趣主播型|睿智悬疑反转型|亲切老友大白话型)[^】]*】：[^\n]*\n*/g, '')
         .replace(/(?:^|\n)【待修复的第\s*\d+\/\d+\s*部分文案】：\s*\n*/g, '')
         .replace(/(?:^|\n)【风格定位】：[^\n]*\n*/g, '')
         .trim();
+      return stripEditorialMetaCommentary(cleaned).text;
     };
 
     const parseChunkOutput = (aiText) => {

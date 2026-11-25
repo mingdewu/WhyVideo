@@ -20,13 +20,13 @@ let selectedHumanizeStyle = 'humorous';
 
       if (badge) {
         if (isPreview && meta) {
-          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-warn-soft text-warn border border-warn-line';
           badge.textContent = `⏳ 待确认替换 · ${ver}${styleName ? ' · ' + styleName : ''}`;
         } else if (meta && meta.version) {
-          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-ok-soft text-ok border border-ok-line';
           badge.textContent = `✅ 已修复 · ${ver}${styleName ? ' · ' + styleName : ''}${meta.humanized_at ? ' · ' + meta.humanized_at : ''}`;
         } else {
-          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-gray-800 text-gray-400 border border-gray-700';
+          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-subtle text-ink-muted border border-line';
           badge.textContent = '📄 原稿未修复 (v1.0)';
         }
       }
@@ -34,15 +34,15 @@ let selectedHumanizeStyle = 'humorous';
       if (btn) {
         if (isPreview && meta) {
           btn.disabled = false;
-          btn.className = 'px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer';
+          btn.className = 'px-4 py-2 text-xs font-black rounded-xl text-ink-inverse transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer bg-ok-solid hover:bg-ok-hover';
           btn.innerHTML = '<span>✅ 确认替换定稿文案</span>';
         } else if (meta && meta.version) {
           btn.disabled = false;
-          btn.className = 'px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer';
+          btn.className = 'px-4 py-2 text-xs font-black rounded-xl text-ink-inverse transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer bg-action hover:bg-action-hover';
           btn.innerHTML = '<span>🪄 再次执行真人化修复</span>';
         } else {
           btn.disabled = false;
-          btn.className = 'px-4 py-2 text-xs font-black rounded-xl bg-gradient-to-r from-violet-600 via-purple-600 to-indigo-600 hover:brightness-110 text-white transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer';
+          btn.className = 'px-4 py-2 text-xs font-black rounded-xl text-ink-inverse transition shadow-lg flex items-center gap-1.5 shrink-0 cursor-pointer bg-action hover:bg-action-hover';
           btn.innerHTML = '<span>🪄 启动全篇 AI 真人化修复</span>';
         }
       }
@@ -50,11 +50,11 @@ let selectedHumanizeStyle = 'humorous';
       if (acceptBtn) {
         if (isPreview && meta) {
           acceptBtn.disabled = false;
-          acceptBtn.className = 'px-3 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-black shadow transition cursor-pointer';
+          acceptBtn.className = 'px-3 py-1 rounded-lg bg-ok-solid hover:bg-ok-hover text-ink-inverse text-[11px] font-black shadow transition cursor-pointer';
           acceptBtn.textContent = '✅ 确认替换定稿文案';
         } else if (meta && meta.version) {
           acceptBtn.disabled = true;
-          acceptBtn.className = 'px-3 py-1 rounded-lg bg-emerald-900/50 border border-emerald-500/40 text-emerald-300 text-[11px] font-bold cursor-default';
+          acceptBtn.className = 'px-3 py-1 rounded-lg bg-ok-soft border border-ok-line text-ok text-[11px] font-bold cursor-default';
           acceptBtn.textContent = '✅ 已修复';
         }
       }
@@ -75,11 +75,11 @@ let selectedHumanizeStyle = 'humorous';
       const btnS = document.getElementById('btnDiffSplit');
       if (btnU && btnS) {
         btnU.className = mode === 'unified'
-          ? 'px-2.5 py-0.5 rounded bg-violet-600 text-white font-bold cursor-pointer'
-          : 'px-2.5 py-0.5 rounded text-gray-400 hover:text-white font-bold cursor-pointer';
+          ? 'px-2.5 py-0.5 rounded bg-action text-ink-inverse font-bold cursor-pointer'
+          : 'px-2.5 py-0.5 rounded text-ink-muted hover:text-ink font-bold cursor-pointer';
         btnS.className = mode === 'split'
-          ? 'px-2.5 py-0.5 rounded bg-violet-600 text-white font-bold cursor-pointer'
-          : 'px-2.5 py-0.5 rounded text-gray-400 hover:text-white font-bold cursor-pointer';
+          ? 'px-2.5 py-0.5 rounded bg-action text-ink-inverse font-bold cursor-pointer'
+          : 'px-2.5 py-0.5 rounded text-ink-muted hover:text-ink font-bold cursor-pointer';
       }
       renderHumanizeDiffView();
     }
@@ -180,7 +180,7 @@ let selectedHumanizeStyle = 'humorous';
       const escHtml = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
       if (visibleOps.length === 0) {
-        bodyEl.innerHTML = '<div class="p-4 text-center text-gray-500">前后语句完全一致，未产生文字差异。</div>';
+        bodyEl.innerHTML = '<div class="p-4 text-center text-ink-muted">前后语句完全一致，未产生文字差异。</div>';
         return;
       }
 
@@ -188,12 +188,12 @@ let selectedHumanizeStyle = 'humorous';
         bodyEl.innerHTML = visibleOps
           .map((op) => {
             if (op.type === 'del') {
-              return `<div class="flex items-start gap-2 px-3 py-1.5 bg-rose-950/55 border-l-2 border-rose-500 text-rose-200"><span class="w-8 shrink-0 font-mono text-[11px] text-right text-rose-400/70 select-none">${op.oldLine}</span><span class="w-4 shrink-0 font-mono text-rose-400 font-black select-none">-</span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
+              return `<div class="flex items-start gap-2 px-3 py-1.5 bg-danger-soft border-l-2 border-danger-line text-danger"><span class="w-8 shrink-0 font-mono text-[11px] text-right text-danger select-none">${op.oldLine}</span><span class="w-4 shrink-0 font-mono text-danger font-black select-none">-</span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
             }
             if (op.type === 'add') {
-              return `<div class="flex items-start gap-2 px-3 py-1.5 bg-emerald-950/50 border-l-2 border-emerald-500 text-emerald-200"><span class="w-8 shrink-0 font-mono text-[11px] text-right text-emerald-400/70 select-none">${op.newLine}</span><span class="w-4 shrink-0 font-mono text-emerald-400 font-black select-none">+</span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
+              return `<div class="flex items-start gap-2 px-3 py-1.5 bg-ok-soft border-l-2 border-ok-line text-ok"><span class="w-8 shrink-0 font-mono text-[11px] text-right text-ok select-none">${op.newLine}</span><span class="w-4 shrink-0 font-mono text-ok font-black select-none">+</span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
             }
-            return `<div class="flex items-start gap-2 px-3 py-1.5 bg-transparent text-gray-300"><span class="w-8 shrink-0 font-mono text-[11px] text-right text-gray-600 select-none">${op.newLine}</span><span class="w-4 shrink-0 font-mono text-gray-600 select-none"> </span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
+            return `<div class="flex items-start gap-2 px-3 py-1.5 bg-transparent text-ink-secondary"><span class="w-8 shrink-0 font-mono text-[11px] text-right text-ink-muted select-none">${op.newLine}</span><span class="w-4 shrink-0 font-mono text-ink-muted select-none"> </span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
           })
           .join('');
       } else {
@@ -221,23 +221,23 @@ let selectedHumanizeStyle = 'humorous';
         }
         const renderSplitCell = (op, side) => {
           if (!op) {
-            return '<div class="flex items-stretch min-w-0 bg-[#161b22]/70 text-gray-700 select-none"><span class="w-10 shrink-0 font-mono border-r border-gray-800/50 bg-[#161b22]/90"></span><span class="flex-1 px-2.5 py-1.5"></span></div>';
+            return '<div class="flex items-stretch min-w-0 bg-subtle text-ink-muted select-none"><span class="w-10 shrink-0 font-mono border-r border-line bg-subtle"></span><span class="flex-1 px-2.5 py-1.5"></span></div>';
           }
           const isDel = side === 'left' && op.type === 'del';
           const isAdd = side === 'right' && op.type === 'add';
           const lineNo = side === 'left' ? op.oldLine : op.newLine;
           if (isDel) {
-            return `<div class="flex items-stretch min-w-0 bg-rose-950/45 border-l-2 border-rose-500 text-rose-100"><span class="w-10 shrink-0 font-mono px-1.5 py-1.5 text-right text-[11px] text-rose-400/80 bg-rose-950/60 border-r border-rose-900/40 select-none">${lineNo}</span><span class="w-5 shrink-0 font-mono py-1.5 text-center text-rose-400 font-black select-none">-</span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed px-2.5 py-1.5 whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
+            return `<div class="flex items-stretch min-w-0 bg-danger-soft border-l-2 border-danger-line text-danger"><span class="w-10 shrink-0 font-mono px-1.5 py-1.5 text-right text-[11px] text-danger bg-danger-soft border-r border-danger-line select-none">${lineNo}</span><span class="w-5 shrink-0 font-mono py-1.5 text-center text-danger font-black select-none">-</span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed px-2.5 py-1.5 whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
           }
           if (isAdd) {
-            return `<div class="flex items-stretch min-w-0 bg-emerald-950/40 border-l-2 border-emerald-500 text-emerald-100"><span class="w-10 shrink-0 font-mono px-1.5 py-1.5 text-right text-[11px] text-emerald-400/80 bg-emerald-950/55 border-r border-emerald-900/40 select-none">${lineNo}</span><span class="w-5 shrink-0 font-mono py-1.5 text-center text-emerald-400 font-black select-none">+</span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed px-2.5 py-1.5 whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
+            return `<div class="flex items-stretch min-w-0 bg-ok-soft border-l-2 border-ok-line text-ok"><span class="w-10 shrink-0 font-mono px-1.5 py-1.5 text-right text-[11px] text-ok bg-ok-soft border-r border-ok-line select-none">${lineNo}</span><span class="w-5 shrink-0 font-mono py-1.5 text-center text-ok font-black select-none">+</span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed px-2.5 py-1.5 whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
           }
-          return `<div class="flex items-stretch min-w-0 bg-[#0d1117] text-gray-300"><span class="w-10 shrink-0 font-mono px-1.5 py-1.5 text-right text-[11px] text-gray-600 bg-[#0d1117] border-r border-gray-800/60 select-none">${lineNo}</span><span class="w-5 shrink-0 font-mono py-1.5 text-center text-gray-700 select-none"> </span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed px-2.5 py-1.5 whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
+          return `<div class="flex items-stretch min-w-0 bg-surface text-ink"><span class="w-10 shrink-0 font-mono px-1.5 py-1.5 text-right text-[11px] text-ink-muted bg-subtle border-r border-line select-none">${lineNo}</span><span class="w-5 shrink-0 font-mono py-1.5 text-center text-ink-muted select-none"> </span><span class="flex-1 min-w-0 font-sans text-[13px] leading-relaxed px-2.5 py-1.5 whitespace-pre-wrap break-words">${escHtml(op.text)}</span></div>`;
         };
         bodyEl.innerHTML =
-          `<div class="grid grid-cols-2 bg-[#161b22] text-[11px] font-bold text-gray-300 sticky top-0 z-10 border-b border-gray-800 divide-x divide-gray-800"><div class="px-3 py-2 flex items-center gap-1.5 text-rose-200/90">📄 ${escHtml(leftLabel)}</div><div class="px-3 py-2 flex items-center gap-1.5 text-emerald-200/90">✨ ${escHtml(rightLabel)}</div></div>` +
+          `<div class="grid grid-cols-2 bg-subtle text-[11px] font-bold text-ink-secondary sticky top-0 z-10 border-b border-line divide-x divide-line"><div class="px-3 py-2 flex items-center gap-1.5 text-danger">📄 ${escHtml(leftLabel)}</div><div class="px-3 py-2 flex items-center gap-1.5 text-ok">✨ ${escHtml(rightLabel)}</div></div>` +
           rows
-            .map((r) => `<div class="grid grid-cols-2 divide-x divide-gray-800">${renderSplitCell(r.left, 'left')}${renderSplitCell(r.right, 'right')}</div>`)
+            .map((r) => `<div class="grid grid-cols-2 divide-x divide-line">${renderSplitCell(r.left, 'left')}${renderSplitCell(r.right, 'right')}</div>`)
             .join('');
       }
     }
@@ -282,7 +282,7 @@ let selectedHumanizeStyle = 'humorous';
         closeHumanizeWorkbenchModal();
         setStep5StageMode('editor');
         if (badge) {
-          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40';
+          badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-ok-soft text-ok border border-ok-line';
           badge.textContent = `✅ 已替换定稿文案并保存 (${metaToSave.version})`;
         }
         showToast('✅ 已将修复后的文字置换到「完整长视频定稿文案」并保存！');
@@ -304,8 +304,8 @@ let selectedHumanizeStyle = 'humorous';
       const btnSuspense = document.getElementById('btnStyleSuspense');
       const btnColloquial = document.getElementById('btnStyleColloquial');
 
-      const activeClass = 'px-2.5 py-1 rounded-lg text-xs font-bold bg-violet-600 text-white transition shadow cursor-pointer';
-      const inactiveClass = 'px-2.5 py-1 rounded-lg text-xs font-bold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 transition cursor-pointer';
+      const activeClass = 'px-2.5 py-1 rounded-lg text-xs font-bold bg-action text-ink-inverse transition shadow cursor-pointer';
+      const inactiveClass = 'px-2.5 py-1 rounded-lg text-xs font-bold bg-surface text-ink-muted hover:text-ink border border-line transition cursor-pointer';
 
       if (btnHumor) btnHumor.className = style === 'humorous' ? activeClass : inactiveClass;
       if (btnSuspense) btnSuspense.className = style === 'suspense' ? activeClass : inactiveClass;
@@ -391,7 +391,7 @@ let selectedHumanizeStyle = 'humorous';
 
           const badge = document.getElementById('wHumanizePendingBadge');
           if (badge) {
-            badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+            badge.className = 'px-2 py-0.5 rounded-full text-[10px] font-bold bg-warn-soft text-warn border border-warn-line';
             badge.textContent = `⏳ ${nextVer} 待确认 · 确认后将置换下方定稿文案`;
           }
 
@@ -399,21 +399,21 @@ let selectedHumanizeStyle = 'humorous';
             const stats = resObj.stats || {};
             const wordCount = resObj.humanized_text.length;
             auditContent.innerHTML = `
-              <div class="bg-gray-900/90 p-2 rounded border border-gray-800">
-                <div class="text-[10px] text-gray-500">字数变化 / 脱脂率</div>
-                <div class="text-xs font-bold text-white">${stats.original_chars || content.length} ➔ ${stats.humanized_chars || wordCount} 字 <span class="text-emerald-400">(${stats.compression_rate || '脱脂精简'})</span></div>
+              <div class="bg-subtle p-2 rounded border border-line">
+                <div class="text-[10px] text-ink-muted">字数变化 / 脱脂率</div>
+                <div class="text-xs font-bold text-ink">${stats.original_chars || content.length} ➔ ${stats.humanized_chars || wordCount} 字 <span class="text-ok">(${stats.compression_rate || '脱脂精简'})</span></div>
               </div>
-              <div class="bg-gray-900/90 p-2 rounded border border-gray-800">
-                <div class="text-[10px] text-gray-500">已斩断 AI 八股词</div>
-                <div class="text-xs font-bold text-rose-300 truncate" title="${(stats.removed_ai_phrases || []).join(', ')}">${(stats.removed_ai_phrases || ['总而言之', '不可否认']).slice(0, 2).join('、')}等</div>
+              <div class="bg-subtle p-2 rounded border border-line">
+                <div class="text-[10px] text-ink-muted">已斩断 AI 八股词</div>
+                <div class="text-xs font-bold text-danger truncate" title="${(stats.removed_ai_phrases || []).join(', ')}">${(stats.removed_ai_phrases || ['总而言之', '不可否认']).slice(0, 2).join('、')}等</div>
               </div>
-              <div class="bg-gray-900/90 p-2 rounded border border-gray-800">
-                <div class="text-[10px] text-gray-500">碎化长复合句</div>
-                <div class="text-xs font-bold text-blue-300">${stats.split_long_sentences_count || 30}+ 处呼吸短句</div>
+              <div class="bg-subtle p-2 rounded border border-line">
+                <div class="text-[10px] text-ink-muted">碎化长复合句</div>
+                <div class="text-xs font-bold text-info">${stats.split_long_sentences_count || 30}+ 处呼吸短句</div>
               </div>
-              <div class="bg-gray-900/90 p-2 rounded border border-gray-800">
-                <div class="text-[10px] text-gray-500">注入生活幽默比喻</div>
-                <div class="text-xs font-bold text-amber-300">${stats.humorous_analogies_count || 8} 处生动笑点</div>
+              <div class="bg-subtle p-2 rounded border border-line">
+                <div class="text-[10px] text-ink-muted">注入生活幽默比喻</div>
+                <div class="text-xs font-bold text-warn">${stats.humorous_analogies_count || 8} 处生动笑点</div>
               </div>
             `;
             auditSummary.textContent = resObj.audit_report || '全篇文案已由 AI 完成真人声学与幽默化重构，节奏紧凑、听感流畅自然！';
@@ -554,12 +554,12 @@ let selectedHumanizeStyle = 'humorous';
 
       if (btnCreate && btnImport && viewCreate && viewImport) {
         btnCreate.className = isCreate
-          ? 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-purple-600 text-white shadow cursor-pointer'
-          : 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer';
+          ? 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-action text-ink-inverse shadow cursor-pointer'
+          : 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-ink-muted hover:text-ink cursor-pointer';
 
         btnImport.className = !isCreate
-          ? 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-violet-600 text-white shadow cursor-pointer'
-          : 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-gray-400 hover:text-white cursor-pointer';
+          ? 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 bg-action text-ink-inverse shadow cursor-pointer'
+          : 'px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 text-ink-muted hover:text-ink cursor-pointer';
 
         viewCreate.classList.toggle('hidden', !isCreate);
         viewImport.classList.toggle('hidden', isCreate);

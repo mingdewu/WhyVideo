@@ -7,64 +7,64 @@ function renderEvidenceCardsList() {
         const hasScript = Boolean(writerData?.finalScript && (writerData.finalScript.total_word_count > 0 || writerData.finalScript.script_segments));
         if (hasScript) {
           container.innerHTML = `
-            <div class="p-6 rounded-2xl bg-gray-950 border border-purple-500/30 text-center space-y-3">
-              <div class="text-xs text-purple-300 font-bold">📄 本工程已具备定稿文案（约 ${writerData.finalScript.total_word_count || '若干'} 字），暂无独立提取的证据卡</div>
-              <p class="text-[11px] text-gray-400 max-w-md mx-auto">
+            <div class="p-6 rounded-2xl bg-subtle border border-accent-line text-center space-y-3">
+              <div class="text-xs text-accent font-bold">📄 本工程已具备定稿文案（约 ${writerData.finalScript.total_word_count || '若干'} 字），暂无独立提取的证据卡</div>
+              <p class="text-[11px] text-ink-muted max-w-md mx-auto">
                 你可以继续直接查看与编辑大纲、分章正文和全文统稿，亦可一键让 AI 从当前定稿正文中反向提炼证据卡用于事实核验：
               </p>
               <div class="flex items-center justify-center gap-2.5 pt-1">
-                <button type="button" onclick="aiExtractEvidence()" class="px-4 py-2 text-xs font-bold rounded-xl bg-purple-600 hover:bg-purple-500 text-white shadow transition flex items-center gap-1.5 cursor-pointer">
+                <button type="button" onclick="aiExtractEvidence()" class="px-4 py-2 text-xs font-bold rounded-xl bg-action hover:bg-action-hover text-ink-inverse shadow transition flex items-center gap-1.5 cursor-pointer">
                   <span>🤖 从现有正文一键提炼证据卡</span>
                 </button>
-                <button type="button" onclick="addCustomEvidenceCard()" class="px-3.5 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 transition flex items-center gap-1 cursor-pointer">
+                <button type="button" onclick="addCustomEvidenceCard()" class="px-3.5 py-2 text-xs font-semibold rounded-xl card hover:border-line-strong text-ink-secondary transition flex items-center gap-1 cursor-pointer">
                   <span>➕ 手动补充证据卡</span>
                 </button>
               </div>
             </div>
           `;
         } else {
-          container.innerHTML = '<div class="text-center py-10 text-gray-500 text-xs">暂无证据卡，请在左侧填入资料后点击上方「🤖 从资料中提取证据卡」</div>';
+          container.innerHTML = '<div class="text-center py-10 text-ink-muted text-xs">暂无证据卡，请在左侧填入资料后点击上方「🤖 从资料中提取证据卡」</div>';
         }
         return;
       }
 
       const claimTypeBadge = {
-        verified_fact: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">已证实客观事实</span>',
-        unverified_fact: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">事实线索·待核查</span>',
-        disputed_claim: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">学界/行业存在争议</span>',
-        legend_or_anecdote: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">民间传说/轶事</span>',
-        author_interpretation: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">作者个人推论</span>',
+        verified_fact: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-ok-soft text-ok border border-ok-line">已证实客观事实</span>',
+        unverified_fact: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-warn-soft text-warn border border-warn-line">事实线索·待核查</span>',
+        disputed_claim: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-warn-soft text-warn border border-warn-line">学界/行业存在争议</span>',
+        legend_or_anecdote: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-info-soft text-info border border-info-line">民间传说/轶事</span>',
+        author_interpretation: '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-accent-soft text-accent border border-accent-line">作者个人推论</span>',
       };
 
       container.innerHTML = cards
         .map(
           (c, idx) => `
-        <div class="p-3 rounded-xl bg-gray-950 border border-gray-800/80 hover:border-purple-500/40 transition space-y-1.5 text-xs">
+        <div class="p-3 rounded-xl bg-subtle border border-line hover:border-ink transition space-y-1.5 text-xs">
           <div class="flex items-center justify-between">
             <div class="flex items-center gap-2 flex-wrap">
-              <span class="font-mono font-bold text-amber-400">${c.evidence_id || 'EV-' + String(idx + 1).padStart(3, '0')}</span>
+              <span class="font-mono font-bold text-warn">${c.evidence_id || 'EV-' + String(idx + 1).padStart(3, '0')}</span>
               ${c.verification_status === 'human_approved'
-                ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">人工复核通过</span>'
+                ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-ok-soft text-ok border border-ok-line">人工复核通过</span>'
                 : c.claim_type === 'verified_fact' && !hasEvidenceSourceUrl(c)
-                ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">来源待核查</span>'
+                ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-warn-soft text-warn border border-warn-line">来源待核查</span>'
                 : c.claim_type === 'unverified_fact' && (c.verification_status === 'failed' || c.verification_checked_at)
-                  ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30">自动未通过 · 待人工复核</span>'
-                  : (claimTypeBadge[c.claim_type] || '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-gray-500/20 text-gray-300 border border-gray-500/30">类型待核查</span>')}
-              <span class="text-[10px] text-gray-400 font-mono">可靠度: ${c.claim_type === 'verified_fact' && !hasEvidenceSourceUrl(c) && c.verification_status !== 'human_approved' ? '待核查' : (c.reliability || '未评估')}</span>
+                  ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-danger-soft text-danger border border-danger-line">自动未通过 · 待人工复核</span>'
+                  : (claimTypeBadge[c.claim_type] || '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-subtle text-ink-secondary border border-line">类型待核查</span>')}
+              <span class="text-[10px] text-ink-muted font-mono">可靠度: ${c.claim_type === 'verified_fact' && !hasEvidenceSourceUrl(c) && c.verification_status !== 'human_approved' ? '待核查' : (c.reliability || '未评估')}</span>
             </div>
             <div class="flex items-center gap-2">
-              ${c.claim_type === 'unverified_fact' && (c.verification_status === 'failed' || c.verification_checked_at) ? '<button type="button" onclick="humanApproveEvidenceCard(' + idx + ')" class="text-amber-300 hover:text-amber-200 text-xs">人工复核</button>' : ''}
-              <button type="button" onclick="deleteEvidenceCard(${idx})" class="text-gray-500 hover:text-rose-400 text-xs">✕ 删除</button>
+              ${c.claim_type === 'unverified_fact' && (c.verification_status === 'failed' || c.verification_checked_at) ? '<button type="button" onclick="humanApproveEvidenceCard(' + idx + ')" class="text-warn hover:text-warn text-xs">人工复核</button>' : ''}
+              <button type="button" onclick="deleteEvidenceCard(${idx})" class="text-ink-muted hover:text-danger text-xs">✕ 删除</button>
             </div>
           </div>
-          <div class="text-gray-200 leading-relaxed font-sans">${c.evidence_summary || c.claim || '无主张陈述'}</div>
-          <div class="text-[11px] text-gray-500 flex items-center justify-between">
+          <div class="text-ink leading-relaxed font-sans">${c.evidence_summary || c.claim || '无主张陈述'}</div>
+          <div class="text-[11px] text-ink-muted flex items-center justify-between">
             <span class="truncate max-w-md">来源: ${escapeHtml(c.source_title || c.source_url || '待自动核查')}</span>
-            ${hasEvidenceSourceUrl(c) ? '<a class="text-sky-400 hover:underline shrink-0" href="' + escapeHtml(c.source_url) + '" target="_blank" rel="noopener noreferrer">打开来源</a>' : ''}
+            ${hasEvidenceSourceUrl(c) ? '<a class="text-info hover:underline shrink-0" href="' + escapeHtml(c.source_url) + '" target="_blank" rel="noopener noreferrer">打开来源</a>' : ''}
           </div>
-          ${c.source_excerpt ? '<div class="text-[11px] text-gray-400 leading-relaxed">原文依据：' + escapeHtml(c.source_excerpt) + '</div>' : ''}
-          ${c.verification_status === 'failed' ? '<div class="text-[11px] text-rose-300 leading-relaxed">未通过原因：' + escapeHtml(c.verification_reason || '未找到支持完整主张的来源') + '</div>' : ''}
-          ${c.verification_status === 'human_approved' ? '<div class="text-[11px] text-emerald-300 leading-relaxed">人工判断依据：' + escapeHtml(c.review_note || '') + '</div>' : ''}
+          ${c.source_excerpt ? '<div class="text-[11px] text-ink-muted leading-relaxed">原文依据：' + escapeHtml(c.source_excerpt) + '</div>' : ''}
+          ${c.verification_status === 'failed' ? '<div class="text-[11px] text-danger leading-relaxed">未通过原因：' + escapeHtml(c.verification_reason || '未找到支持完整主张的来源') + '</div>' : ''}
+          ${c.verification_status === 'human_approved' ? '<div class="text-[11px] text-ok leading-relaxed">人工判断依据：' + escapeHtml(c.review_note || '') + '</div>' : ''}
         </div>
       `
         )
@@ -149,7 +149,7 @@ function renderEvidenceCardsList() {
       const outline = writerData?.outline;
       if (!outline) {
         document.getElementById('wOutlineChaptersList').innerHTML =
-          '<div class="text-center py-8 text-gray-500 text-xs">暂无大纲章节，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>';
+          '<div class="text-center py-8 text-ink-muted text-xs">暂无大纲章节，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>';
         document.getElementById('wOutlineChapterCountBadge').textContent = '0 章';
         return;
       }
@@ -169,7 +169,7 @@ function renderEvidenceCardsList() {
       countEl.textContent = `${chapters.length} 章`;
 
       if (chapters.length === 0) {
-        listEl.innerHTML = '<div class="text-center py-8 text-gray-500 text-xs">暂无大纲章节，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>';
+        listEl.innerHTML = '<div class="text-center py-8 text-ink-muted text-xs">暂无大纲章节，请核验证据卡后点击「🤖 基于证据卡生成大纲」</div>';
         return;
       }
 
@@ -177,42 +177,42 @@ function renderEvidenceCardsList() {
       const isHydrated = Boolean(outline._hydrated_from_script);
 
       listEl.innerHTML = (isHydrated
-        ? '<div class="p-2 rounded-lg bg-purple-950/20 border border-purple-500/30 text-[11px] text-purple-300">💡 当前大纲已由定稿文案自动提取映射，你可以直接修改任意字段后点击「💾 保存大纲修改」：</div>'
+        ? '<div class="p-2 rounded-lg bg-accent-soft border border-accent-line text-[11px] text-accent">💡 当前大纲已由定稿文案自动提取映射，你可以直接修改任意字段后点击「💾 保存大纲修改」：</div>'
         : '') + chapters
         .map(
           (ch, i) => `
-        <div class="p-3.5 rounded-xl bg-gray-950 border border-gray-800 hover:border-purple-500/40 transition space-y-2.5" data-outline-idx="${i}">
+        <div class="p-3.5 rounded-xl bg-subtle border border-line hover:border-ink transition space-y-2.5" data-outline-idx="${i}">
           <div class="flex items-center justify-between gap-2">
             <div class="flex items-center gap-2 flex-1 min-w-0">
-              <span class="px-2 py-0.5 rounded bg-purple-600/25 text-purple-300 border border-purple-500/30 font-mono text-[10px] font-black shrink-0">第 ${ch.chapter_number || i + 1} 章</span>
+              <span class="px-2 py-0.5 rounded bg-accent-soft text-accent border border-accent-line font-mono text-[10px] font-black shrink-0">第 ${ch.chapter_number || i + 1} 章</span>
               <input type="text" data-field="chapter_title" value="${escAttr(ch.chapter_title)}" placeholder="章节标题..."
-                class="flex-1 min-w-0 bg-gray-900 text-white font-bold text-xs px-2.5 py-1 rounded-lg border border-gray-700 focus:outline-none focus:border-purple-500" />
+                class="flex-1 min-w-0 bg-input text-ink font-bold text-xs px-2.5 py-1 rounded-lg border border-line focus:outline-none focus:border-ink" />
             </div>
             <div class="flex items-center gap-1.5 flex-wrap shrink-0">
               ${(ch.supporting_evidence_ids || ch.bound_evidence_ids || [])
-                .map((ev) => `<span class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono text-[10px] font-bold">${ev}</span>`)
+                .map((ev) => `<span class="px-1.5 py-0.5 rounded bg-accent-soft text-accent font-mono text-[10px] font-bold">${ev}</span>`)
                 .join('')}
             </div>
           </div>
           <div>
-            <label class="block text-[10px] text-amber-300/90 font-semibold mb-1">🎯 核心子问题：</label>
+            <label class="block text-[10px] text-warn font-semibold mb-1">🎯 核心子问题：</label>
             <input type="text" data-field="sub_question" value="${escAttr(ch.sub_question || ch.core_question || '')}" placeholder="本章要回答的核心子问题..."
-              class="w-full bg-gray-900 text-amber-200 text-xs px-2.5 py-1 rounded-lg border border-gray-800 focus:outline-none focus:border-amber-400" />
+              class="w-full bg-input text-warn text-xs px-2.5 py-1 rounded-lg border border-line focus:outline-none focus:border-ink" />
           </div>
           <div>
-            <label class="block text-[10px] text-emerald-300/90 font-semibold mb-1">📌 对总标题的直接原因回答（因为……）：</label>
+            <label class="block text-[10px] text-ok font-semibold mb-1">📌 对总标题的直接原因回答（因为……）：</label>
             <input type="text" data-field="direct_reason_to_title" value="${escAttr(ch.direct_reason_to_title || ch.direct_answer_to_title || '')}" placeholder="本章直接证明了总标题的第几条原因：因为..."
-              class="w-full bg-gray-900 text-emerald-200 text-xs px-2.5 py-1 rounded-lg border border-gray-800 focus:outline-none focus:border-emerald-400" />
+              class="w-full bg-input text-ok text-xs px-2.5 py-1 rounded-lg border border-line focus:outline-none focus:border-ink" />
           </div>
           <div>
-            <label class="block text-[10px] text-gray-400 font-semibold mb-1">💡 机制与内容概述：</label>
+            <label class="block text-[10px] text-ink-muted font-semibold mb-1">💡 机制与内容概述：</label>
             <textarea rows="2" data-field="mechanism_or_background_summary" placeholder="机制与案例要点..."
-              class="w-full bg-gray-900 text-gray-300 text-[11px] px-2.5 py-1.5 rounded-lg border border-gray-800 focus:outline-none focus:border-purple-500 leading-relaxed">${escAttr(ch.mechanism_or_background_summary || ch.mechanism || '')}</textarea>
+              class="w-full bg-input text-ink-secondary text-[11px] px-2.5 py-1.5 rounded-lg border border-line focus:outline-none focus:border-ink leading-relaxed">${escAttr(ch.mechanism_or_background_summary || ch.mechanism || '')}</textarea>
           </div>
           <div>
-            <label class="block text-[10px] text-gray-500 font-semibold mb-1">↪ 承接下章过渡（可选）：</label>
+            <label class="block text-[10px] text-ink-muted font-semibold mb-1">↪ 承接下章过渡（可选）：</label>
             <input type="text" data-field="transition_to_next" value="${escAttr(ch.transition_to_next || '')}" placeholder="引向下一章的自然过渡设问..."
-              class="w-full bg-gray-900 text-gray-400 font-mono text-[11px] px-2.5 py-1 rounded-lg border border-gray-800 focus:outline-none focus:border-purple-500" />
+              class="w-full bg-input text-ink-muted font-mono text-[11px] px-2.5 py-1 rounded-lg border border-line focus:outline-none focus:border-ink" />
           </div>
         </div>
       `
@@ -291,7 +291,7 @@ function renderEvidenceCardsList() {
       const outline = writerData?.outline;
       const chapters = outline?.chapters?.length ? outline.chapters : (writerData?.chapters || []);
       if (chapters.length === 0) {
-        bar.innerHTML = '<span class="text-xs text-gray-500 py-1">请先完成大纲审核，章节选项卡将在此呈现</span>';
+        bar.innerHTML = '<span class="text-xs text-ink-muted py-1">请先完成大纲审核，章节选项卡将在此呈现</span>';
         return;
       }
 
@@ -300,8 +300,8 @@ function renderEvidenceCardsList() {
           (ch, idx) => `
         <button type="button" onclick="selectEditingChapter(${idx})" class="px-3 py-1.5 rounded-xl text-xs font-bold transition whitespace-nowrap cursor-pointer ${
           idx === currentChapterIndex
-            ? 'bg-purple-600 text-white shadow'
-            : 'card text-gray-400 hover:text-white hover:border-purple-500/40'
+            ? 'bg-action text-ink-inverse shadow'
+            : 'card text-ink-muted hover:text-ink hover:border-ink'
         }">
           第 ${ch.chapter_number || idx + 1} 章
         </button>

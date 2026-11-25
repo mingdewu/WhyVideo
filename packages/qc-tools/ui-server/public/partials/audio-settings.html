@@ -1,22 +1,22 @@
   <!-- 配音配置抽屉/弹窗 -->
-  <div id="audioModal" onclick="if(event.target===this) toggleAudioModal()" class="studio-modal fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-    <div class="card w-full max-w-xl p-6 rounded-2xl border border-rose-500/40 shadow-2xl space-y-4">
-      <div class="flex items-center justify-between pb-3 border-b border-gray-800">
-        <h3 class="text-lg font-bold text-white flex items-center gap-2">
+  <div id="audioModal" onclick="if(event.target===this) toggleAudioModal()" class="studio-modal fixed inset-0 bg-backdrop backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="card w-full max-w-xl p-6 rounded-2xl border border-danger-line shadow-2xl space-y-4">
+      <div class="flex items-center justify-between pb-3 border-b border-line">
+        <h3 class="text-lg font-bold text-ink flex items-center gap-2">
           🎙️ AI 配音引擎控制中心
         </h3>
-        <button type="button" onclick="toggleAudioModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-gray-400 hover:text-white hover:bg-gray-800/80 transition duration-150 text-xl font-bold cursor-pointer shrink-0 border border-transparent hover:border-gray-700" title="关闭退出 (Esc)">✕</button>
+        <button type="button" onclick="toggleAudioModal()" class="w-9 h-9 rounded-xl flex items-center justify-center text-ink-muted hover:text-ink hover:bg-muted transition duration-150 text-xl font-bold cursor-pointer shrink-0 border border-transparent hover:border-line-strong" title="关闭退出 (Esc)">✕</button>
       </div>
 
       <div class="space-y-3">
         <div>
-          <label class="block text-xs font-semibold text-gray-300 mb-1">选择配音提供商：</label>
+          <label class="block text-xs font-semibold text-ink-secondary mb-1">选择配音提供商：</label>
           <div class="grid grid-cols-2 gap-3">
-            <label id="labelAudioProviderElevenlabs" class="flex items-center gap-2 p-2.5 rounded-xl border border-gray-700 bg-gray-900 cursor-pointer text-xs font-bold text-gray-400 transition">
+            <label id="labelAudioProviderElevenlabs" class="flex items-center gap-2 p-2.5 rounded-xl border border-line bg-surface cursor-pointer text-xs font-bold text-ink-muted transition">
               <input type="radio" name="audioProvider" value="elevenlabs" onchange="updateAudioProviderUI()" />
               <span>ElevenLabs 云端配音</span>
             </label>
-            <label id="labelAudioProviderVoicebox" class="flex items-center gap-2 p-2.5 rounded-xl border border-rose-500 bg-rose-500/10 cursor-pointer text-xs font-bold text-rose-200 transition">
+            <label id="labelAudioProviderVoicebox" class="flex items-center gap-2 p-2.5 rounded-xl border border-danger-line bg-danger-soft cursor-pointer text-xs font-bold text-danger transition">
               <input type="radio" name="audioProvider" value="voicebox" checked onchange="updateAudioProviderUI()" />
               <span>Voicebox 本地模型</span>
             </label>
@@ -25,13 +25,13 @@
 
         <div id="elevenlabsFields" class="hidden space-y-3">
         <div>
-          <label class="block text-xs font-semibold text-gray-300 mb-1">
+          <label class="block text-xs font-semibold text-ink-secondary mb-1">
             ElevenLabs API Key：
-            <a href="https://elevenlabs.io" target="_blank" class="text-rose-400 hover:underline text-[11px] font-normal ml-2">获取 API Key ↗</a>
+            <a href="https://elevenlabs.io" target="_blank" class="text-danger hover:underline text-[11px] font-normal ml-2">获取 API Key ↗</a>
           </label>
           <div class="flex items-center gap-2">
-            <input type="password" id="elevenlabsKeyInput" oninput="onElevenlabsKeyInputChange()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadElevenlabsVoices(true);}" placeholder="在此输入 xi-api-key（或在根目录 .env 中写入）..." class="flex-1 px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500" />
-            <button type="button" id="btnFetchElevenlabsVoices" onclick="loadElevenlabsVoices(true)" class="px-3 py-2 text-xs font-bold rounded-xl bg-rose-600/25 hover:bg-rose-600 text-rose-100 border border-rose-500/40 transition shrink-0 cursor-pointer">
+            <input type="password" id="elevenlabsKeyInput" oninput="onElevenlabsKeyInputChange()" onkeydown="if(event.key==='Enter'){event.preventDefault();loadElevenlabsVoices(true);}" placeholder="在此输入 xi-api-key（或在根目录 .env 中写入）..." class="flex-1 px-3 py-2 text-xs rounded-xl bg-input border border-line text-ink focus:outline-none focus:border-ink" />
+            <button type="button" id="btnFetchElevenlabsVoices" onclick="loadElevenlabsVoices(true)" class="px-3 py-2 text-xs font-bold rounded-xl bg-danger-soft hover:bg-danger-hover text-danger hover:text-ink-inverse border border-danger-line transition shrink-0 cursor-pointer">
               🔄 拉取我的音色
             </button>
           </div>
@@ -39,31 +39,31 @@
 
         <div>
           <div class="flex items-center justify-between gap-2 mb-1">
-            <label class="block text-xs font-semibold text-gray-300">我的 ElevenLabs 音色列表 (Voice ID)：</label>
+            <label class="block text-xs font-semibold text-ink-secondary">我的 ElevenLabs 音色列表 (Voice ID)：</label>
             <div class="flex items-center gap-2">
-              <span id="elevenlabsVoiceStatus" class="text-[11px] text-gray-400"></span>
-              <button type="button" id="btnPreviewElevenlabsVoice" onclick="previewSelectedElevenlabsVoice()" disabled class="px-2 py-0.5 text-[11px] font-semibold rounded-lg bg-gray-800 hover:bg-gray-700 text-rose-200 border border-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer">
+              <span id="elevenlabsVoiceStatus" class="text-[11px] text-ink-muted"></span>
+              <button type="button" id="btnPreviewElevenlabsVoice" onclick="previewSelectedElevenlabsVoice()" disabled class="px-2 py-0.5 text-[11px] font-semibold rounded-lg bg-subtle hover:bg-muted text-danger border border-line disabled:opacity-40 disabled:cursor-not-allowed transition cursor-pointer">
                 ▶ 试听原声
               </button>
             </div>
           </div>
-          <select id="voiceIdSelect" onchange="onElevenlabsVoiceSelectChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">
+          <select id="voiceIdSelect" onchange="onElevenlabsVoiceSelectChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-input border border-line text-ink focus:outline-none focus:border-ink">
             <option value="">请先输入 API Key 并点击「拉取我的音色」</option>
           </select>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block text-xs font-semibold text-gray-300 mb-1">语音模型 (Model)：</label>
-            <select id="elevenlabsModelSelect" onchange="syncElevenlabsStabilityStep(true)" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">
+            <label class="block text-xs font-semibold text-ink-secondary mb-1">语音模型 (Model)：</label>
+            <select id="elevenlabsModelSelect" onchange="syncElevenlabsStabilityStep(true)" class="w-full px-3 py-2 text-xs rounded-xl bg-input border border-line text-ink focus:outline-none focus:border-ink">
               <option value="eleven_v4">Eleven v4（推荐，精细可调）</option>
               <option value="eleven_v4_turbo">Eleven v4 Turbo（极速）</option>
               <option value="eleven_v3">Eleven v3（表现力强，3档稳定度）</option>
             </select>
           </div>
           <div>
-            <label class="block text-xs font-semibold text-gray-300 mb-1">语言 (Language)：</label>
-            <select id="elevenlabsLanguageSelect" onchange="onElevenlabsParamChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">
+            <label class="block text-xs font-semibold text-ink-secondary mb-1">语言 (Language)：</label>
+            <select id="elevenlabsLanguageSelect" onchange="onElevenlabsParamChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-input border border-line text-ink focus:outline-none focus:border-ink">
               <option value="zh">中文（推荐）</option>
               <option value="">自动检测</option>
               <option value="en">English</option>
@@ -72,25 +72,25 @@
           </div>
         </div>
 
-        <div class="grid grid-cols-2 gap-3 p-3 rounded-xl bg-gray-950/70 border border-gray-800">
+        <div class="grid grid-cols-2 gap-3 p-3 rounded-xl bg-subtle border border-line">
           <div>
             <div class="flex items-center justify-between text-xs mb-1">
-              <span class="font-semibold text-gray-300">稳定性 (Stability)</span>
-              <span id="elevenlabsStabilityLabel" class="font-mono text-rose-300 font-bold">35%</span>
+              <span class="font-semibold text-ink-secondary">稳定性 (Stability)</span>
+              <span id="elevenlabsStabilityLabel" class="font-mono text-danger font-bold">35%</span>
             </div>
             <input type="range" id="elevenlabsStabilitySlider" min="0" max="1" step="0.05" value="0.35" oninput="onElevenlabsParamChange()" class="w-full accent-rose-500 cursor-pointer" />
-            <div class="flex justify-between text-[10px] text-gray-500 mt-0.5">
+            <div class="flex justify-between text-[10px] text-ink-muted mt-0.5">
               <span>创意</span>
               <span>稳健</span>
             </div>
           </div>
           <div>
             <div class="flex items-center justify-between text-xs mb-1">
-              <span class="font-semibold text-gray-300">相似度 (Similarity)</span>
-              <span id="elevenlabsSimilarityLabel" class="font-mono text-rose-300 font-bold">80%</span>
+              <span class="font-semibold text-ink-secondary">相似度 (Similarity)</span>
+              <span id="elevenlabsSimilarityLabel" class="font-mono text-danger font-bold">80%</span>
             </div>
             <input type="range" id="elevenlabsSimilaritySlider" min="0" max="1" step="0.05" value="0.8" oninput="onElevenlabsParamChange()" class="w-full accent-rose-500 cursor-pointer" />
-            <div class="flex justify-between text-[10px] text-gray-500 mt-0.5">
+            <div class="flex justify-between text-[10px] text-ink-muted mt-0.5">
               <span>低</span>
               <span>高</span>
             </div>
@@ -99,41 +99,41 @@
         </div>
 
         <div id="voiceboxFields">
-          <label class="block text-xs font-semibold text-gray-300 mb-1">Voicebox 本地音色：</label>
-          <select id="voiceboxProfileSelect" onchange="onVoiceboxProfileSelectChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white">
+          <label class="block text-xs font-semibold text-ink-secondary mb-1">Voicebox 本地音色：</label>
+          <select id="voiceboxProfileSelect" onchange="onVoiceboxProfileSelectChange()" class="w-full px-3 py-2 text-xs rounded-xl bg-input border border-line text-ink">
             <option value="">正在读取本地音色…</option>
           </select>
         </div>
 
         <div>
-          <label class="block text-xs font-semibold text-gray-300 mb-1">试听测试文本（仅用于「试听测试」）：</label>
-          <textarea id="sampleAudioText" rows="2" class="w-full px-3 py-2 text-xs rounded-xl bg-gray-950 border border-gray-700 text-white focus:outline-none focus:border-rose-500">这是来自 WhyVideo 工作台的高保真纪录片旁白语音测试。</textarea>
+          <label class="block text-xs font-semibold text-ink-secondary mb-1">试听测试文本（仅用于「试听测试」）：</label>
+          <textarea id="sampleAudioText" rows="2" class="w-full px-3 py-2 text-xs rounded-xl bg-input border border-line text-ink focus:outline-none focus:border-ink">这是来自 WhyVideo 工作台的高保真纪录片旁白语音测试。</textarea>
         </div>
-        <div id="fullScriptSummaryBox" class="px-3 py-2 rounded-xl bg-emerald-950/35 border border-emerald-500/30 text-xs text-emerald-200">
+        <div id="fullScriptSummaryBox" class="px-3 py-2 rounded-xl bg-ok-soft border border-ok-line text-xs text-ok">
           📄 全片旁白：确认保存当前配音引擎设置后，点击主界面顶部的「🎙️ 生成音频」即可生成整部视频配音并对齐时间轴
         </div>
-        <label id="useAsNarrationLabel" class="flex items-center gap-2 text-xs text-gray-300">
+        <label id="useAsNarrationLabel" class="flex items-center gap-2 text-xs text-ink-secondary">
           <input type="checkbox" id="useAsNarrationCheckbox" class="accent-emerald-500" />
           试听测试时也设为当前工程成片旁白（Voicebox）
         </label>
-        <div id="voiceboxJobStatus" class="text-xs text-gray-300 font-medium"></div>
+        <div id="voiceboxJobStatus" class="text-xs text-ink-secondary font-medium"></div>
 
-        <div id="audioPlayerContainer" class="hidden p-3 rounded-xl bg-gray-950 border border-gray-800">
+        <div id="audioPlayerContainer" class="hidden p-3 rounded-xl bg-subtle border border-line">
           <audio id="audioPreviewPlayer" controls class="w-full h-8"></audio>
         </div>
       </div>
 
-      <div class="flex flex-wrap justify-end gap-2.5 pt-3 border-t border-gray-800">
-        <button onclick="toggleAudioModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-gray-600 text-gray-300 cursor-pointer">
+      <div class="flex flex-wrap justify-end gap-2.5 pt-3 border-t border-line">
+        <button onclick="toggleAudioModal()" class="px-4 py-2 text-xs font-semibold rounded-xl card hover:border-line-strong text-ink-secondary cursor-pointer">
           取消
         </button>
-        <button onclick="cancelVoiceboxJob()" id="btnCancelVoicebox" class="hidden px-4 py-2 text-xs font-semibold rounded-xl bg-gray-800 hover:bg-gray-700 border border-rose-500/50 text-rose-300 transition cursor-pointer">
+        <button onclick="cancelVoiceboxJob()" id="btnCancelVoicebox" class="hidden px-4 py-2 text-xs font-semibold rounded-xl bg-subtle hover:bg-muted border border-danger-line text-danger transition cursor-pointer">
           🛑 取消配音
         </button>
-        <button onclick="synthesizeTestVoice()" id="btnSynth" class="px-4 py-2 text-xs font-bold rounded-xl bg-rose-600/80 hover:bg-rose-500 text-white transition shadow cursor-pointer">
+        <button onclick="synthesizeTestVoice()" id="btnSynth" class="px-4 py-2 text-xs font-bold rounded-xl bg-danger-soft hover:bg-danger-hover text-danger hover:text-ink-inverse border border-danger-line transition shadow cursor-pointer">
           🔊 试听测试配音
         </button>
-        <button onclick="confirmSaveAudioConfig()" id="btnConfirmAudioConfig" class="px-5 py-2 text-xs font-extrabold rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:brightness-110 text-white transition shadow-lg cursor-pointer">
+        <button onclick="confirmSaveAudioConfig()" id="btnConfirmAudioConfig" class="px-5 py-2 text-xs font-extrabold rounded-xl text-ink-inverse transition shadow-lg cursor-pointer bg-ok-solid hover:bg-ok-hover">
           ✅ 确认保存设置
         </button>
       </div>

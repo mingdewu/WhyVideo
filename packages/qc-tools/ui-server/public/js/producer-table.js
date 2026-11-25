@@ -71,7 +71,7 @@ window.observeLazySceneVideos = observeLazySceneVideos;
         const tr = document.createElement('tr');
         tr.setAttribute('role', 'row');
         tr.dataset.sceneIdx = String(idx);
-        tr.className = 'transition ' + (isSharedWithPrev ? 'bg-sky-950/20' : '');
+        tr.className = 'transition ' + (isSharedWithPrev ? 'bg-info-soft' : '');
 
         // 1. 镜头序号与时长
         const hasProjectAudio = Boolean((window.timingSummaryData && window.timingSummaryData.has_audio_file) || (manifestData && manifestData.audio_file));
@@ -79,28 +79,28 @@ window.observeLazySceneVideos = observeLazySceneVideos;
         const td1 = document.createElement('td');
         td1.className = 'p-3 text-center';
         td1.innerHTML = `
-          <span class="px-2 py-0.5 rounded-lg bg-gray-900 border border-gray-700 text-amber-400 font-extrabold text-xs block mb-1">
+          <span class="px-2 py-0.5 rounded-lg bg-surface border border-line text-warn font-extrabold text-xs block mb-1">
             ${scene.scene_id}
           </span>
           <span class="inline-block px-1.5 py-px rounded text-[9px] leading-tight font-semibold mb-1 ${badgeClass}">
             ${badgeLabel}
           </span>
-          <span class="text-sm font-extrabold text-white bg-gray-900/90 border border-gray-700/80 rounded-md px-2 py-1 block font-mono tracking-tight my-1 whitespace-nowrap">
+          <span class="text-sm font-extrabold text-ink bg-subtle border border-line rounded-md px-2 py-1 block font-mono tracking-tight my-1 whitespace-nowrap">
             ${(visualTiming.startMs / 1000).toFixed(1)}s - ${(visualTiming.endMs / 1000).toFixed(1)}s
           </span>
           ${isSharedGroup ? `
-            <span class="text-[10px] text-sky-300 block">🔗 连用总时长 ${visualDurSec}s · ${visualTiming.last - visualTiming.first + 1} 段共用画面</span>
-            <span class="text-[9px] text-gray-400 block mt-1">本段旁白 ${durSec}s · ${(scene.start_ms / 1000).toFixed(1)}–${(scene.end_ms / 1000).toFixed(1)}s</span>
+            <span class="text-[10px] text-info block">🔗 连用总时长 ${visualDurSec}s · ${visualTiming.last - visualTiming.first + 1} 段共用画面</span>
+            <span class="text-[9px] text-ink-muted block mt-1">本段旁白 ${durSec}s · ${(scene.start_ms / 1000).toFixed(1)}–${(scene.end_ms / 1000).toFixed(1)}s</span>
           ` : ''}
           <div class="mt-1 flex flex-wrap items-center justify-center gap-1">
             ${scene.timing_source && scene.timing_source.startsWith('aligned')
-              ? '<span class="inline-block px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-[9px] font-semibold">🎙️ 已对齐</span>'
+              ? '<span class="inline-block px-1.5 py-0.5 rounded bg-ok-soft text-ok border border-ok-line text-[9px] font-semibold">🎙️ 已对齐</span>'
               : ''}
             ${hasProjectAudio
-              ? `<button type="button" id="btnPlayShotAudio_${idx}" onclick="togglePlayShotNarration(${idx})" class="px-1.5 py-0.5 rounded ${isPlayingThisShot ? 'bg-rose-600 text-white border-rose-400' : 'bg-emerald-600/25 hover:bg-emerald-600/45 text-emerald-200 border-emerald-500/40'} border text-[9px] font-bold transition cursor-pointer shadow-sm" title="试听本镜头对应的旁白配音片段 (${(scene.start_ms / 1000).toFixed(1)}s ~ ${(scene.end_ms / 1000).toFixed(1)}s)">${isPlayingThisShot ? '⏹️ 停止' : '🔊 试听'}</button>`
+              ? `<button type="button" id="btnPlayShotAudio_${idx}" onclick="togglePlayShotNarration(${idx})" class="px-1.5 py-0.5 rounded ${isPlayingThisShot ? 'bg-danger-solid text-ink-inverse border-danger-line' : 'bg-ok-soft hover:bg-ok-soft text-ok border-ok-line'} border text-[9px] font-bold transition cursor-pointer shadow-sm" title="试听本镜头对应的旁白配音片段 (${(scene.start_ms / 1000).toFixed(1)}s ~ ${(scene.end_ms / 1000).toFixed(1)}s)">${isPlayingThisShot ? '⏹️ 停止' : '🔊 试听'}</button>`
               : ''}
           </div>
-          <span class="text-[10px] text-gray-400 block mt-0.5">${scene.chapter_ref || ''}</span>
+          <span class="text-[10px] text-ink-muted block mt-0.5">${scene.chapter_ref || ''}</span>
         `;
 
         // 2. 旁白片段（支持点字切画面 / 挪切点）
@@ -109,16 +109,16 @@ window.observeLazySceneVideos = observeLazySceneVideos;
         const isPickerOpen = Boolean(window._openCutPickers && window._openCutPickers[idx]);
         const vKws = Array.isArray(scene.visual_keywords) ? scene.visual_keywords : [];
         td2.innerHTML = `
-          <textarea rows="4" aria-label="旁白" class="w-full p-2.5 rounded-lg bg-gray-950 border border-gray-700 text-gray-100 text-xs leading-relaxed focus:border-blue-500 focus:outline-none"
+          <textarea rows="4" aria-label="旁白" class="w-full p-2.5 rounded-lg bg-input border border-line text-ink text-xs leading-relaxed focus:border-ink focus:outline-none"
             onchange="onNarrationEdit(${idx}, this.value)">${escapeHtml(scene.narration_text || '')}</textarea>
           <div class="mt-1.5 flex flex-wrap items-center justify-between gap-1.5 text-[10px]">
             <button type="button" onclick="toggleCharCutPicker(${idx})"
-              class="px-2 py-0.5 rounded bg-indigo-500/15 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/30 font-semibold transition cursor-pointer">
+              class="px-2 py-0.5 rounded bg-accent-soft hover:bg-accent-soft text-accent border border-accent-line font-semibold transition cursor-pointer">
               ${isPickerOpen ? '▲ 收起切点面板' : '👆 点字切画面 / 挪切点'}
             </button>
-            ${vKws.length ? ('<span class="px-1.5 py-0.5 rounded bg-purple-500/15 text-purple-200 border border-purple-500/30 font-mono truncate max-w-[180px]" title="画面触发关键词">🎯 ' + escapeHtml(vKws.join(' / ')) + '</span>') : ''}
+            ${vKws.length ? ('<span class="px-1.5 py-0.5 rounded bg-accent-soft text-accent border border-accent-line font-mono truncate max-w-[180px]" title="画面触发关键词">🎯 ' + escapeHtml(vKws.join(' / ')) + '</span>') : ''}
           </div>
-          <div id="charCutPicker_${idx}" class="${isPickerOpen ? '' : 'hidden '}mt-2 p-2.5 rounded-xl bg-gray-900/95 border border-indigo-500/40 space-y-2"></div>
+          <div id="charCutPicker_${idx}" class="${isPickerOpen ? '' : 'hidden '}mt-2 p-2.5 rounded-xl bg-surface border border-accent-line space-y-2"></div>
         `;
         if (isPickerOpen) {
           const pickerEl = td2.querySelector('#charCutPicker_' + idx);
@@ -132,16 +132,16 @@ window.observeLazySceneVideos = observeLazySceneVideos;
           <div class="space-y-1.5">
             <label class="flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition ${
               !isAi
-                ? 'bg-sky-500/20 border-sky-500 text-sky-200 font-bold'
-                : 'bg-gray-950 border-gray-800 text-gray-400'
+                ? 'bg-info-soft border-info-line text-info font-bold'
+                : 'bg-subtle border-line text-ink-muted'
             }">
               <input type="radio" name="mode_${idx}" onchange="setMode(${idx}, 'manual_upload')" ${!isAi ? 'checked' : ''} />
               <span class="text-xs">📤 人工上传素材</span>
             </label>
             <label class="flex items-center gap-2 p-2 rounded-xl border cursor-pointer transition ${
               isAi
-                ? 'bg-purple-500/20 border-purple-500 text-purple-200 font-bold'
-                : 'bg-gray-950 border-gray-800 text-gray-400'
+                ? 'bg-accent-soft border-accent-line text-accent font-bold'
+                : 'bg-subtle border-line text-ink-muted'
             }">
               <input type="radio" name="mode_${idx}" onchange="setMode(${idx}, 'ai_ppt_slide')" ${isAi ? 'checked' : ''} />
               <span class="text-xs">🤖 AI 生成画面</span>
@@ -177,53 +177,53 @@ window.observeLazySceneVideos = observeLazySceneVideos;
             <!-- Prompt 指导输入窗口 -->
             <div class="space-y-1">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] text-purple-300 font-bold">🎬 视频描述 & 运镜指示词 (Text-to-Video):</span>
-                <button type="button" id="prompt_btn_${idx}" onclick="autoGenerateShotPrompt(${idx}, 'video')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-900/60 hover:bg-purple-800 text-purple-200 border border-purple-500/40 transition flex items-center gap-1 shadow-sm" title="根据旁白内容由 AI 视觉总监提炼电影级运镜与画面描述词">
+                <span class="text-[10px] text-accent font-bold">🎬 视频描述 & 运镜指示词 (Text-to-Video):</span>
+                <button type="button" id="prompt_btn_${idx}" onclick="autoGenerateShotPrompt(${idx}, 'video')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-accent-soft hover:bg-action-hover text-accent border border-accent-line transition flex items-center gap-1 shadow-sm" title="根据旁白内容由 AI 视觉总监提炼电影级运镜与画面描述词">
                   ✨ 自动提炼运镜词
                 </button>
               </div>
               <textarea id="prompt_input_${idx}" rows="2" placeholder="输入本镜头视频画面与运镜提示词（留空将根据旁白生成）..."
-                class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-purple-500/30 text-purple-100 text-[11px] font-mono focus:border-purple-400 focus:outline-none resize-none"
+                class="w-full px-2 py-1.5 rounded-lg bg-input border border-accent-line text-accent text-[11px] font-mono focus:border-ink focus:outline-none resize-none"
                 onchange="onPptThemeEdit(${idx}, 'custom_prompt', this.value)">${escapeHtml(ppt.custom_prompt || '')}</textarea>
             </div>
 
             <!-- 一键生成实体视频按钮 -->
             <div class="pt-0.5">
-              <button id="gen_btn_${idx}" onclick="generateRowPpt(${idx})" class="w-full py-1.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-indigo-600 hover:brightness-110 text-white font-black text-xs transition shadow-md flex items-center justify-center gap-1.5">
+              <button id="gen_btn_${idx}" onclick="generateRowPpt(${idx})" class="w-full py-1.5 px-3 rounded-xl text-ink-inverse font-black text-xs transition shadow-md flex items-center justify-center gap-1.5 bg-ok-solid hover:bg-ok-hover">
                 <span>🎬 一键生成真实动态视频 (${pName})</span>
               </button>
             </div>
 
             <!-- 实体视频行内真实播放器或预览占位 -->
             ${hasGeneratedVideo ? `
-              <div class="rounded-xl border border-emerald-500/60 bg-black aspect-[16/9] relative overflow-hidden group shadow-lg">
+              <div class="rounded-xl border border-ok-line bg-media aspect-[16/9] relative overflow-hidden group shadow-lg">
                 <video data-lazy-src="${generatedVideoSrc}#t=1" controls playsinline preload="none" onloadedmetadata="checkVideoElementDuration(this, ${idx})" class="w-full h-full object-cover"></video>
-                <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-emerald-400 border border-emerald-500/40 flex items-center gap-1 pointer-events-none">
+                <div class="absolute top-2 left-2 bg-media/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-ink-inverse border border-ok-line flex items-center gap-1 pointer-events-none">
                   <span>✅ 实体 MP4 视频就绪 (时长: ${durSec}s)</span>
                 </div>
               </div>
-              <div id="aiVideoShortWarn_${idx}" class="${aiShortInfo.isTooShort ? '' : 'hidden '}px-2.5 py-1.5 rounded-lg bg-rose-600/25 border border-rose-500 text-rose-200 text-[11px] font-bold flex items-center gap-1.5 shadow-sm">
+              <div id="aiVideoShortWarn_${idx}" class="${aiShortInfo.isTooShort ? '' : 'hidden '}px-2.5 py-1.5 rounded-lg bg-danger-soft border border-danger-line text-danger text-[11px] font-bold flex items-center gap-1.5 shadow-sm">
                 ${aiShortInfo.isTooShort ? buildVideoShortWarnText(aiShortInfo, durSec) : ''}
               </div>
             ` : `
-              <div class="rounded-xl border border-emerald-500/30 bg-gradient-to-br from-gray-950 via-teal-950/20 to-gray-900 p-2.5 shadow-inner aspect-[16/9] flex flex-col justify-between relative overflow-hidden group">
+              <div class="rounded-xl border border-ok-line p-2.5 shadow-inner aspect-[16/9] flex flex-col justify-between relative overflow-hidden group bg-subtle">
                 <div class="flex items-center justify-between">
-                  <span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-500/25 text-emerald-300 border border-emerald-500/30">
+                  <span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-ok-soft text-ok border border-ok-line">
                     待生成 · 🎬 实体动态视频 (MP4)
                   </span>
-                  <span class="text-[9px] text-gray-500 font-mono">1920x1080 · ${durSec}s</span>
+                  <span class="text-[9px] text-ink-muted font-mono">1920x1080 · ${durSec}s</span>
                 </div>
 
                 <div class="my-auto text-center px-1">
-                  <h4 class="text-xs font-bold text-gray-200 line-clamp-2">
+                  <h4 class="text-xs font-bold text-ink line-clamp-2">
                     ${scene.narration_text}
                   </h4>
-                  <p class="text-[10px] text-emerald-400/90 mt-1 line-clamp-1 font-mono">
+                  <p class="text-[10px] text-ok mt-1 line-clamp-1 font-mono">
                     ${ppt.custom_prompt ? ('🎯 ' + ppt.custom_prompt) : (kws.length ? ('标志: ' + kws.join(' · ')) : '等待指令')}
                   </p>
                 </div>
 
-                <div class="flex items-center justify-between pt-1 border-t border-emerald-500/20 text-[9px] text-emerald-300/70">
+                <div class="flex items-center justify-between pt-1 border-t border-ok-line text-[9px] text-ok">
                   <span>⚡ 点击上方按钮调用 ${pName} 生成实体视频</span>
                   <span>⏱️ 需 ${durSec}s</span>
                 </div>
@@ -235,94 +235,94 @@ window.observeLazySceneVideos = observeLazySceneVideos;
           innerContent = `
             <div class="space-y-1">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] text-purple-300 font-bold">🖼️ 实景图视觉指示词 (FLUX HD):</span>
-                <button type="button" id="prompt_btn_${idx}" onclick="autoGenerateShotPrompt(${idx}, 'image')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-900/60 hover:bg-blue-800 text-blue-200 border border-blue-500/40 transition flex items-center gap-1 shadow-sm" title="根据旁白内容由 AI 视觉总监提炼超清摄影构图与视觉特征词">
+                <span class="text-[10px] text-accent font-bold">🖼️ 实景图视觉指示词 (FLUX HD):</span>
+                <button type="button" id="prompt_btn_${idx}" onclick="autoGenerateShotPrompt(${idx}, 'image')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-info-soft hover:bg-info-solid text-info border border-info-line transition flex items-center gap-1 shadow-sm" title="根据旁白内容由 AI 视觉总监提炼超清摄影构图与视觉特征词">
                   ✨ 自动提炼实景词
                 </button>
               </div>
               <textarea id="prompt_input_${idx}" rows="2" placeholder="输入本镜头实景图画面描述词（留空将根据旁白生成）..."
-                class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-purple-500/30 text-purple-100 text-[11px] font-mono focus:border-purple-400 focus:outline-none resize-none"
+                class="w-full px-2 py-1.5 rounded-lg bg-input border border-accent-line text-accent text-[11px] font-mono focus:border-ink focus:outline-none resize-none"
                 onchange="onPptThemeEdit(${idx}, 'custom_prompt', this.value)">${escapeHtml(ppt.custom_prompt || '')}</textarea>
             </div>
 
             <div class="pt-0.5">
-              <button id="gen_btn_${idx}" onclick="generateRowPpt(${idx})" class="w-full py-1.5 px-3 rounded-xl bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:brightness-110 text-white font-black text-xs transition shadow-md flex items-center justify-center gap-1.5">
+              <button id="gen_btn_${idx}" onclick="generateRowPpt(${idx})" class="w-full py-1.5 px-3 rounded-xl text-ink-inverse font-black text-xs transition shadow-md flex items-center justify-center gap-1.5 bg-action hover:bg-action-hover">
                 <span>🖼️ 一键生成超清实景图 (${iName})</span>
               </button>
             </div>
 
             ${hasPreviewImage ? `
-              <div class="rounded-xl border border-emerald-500/60 bg-black aspect-[16/9] relative overflow-hidden group shadow-lg">
+              <div class="rounded-xl border border-ok-line bg-media aspect-[16/9] relative overflow-hidden group shadow-lg">
                 <img src="${scene.preview_image_url}" class="w-full h-full object-cover transition duration-300 group-hover:scale-105 cursor-pointer" alt="Image Still 1080p" onclick="window.open('${scene.preview_image_url}')" />
-                <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-emerald-400 border border-emerald-500/40">
+                <div class="absolute top-2 left-2 bg-media/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-ink-inverse border border-ok-line">
                   <span>✅ 超清实景图已挂载</span>
                 </div>
-                <a href="${scene.preview_image_url}" target="_blank" class="absolute top-2 right-2 bg-blue-950/90 hover:bg-blue-600 text-blue-200 hover:text-white px-2 py-0.5 rounded text-[10px] font-bold border border-blue-500/50 flex items-center gap-1 shadow transition z-20">
+                <a href="${scene.preview_image_url}" target="_blank" class="absolute top-2 right-2 bg-info-soft hover:bg-info-solid text-info hover:text-ink-inverse px-2 py-0.5 rounded text-[10px] font-bold border border-info-line flex items-center gap-1 shadow transition z-20">
                   🔍 查看大图
                 </a>
               </div>
             ` : `
-              <div class="rounded-xl border border-blue-500/30 bg-gray-950 p-2.5 aspect-[16/9] flex flex-col justify-between">
-                <span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-blue-500/20 text-blue-300 w-fit">待生成 · 超清实景图</span>
-                <p class="text-xs text-center text-gray-300 line-clamp-2">${scene.narration_text}</p>
-                <div class="text-[9px] text-blue-300/70 text-center">点击上方按钮由 ${iName} 生成超清实景图</div>
+              <div class="rounded-xl border border-info-line bg-subtle p-2.5 aspect-[16/9] flex flex-col justify-between">
+                <span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-info-soft text-info w-fit">待生成 · 超清实景图</span>
+                <p class="text-xs text-center text-ink-secondary line-clamp-2">${scene.narration_text}</p>
+                <div class="text-[9px] text-info text-center">点击上方按钮由 ${iName} 生成超清实景图</div>
               </div>
             `}
           `;
         } else {
           // 📊 动效排版卡片形态
           innerContent = `
-            <div class="flex items-center justify-between p-1 rounded-lg bg-gray-950 border border-purple-500/30 text-[10px]">
-              <div class="flex items-center gap-1.5 font-bold text-purple-300">
+            <div class="flex items-center justify-between p-1 rounded-lg bg-subtle border border-accent-line text-[10px]">
+              <div class="flex items-center gap-1.5 font-bold text-accent">
                 <span>🪐 大模型 API 视觉排版调优</span>
-                <span class="text-[9px] px-1.5 py-0.2 rounded bg-purple-900/50 text-purple-200 border border-purple-400/40">AI 自由设计</span>
+                <span class="text-[9px] px-1.5 py-0.2 rounded bg-accent-soft text-accent border border-accent-line">AI 自由设计</span>
               </div>
-              <span class="text-[9px] text-gray-400">结合顶部模型自适应优化</span>
+              <span class="text-[9px] text-ink-muted">结合顶部模型自适应优化</span>
             </div>
 
             <div class="space-y-1">
               <div class="flex items-center justify-between">
-                <span class="text-[10px] text-purple-300 font-bold">📊 卡片排版指导词 (Prompt):</span>
-                <button type="button" id="prompt_btn_${idx}" onclick="autoGenerateShotPrompt(${idx}, 'card')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-900/60 hover:bg-indigo-800 text-indigo-200 border border-indigo-500/40 transition flex items-center gap-1 shadow-sm" title="根据旁白内容由 AI 视觉总监提炼卡片视觉排版提示">
+                <span class="text-[10px] text-accent font-bold">📊 卡片排版指导词 (Prompt):</span>
+                <button type="button" id="prompt_btn_${idx}" onclick="autoGenerateShotPrompt(${idx}, 'card')" class="px-2 py-0.5 rounded text-[10px] font-bold bg-accent-soft hover:bg-action-hover text-accent border border-accent-line transition flex items-center gap-1 shadow-sm" title="根据旁白内容由 AI 视觉总监提炼卡片视觉排版提示">
                   ✨ 自动提炼排版词
                 </button>
               </div>
               <textarea id="prompt_input_${idx}" rows="2" placeholder="输入卡片 Prompt 指导词..."
-                class="w-full px-2 py-1.5 rounded-lg bg-gray-950 border border-purple-500/30 text-purple-100 text-[11px] font-mono focus:border-purple-400 focus:outline-none resize-none"
+                class="w-full px-2 py-1.5 rounded-lg bg-input border border-accent-line text-accent text-[11px] font-mono focus:border-ink focus:outline-none resize-none"
                 onchange="onPptThemeEdit(${idx}, 'custom_prompt', this.value)">${escapeHtml(ppt.custom_prompt || '')}</textarea>
             </div>
 
             <div class="flex items-center gap-1.5">
-              <span class="text-[10px] text-gray-400 font-bold whitespace-nowrap">大字:</span>
+              <span class="text-[10px] text-ink-muted font-bold whitespace-nowrap">大字:</span>
               <input id="title_input_${idx}" type="text" value="${escapeHtml(ppt.theme_title || '')}" placeholder="修改核心大字标题..."
-                class="w-full px-2 py-1 rounded-lg bg-gray-950 border border-purple-500/30 text-purple-200 font-bold text-[11px] focus:border-purple-400 focus:outline-none"
+                class="w-full px-2 py-1 rounded-lg bg-input border border-accent-line text-accent font-bold text-[11px] focus:border-ink focus:outline-none"
                 onchange="onPptThemeEdit(${idx}, 'theme_title', this.value)" />
             </div>
 
             <div class="pt-0.5">
-              <button id="gen_btn_${idx}" onclick="generateRowPpt(${idx})" class="w-full py-1.5 px-3 rounded-xl bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-600 hover:brightness-110 text-white font-black text-xs transition shadow-md flex items-center justify-center gap-1.5">
+              <button id="gen_btn_${idx}" onclick="generateRowPpt(${idx})" class="w-full py-1.5 px-3 rounded-xl text-ink-inverse font-black text-xs transition shadow-md flex items-center justify-center gap-1.5 bg-action hover:bg-action-hover">
                 <span>🎨 一键由 AI 绘制 PPT 动态卡片 (${iName})</span>
               </button>
             </div>
 
             ${hasPreviewImage ? `
-              <div class="rounded-xl border border-emerald-500/60 bg-black aspect-[16/9] relative overflow-hidden group shadow-lg">
+              <div class="rounded-xl border border-ok-line bg-media aspect-[16/9] relative overflow-hidden group shadow-lg">
                 <img src="${scene.preview_image_url}" class="w-full h-full object-cover transition duration-300 group-hover:scale-105 cursor-pointer" alt="AI Presentation Card" onclick="window.open('${scene.preview_image_url}')" />
-                <div class="absolute top-2 left-2 bg-black/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-emerald-400 border border-emerald-500/40">
+                <div class="absolute top-2 left-2 bg-media/80 backdrop-blur-md px-2 py-0.5 rounded text-[9px] font-black text-ink-inverse border border-ok-line">
                   <span>✅ AI 绘制 PPT 动态卡片 (${iName})</span>
                 </div>
-                <a href="${scene.preview_image_url}" target="_blank" class="absolute top-2 right-2 bg-purple-950/90 hover:bg-purple-600 text-purple-200 hover:text-white px-2 py-0.5 rounded text-[10px] font-bold border border-purple-500/50 flex items-center gap-1 shadow transition z-20">
+                <a href="${scene.preview_image_url}" target="_blank" class="absolute top-2 right-2 bg-accent-soft hover:bg-action-hover text-accent hover:text-ink-inverse px-2 py-0.5 rounded text-[10px] font-bold border border-accent-line flex items-center gap-1 shadow transition z-20">
                   🔍 查看大图
                 </a>
               </div>
             ` : `
-              <div class="rounded-xl border border-purple-500/40 bg-gradient-to-br from-gray-950 via-purple-950/20 to-gray-900 p-2.5 shadow-inner aspect-[16/9] flex flex-col justify-between">
-                <span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-purple-500/25 text-purple-300 w-fit">待生成 · AI PPT 动态卡片</span>
+              <div class="rounded-xl border border-accent-line p-2.5 shadow-inner aspect-[16/9] flex flex-col justify-between bg-subtle">
+                <span class="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-accent-soft text-accent w-fit">待生成 · AI PPT 动态卡片</span>
                 <div class="my-auto text-center px-1">
-                  <h4 class="text-sm font-black text-purple-200">${mainTitle}</h4>
-                  <p class="text-[10px] text-gray-300 mt-1 line-clamp-1">${subtitle}</p>
+                  <h4 class="text-sm font-black text-accent">${mainTitle}</h4>
+                  <p class="text-[10px] text-ink-secondary mt-1 line-clamp-1">${subtitle}</p>
                 </div>
-                <div class="text-[9px] text-purple-300/70 text-center">点击上方按钮由 ${iName} 绘制 16:9 专业 PPT 信息图卡片</div>
+                <div class="text-[9px] text-accent text-center">点击上方按钮由 ${iName} 绘制 16:9 专业 PPT 信息图卡片</div>
               </div>
             `}
           `;
@@ -331,17 +331,17 @@ window.observeLazySceneVideos = observeLazySceneVideos;
         td5.innerHTML = `
           <div class="space-y-2 ${isAi ? '' : 'inactive-visual-editor opacity-40 pointer-events-none'}">
             <!-- 视觉呈现形态三态切换 -->
-            <div class="flex items-center p-0.5 rounded-lg bg-gray-950 border border-gray-800 text-[10px] font-bold">
+            <div class="flex items-center p-0.5 rounded-lg bg-subtle border border-line text-[10px] font-bold">
               <button type="button" onclick="setVisualTarget(${idx}, 'video')"
-                class="flex-1 py-1 rounded text-center transition ${curTargetMode === 'video' ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow font-black' : 'text-gray-400 hover:text-gray-200'}">
+                class="flex-1 py-1 rounded text-center transition ${curTargetMode === 'video' ? 'text-ink-inverse shadow font-black bg-ok-solid hover:bg-ok-hover' : 'text-ink-muted hover:text-ink'}">
                 🎬 实体视频
               </button>
               <button type="button" onclick="setVisualTarget(${idx}, 'image')"
-                class="flex-1 py-1 rounded text-center transition ${curTargetMode === 'image' ? 'bg-blue-600 text-white shadow font-black' : 'text-gray-400 hover:text-gray-200'}">
+                class="flex-1 py-1 rounded text-center transition ${curTargetMode === 'image' ? 'bg-info-solid text-ink-inverse shadow font-black' : 'text-ink-muted hover:text-ink'}">
                 🖼️ 超写实图
               </button>
               <button type="button" onclick="setVisualTarget(${idx}, 'card')"
-                class="flex-1 py-1 rounded text-center transition ${curTargetMode === 'card' ? 'bg-purple-600 text-white shadow font-black' : 'text-gray-400 hover:text-gray-200'}">
+                class="flex-1 py-1 rounded text-center transition ${curTargetMode === 'card' ? 'bg-action text-ink-inverse shadow font-black' : 'text-ink-muted hover:text-ink'}">
                 📊 动效卡片
               </button>
             </div>
@@ -361,14 +361,14 @@ window.observeLazySceneVideos = observeLazySceneVideos;
         if (idx > 0 && prevScene) {
           if (isSharedWithPrev) {
             linkHtml = `
-              <div class="p-1 rounded-lg bg-sky-950/70 border border-sky-500/50 text-[10px] text-sky-300 font-bold flex items-center justify-between gap-1 mb-1.5">
+              <div class="p-1 rounded-lg bg-info-soft border border-info-line text-[10px] text-info font-bold flex items-center justify-between gap-1 mb-1.5">
                 <span>🔗 连用上一镜头素材</span>
-                <button onclick="unlinkScene(${idx})" class="text-rose-400 hover:text-rose-300 text-xs">✕ 取消</button>
+                <button onclick="unlinkScene(${idx})" class="text-danger hover:text-danger text-xs">✕ 取消</button>
               </div>
             `;
           } else {
             linkHtml = `
-              <button onclick="linkWithPrevious(${idx})" class="w-full px-2 py-1 rounded-lg bg-gray-800 hover:bg-sky-600 border border-gray-700 hover:border-sky-400 text-gray-300 hover:text-white text-[10px] font-semibold transition mb-1.5 block">
+              <button onclick="linkWithPrevious(${idx})" class="w-full px-2 py-1 rounded-lg bg-subtle hover:bg-info-solid border border-line hover:border-info-line text-ink-secondary hover:text-ink-inverse text-[10px] font-semibold transition mb-1.5 block">
                 🔗 与上一镜头连用 (共用视频)
               </button>
             `;
@@ -397,9 +397,9 @@ window.observeLazySceneVideos = observeLazySceneVideos;
           }
           if (parts.length > 0) {
             modifiersBadgesHtml = `
-              <div class="p-1.5 rounded-lg bg-emerald-950/70 border border-emerald-500/40 text-[10px] text-emerald-300 font-mono flex items-center justify-between gap-1">
+              <div class="p-1.5 rounded-lg bg-ok-soft border border-ok-line text-[10px] text-ok font-mono flex items-center justify-between gap-1">
                 <span class="truncate" title="${parts.join(' · ')}">✨ ${parts.join(' · ')}</span>
-                <button onclick="resetModifiers(${idx})" class="text-rose-400 hover:text-rose-300 text-[10px] shrink-0 font-bold hover:underline cursor-pointer">重置</button>
+                <button onclick="resetModifiers(${idx})" class="text-danger hover:text-danger text-[10px] shrink-0 font-bold hover:underline cursor-pointer">重置</button>
               </div>
             `;
           }
@@ -420,8 +420,8 @@ window.observeLazySceneVideos = observeLazySceneVideos;
         if (scene.ai_speech_reply) {
           const safeSpeech = String(scene.ai_speech_reply).replace(/</g, '&lt;').replace(/>/g, '&gt;');
           speechBubbleHtml = `
-            <div class="p-2 rounded-lg bg-indigo-950/70 border border-indigo-500/40 text-[10px] text-indigo-200 leading-relaxed shadow-sm">
-              <div class="flex items-center gap-1 font-bold text-indigo-400 mb-0.5">
+            <div class="p-2 rounded-lg bg-accent-soft border border-accent-line text-[10px] text-accent leading-relaxed shadow-sm">
+              <div class="flex items-center gap-1 font-bold text-accent mb-0.5">
                 <span>🤖 AI 剪辑总监反馈：</span>
               </div>
               <div>${safeSpeech}</div>
@@ -434,7 +434,7 @@ window.observeLazySceneVideos = observeLazySceneVideos;
         const bestKw = scene.selected_search_keyword || kwCandidates[0] || '';
         const step0RowHtml = buildStep0BestKeywordHtml(idx, bestKw);
         const step0KeywordsHtml = `
-          <div id="step0KwWrap_${idx}" class="pb-1.5 border-b border-gray-800/70">
+          <div id="step0KwWrap_${idx}" class="pb-1.5 border-b border-line">
             ${step0RowHtml}
           </div>
         `;
@@ -442,29 +442,29 @@ window.observeLazySceneVideos = observeLazySceneVideos;
         // 口令框（置于最上方：既能把秒数口令编译为下载片段跳转指令，也能对已下载本地短视频做加字幕/动效二次剪辑）
         const aiInputHtml = `
           <div class="space-y-1.5 min-w-0">
-            <div class="flex items-center justify-between gap-2 text-[9px] text-sky-300 font-bold min-w-0">
+            <div class="flex items-center justify-between gap-2 text-[9px] text-info font-bold min-w-0">
               <span class="truncate">🎙️ Step 1 · 口语指令 (下载秒数 / 字幕动效)</span>
-              <span class="text-gray-500 font-mono shrink-0">语音或输入后点编译 ↵</span>
+              <span class="text-ink-muted font-mono shrink-0">语音或输入后点编译 ↵</span>
             </div>
             <div class="flex items-center gap-1 min-w-0">
               <input type="text" id="aiIntentInput_${idx}"
                      placeholder="${inputPlaceholder}"
                      value="${currentPromptVal}"
                      onkeydown="if(event.key==='Enter') applyAiIntentForRow(${idx})"
-                     class="min-w-0 flex-1 px-2 py-1.5 rounded-lg bg-gray-950 border border-sky-500/60 text-white text-[10px] placeholder:text-gray-500 focus:border-sky-400 focus:ring-1 focus:ring-sky-400 focus:outline-none" />
+                     class="min-w-0 flex-1 px-2 py-1.5 rounded-lg bg-input border border-info-line text-ink text-[10px] placeholder:text-ink-muted focus:border-ink focus:ring-ink focus:outline-none" />
               <button type="button" id="aiVoiceBtn_${idx}" onclick="toggleVoiceInputForRow(${idx})"
                       aria-label="语音输入口语指令" aria-pressed="false"
                       title="点击开始语音输入口语指令（再次点击结束并转文字）"
-                      class="px-2 py-1.5 rounded-lg bg-gray-900 hover:bg-rose-600/25 border border-sky-500/50 hover:border-rose-400/70 text-sky-200 hover:text-rose-100 font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition flex items-center gap-1">
+                      class="px-2 py-1.5 rounded-lg bg-surface hover:bg-danger-soft border border-info-line hover:border-danger-line text-info hover:text-danger font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition flex items-center gap-1">
                 🎤 语音
               </button>
-              <button type="button" onclick="applyAiIntentForRow(${idx})" class="px-2.5 py-1.5 rounded-lg bg-sky-600 hover:bg-sky-500 text-white font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition" title="解析口语中的起止秒数生成下载跳转命令，或编译字幕与Remotion动效">
+              <button type="button" onclick="applyAiIntentForRow(${idx})" class="px-2.5 py-1.5 rounded-lg bg-info-solid hover:bg-info-solid text-ink-inverse font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition" title="解析口语中的起止秒数生成下载跳转命令，或编译字幕与Remotion动效">
                 ✨ 编译
               </button>
             </div>
-            <div id="aiVoiceStatus_${idx}" class="hidden flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-rose-950/60 border border-rose-500/40 text-[10px] text-rose-200">
+            <div id="aiVoiceStatus_${idx}" class="hidden flex items-center justify-between gap-2 px-2 py-1 rounded-lg bg-danger-soft border border-danger-line text-[10px] text-danger">
               <span id="aiVoiceStatusText_${idx}" class="truncate"></span>
-              <button type="button" onclick="cancelActiveVoiceInput(true)" class="text-gray-300 hover:text-white underline shrink-0 cursor-pointer">取消</button>
+              <button type="button" onclick="cancelActiveVoiceInput(true)" class="text-ink-secondary hover:text-ink underline shrink-0 cursor-pointer">取消</button>
             </div>
             ${speechBubbleHtml}
             ${modifiersBadgesHtml}
@@ -482,20 +482,20 @@ window.observeLazySceneVideos = observeLazySceneVideos;
 
         const downloadRangeBadgeHtml = hasCompiledDlRange
           ? `
-            <div class="p-1.5 rounded-lg bg-teal-950/80 border border-teal-400/60 text-[10px] text-teal-200 font-mono flex items-center justify-between gap-1 shadow-sm">
+            <div class="p-1.5 rounded-lg bg-info-soft border border-info-line text-[10px] text-info font-mono flex items-center justify-between gap-1 shadow-sm">
               <span class="truncate" title="点下载时将只抓取原视频 ${dlRangeLabel} (${dlStart}s~${dlEnd}s)">
                 🎯 已就绪: 仅下载 <b>${dlRangeLabel}</b> (${(Number(dlEnd) - Number(dlStart)).toFixed(1)}s)
               </span>
-              <button type="button" onclick="clearDownloadRangeForRow(${idx})" class="text-rose-400 hover:text-rose-300 text-[10px] shrink-0 font-bold hover:underline cursor-pointer">✕ 整片</button>
+              <button type="button" onclick="clearDownloadRangeForRow(${idx})" class="text-danger hover:text-danger text-[10px] shrink-0 font-bold hover:underline cursor-pointer">✕ 整片</button>
             </div>
           `
           : '';
 
         const urlDownloadBarHtml = `
-          <div class="space-y-1 pt-1 border-t border-gray-800/70 min-w-0">
-            <div class="flex items-center justify-between gap-2 text-[9px] text-teal-300/90 font-bold min-w-0">
+          <div class="space-y-1 pt-1 border-t border-line min-w-0">
+            <div class="flex items-center justify-between gap-2 text-[9px] text-info font-bold min-w-0">
               <span class="truncate">🔗 Step 2 · 填入视频 URL 下载 (${seqDisplay})</span>
-              <span class="text-gray-500 font-mono truncate max-w-[120px] shrink-0" title="projects/${activeProjectId}/public/assets/video/">📂 assets/</span>
+              <span class="text-ink-muted font-mono truncate max-w-[120px] shrink-0" title="projects/${activeProjectId}/public/assets/video/">📂 assets/</span>
             </div>
             ${downloadRangeBadgeHtml}
             <div class="flex items-center gap-1 min-w-0">
@@ -504,33 +504,33 @@ window.observeLazySceneVideos = observeLazySceneVideos;
                      oninput="window._pendingDownloadUrls = window._pendingDownloadUrls || {}; window._pendingDownloadUrls[${idx}] = this.value"
                      placeholder="🔗 粘贴视频链接 (YouTube/B站/抖音等)..."
                      onkeydown="if(event.key==='Enter') downloadUrlForRow(${idx})"
-                     class="w-0 min-w-0 flex-1 px-2 py-1.5 rounded-lg bg-gray-950 border border-teal-500/50 text-white text-[10px] placeholder:text-gray-500 focus:border-teal-400 focus:ring-1 focus:ring-teal-400 focus:outline-none" />
+                     class="w-0 min-w-0 flex-1 px-2 py-1.5 rounded-lg bg-input border border-info-line text-ink text-[10px] placeholder:text-ink-muted focus:border-ink focus:ring-ink focus:outline-none" />
               <button type="button" id="urlDownloadHeadBtn_${idx}" onclick="downloadUrlForRow(${idx}, 'head')"
                       title="从原视频开头截取，时长与第一列一致"
-                      class="px-2 py-1.5 rounded-lg bg-teal-950 border border-teal-500/50 hover:bg-teal-800 text-teal-100 font-bold text-[10px] whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 transition">
+                      class="px-2 py-1.5 rounded-lg bg-info-soft border border-info-line hover:bg-ok-solid hover:text-ink-inverse text-info font-bold text-[10px] whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 transition">
                 前 ${visualDurSec} 秒
               </button>
               <button type="button" id="urlDownloadBtn_${idx}" onclick="downloadUrlForRow(${idx})"
-                      class="px-2 py-1.5 rounded-lg ${hasCompiledDlRange ? 'bg-gradient-to-r from-teal-500 to-emerald-500 ring-1 ring-teal-300' : 'bg-teal-600 hover:bg-teal-500'} text-white font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition">
+                      class="px-2 py-1.5 rounded-lg ${hasCompiledDlRange ? 'ring-1 ring-line-strong bg-ok-solid hover:bg-ok-hover' : 'bg-ok-solid hover:bg-ok-hover'} text-ink-inverse font-bold text-[10px] whitespace-nowrap shrink-0 shadow cursor-pointer transition">
                 ${dlBtnText}
               </button>
             </div>
-            <div class="flex items-center justify-end gap-1 text-[10px] text-gray-300">
+            <div class="flex items-center justify-end gap-1 text-[10px] text-ink-secondary">
               <label for="urlDownloadStart_${idx}">起始秒数</label>
               <input type="number" id="urlDownloadStart_${idx}" min="0" step="0.1" required inputmode="decimal" placeholder="0"
                      onkeydown="if(event.key==='Enter'){event.preventDefault();downloadUrlForRow(${idx}, 'offset')}"
-                     class="w-16 min-w-0 px-2 py-1.5 rounded-lg bg-gray-950 border border-teal-500/50 text-white focus:border-teal-400 focus:outline-none" />
+                     class="w-16 min-w-0 px-2 py-1.5 rounded-lg bg-input border border-info-line text-ink focus:border-ink focus:outline-none" />
               <button type="button" id="urlDownloadOffsetBtn_${idx}" onclick="downloadUrlForRow(${idx}, 'offset')"
                       title="从输入的秒数开始截取 ${visualDurSec} 秒"
-                      class="px-2 py-1.5 rounded-lg bg-teal-950 border border-teal-500/50 hover:bg-teal-800 text-teal-100 font-bold whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 transition">
+                      class="px-2 py-1.5 rounded-lg bg-info-soft border border-info-line hover:bg-ok-solid hover:text-ink-inverse text-info font-bold whitespace-nowrap shrink-0 cursor-pointer disabled:opacity-50 transition">
                 从该秒下载
               </button>
             </div>
             <div id="urlDownloadProgressWrap_${idx}" class="invisible space-y-0.5 pt-0.5">
-              <div class="w-full h-1.5 rounded-full bg-gray-800 overflow-hidden">
-                <div id="urlDownloadProgressBar_${idx}" class="h-full bg-gradient-to-r from-teal-400 to-emerald-400 rounded-full transition-all duration-200" style="width: 0%;"></div>
+              <div class="w-full h-1.5 rounded-full bg-subtle overflow-hidden">
+                <div id="urlDownloadProgressBar_${idx}" class="h-full rounded-full transition-all duration-200 bg-ok-solid hover:bg-ok-hover" style="width: 0%;"></div>
               </div>
-              <div class="flex items-center justify-between text-[9px] text-teal-300/90 font-mono">
+              <div class="flex items-center justify-between text-[9px] text-info font-mono">
                 <span id="urlDownloadProgressText_${idx}" class="truncate">准备下载...</span>
                 <span id="urlDownloadProgressPct_${idx}" class="shrink-0 font-bold">0%</span>
               </div>
@@ -545,8 +545,8 @@ window.observeLazySceneVideos = observeLazySceneVideos;
             ? getVideoShortfallInfo(scene, asset, durSecNum)
             : { isTooShort: false, rawDur: 0, playableSec: 0, shortfallSec: 0 };
           const durBadgeClass = isVideo && shortInfo.isTooShort
-            ? 'text-[10px] text-rose-400 font-mono font-bold shrink-0'
-            : 'text-[10px] text-emerald-400 font-mono font-bold shrink-0';
+            ? 'text-[10px] text-danger font-mono font-bold shrink-0'
+            : 'text-[10px] text-ok font-mono font-bold shrink-0';
           const durBadgeText = isVideo
             ? (shortInfo.isTooShort
                 ? `🚨 视频 ${shortInfo.playableSec.toFixed(1)}s / 需 ${durSec}s`
@@ -560,19 +560,19 @@ window.observeLazySceneVideos = observeLazySceneVideos;
               ${aiInputHtml}
               ${urlDownloadBarHtml}
               <div id="dropzone_${idx}"
-                   class="scene-media-dropzone border ${shortInfo.isTooShort ? 'border-rose-500/80 bg-rose-950/35' : 'border-sky-500/40 bg-sky-950/30'} rounded-xl p-2 text-left gap-1.5"
+                   class="scene-media-dropzone border ${shortInfo.isTooShort ? 'border-danger-line bg-danger-soft' : 'border-info-line bg-info-soft'} rounded-xl p-2 text-left gap-1.5"
                    ondragover="onFileDragOver(event, ${idx})"
                    ondragleave="onFileDragLeave(event, ${idx})"
                    ondrop="onFileDrop(event, ${idx})">
                 <div class="flex items-center justify-between gap-1.5 shrink-0">
-                  <span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-sky-500/20 text-sky-300 truncate min-w-0 flex-1" title="${asset.file_name || asset.asset_id} (${asset.file_path || asset.path})">
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-info-soft text-info truncate min-w-0 flex-1" title="${asset.file_name || asset.asset_id} (${asset.file_path || asset.path})">
                     ${asset.file_name || asset.asset_id}
                   </span>
                   <div class="flex items-center gap-2 shrink-0">
                     <span id="videoDurBadge_${idx}" class="${durBadgeClass}">
                       ${durBadgeText}
                     </span>
-                    <button type="button" onclick="clearAsset(${idx})" class="text-[10px] font-bold text-rose-400 hover:underline cursor-pointer shrink-0">
+                    <button type="button" onclick="clearAsset(${idx})" class="text-[10px] font-bold text-danger hover:underline cursor-pointer shrink-0">
                       清除绑定
                     </button>
                   </div>
@@ -581,15 +581,15 @@ window.observeLazySceneVideos = observeLazySceneVideos;
                 ${
                   isVideo
                     ? `
-                    <div id="videoShortWarn_${idx}" class="${shortInfo.isTooShort ? '' : 'hidden '}px-2 py-1 rounded-lg bg-rose-600/25 border border-rose-500 text-rose-200 text-[10px] font-bold flex items-center gap-1.5 shrink-0">
+                    <div id="videoShortWarn_${idx}" class="${shortInfo.isTooShort ? '' : 'hidden '}px-2 py-1 rounded-lg bg-danger-soft border border-danger-line text-danger text-[10px] font-bold flex items-center gap-1.5 shrink-0">
                       ${shortInfo.isTooShort ? buildVideoShortWarnText(shortInfo, durSec) : ''}
                     </div>
-                    <div class="scene-media-preview rounded-lg border border-gray-800 flex items-center justify-center">
+                    <div class="scene-media-preview rounded-lg border border-line flex items-center justify-center">
                       <video data-lazy-src="${videoSrc}#t=1" controls playsinline preload="none" onloadedmetadata="checkVideoElementDuration(this, ${idx}); if (this.paused && this.duration > 0 && this.duration < 1) this.currentTime = 0.1" class="w-full h-full object-contain"></video>
                     </div>
                   `
                     : `
-                    <div class="scene-media-preview rounded-lg border border-gray-800 flex items-center justify-center">
+                    <div class="scene-media-preview rounded-lg border border-line flex items-center justify-center">
                       <img src="${videoSrc}" class="w-full h-full object-cover" />
                     </div>
                   `
@@ -601,17 +601,17 @@ window.observeLazySceneVideos = observeLazySceneVideos;
                   const audioVolPct = Math.round(((scene.media_modifiers && scene.media_modifiers.original_audio_volume !== undefined) ? scene.media_modifiers.original_audio_volume : 0.3) * 100);
                   if (!hasAudioTrack) {
                     return `
-                      <div class="flex items-center justify-between gap-2 px-2 py-0.5 rounded-lg bg-gray-900/70 border border-gray-800 text-[10px] text-gray-500 shrink-0">
+                      <div class="flex items-center justify-between gap-2 px-2 py-0.5 rounded-lg bg-subtle border border-line text-[10px] text-ink-muted shrink-0">
                         <span>🔇 该素材无音轨</span>
                       </div>
                     `;
                   }
                   return `
-                    <div class="flex items-center justify-between gap-2 px-2 py-0.5 rounded-lg bg-gray-900/90 border border-sky-500/30 text-[10px] shrink-0">
-                      <label class="flex items-center gap-1.5 text-sky-200 font-semibold cursor-pointer select-none shrink-0">
+                    <div class="flex items-center justify-between gap-2 px-2 py-0.5 rounded-lg bg-subtle border border-info-line text-[10px] shrink-0">
+                      <label class="flex items-center gap-1.5 text-info font-semibold cursor-pointer select-none shrink-0">
                         <input type="checkbox" id="keepAudioCheck_${idx}" ${keepAudio ? 'checked' : ''}
                                onchange="updateSceneAudioOption(${idx})"
-                               class="rounded border-gray-600 bg-gray-950 text-sky-500 focus:ring-0 cursor-pointer" />
+                               class="rounded border-line-strong bg-input text-info focus:ring-ink cursor-pointer" />
                         <span>🔊 保留原声</span>
                       </label>
                       <div class="flex items-center gap-1.5 min-w-0 ${keepAudio ? '' : 'opacity-40 pointer-events-none'}">
@@ -619,7 +619,7 @@ window.observeLazySceneVideos = observeLazySceneVideos;
                                oninput="document.getElementById('keepAudioVolText_${idx}').textContent = this.value + '%'"
                                onchange="updateSceneAudioOption(${idx})"
                                class="w-16 accent-sky-400 cursor-pointer" />
-                        <span id="keepAudioVolText_${idx}" class="font-mono text-sky-300 w-8 text-right shrink-0">${audioVolPct}%</span>
+                        <span id="keepAudioVolText_${idx}" class="font-mono text-info w-8 text-right shrink-0">${audioVolPct}%</span>
                       </div>
                     </div>
                   `;
@@ -635,14 +635,14 @@ window.observeLazySceneVideos = observeLazySceneVideos;
               ${aiInputHtml}
               ${urlDownloadBarHtml}
               <button type="button" id="dropzone_${idx}"
-                   class="scene-media-dropzone scene-media-dropzone-empty w-full border-2 border-dashed border-sky-500/40 hover:border-sky-300 bg-black rounded-xl p-2.5 text-center transition cursor-pointer group"
+                   class="scene-media-dropzone scene-media-dropzone-empty w-full border-2 border-dashed border-info-line hover:border-info-line bg-subtle rounded-xl p-2.5 text-center transition cursor-pointer group"
                    ondragover="onFileDragOver(event, ${idx})"
                    ondragleave="onFileDragLeave(event, ${idx})"
                    ondrop="onFileDrop(event, ${idx})"
                    onclick="document.getElementById('fileInput_${idx}').click()">
-                <span class="block text-sky-300 text-lg mb-0.5">📥</span>
-                <span class="block text-[11px] font-bold text-sky-200">选择或拖入视频 / 图片</span>
-                <span class="block text-[9px] text-gray-400 mt-0.5">或先在上方口令框指定秒数 ➔ 编译 ➔ 填 URL 下载</span>
+                <span class="block text-info text-lg mb-0.5">📥</span>
+                <span class="block text-[11px] font-bold text-info">选择或拖入视频 / 图片</span>
+                <span class="block text-[9px] text-ink-muted mt-0.5">或先在上方口令框指定秒数 ➔ 编译 ➔ 填 URL 下载</span>
               </button>
             </div>
           `;
@@ -671,16 +671,16 @@ window.observeLazySceneVideos = observeLazySceneVideos;
         td7.className = 'p-3 text-center';
         td7.innerHTML = `
           <div class="flex flex-col gap-1.5">
-            <button type="button" onclick="openCutPickerForSplit(${idx})" class="w-full px-2 py-1.5 rounded-lg bg-purple-600/25 hover:bg-purple-600 border border-purple-500/40 text-purple-200 hover:text-white text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm cursor-pointer" title="展开点字切画面面板，点任意字前新增换画面点">
+            <button type="button" onclick="openCutPickerForSplit(${idx})" class="w-full px-2 py-1.5 rounded-lg bg-accent-soft hover:bg-action-hover border border-accent-line text-accent hover:text-ink-inverse text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm cursor-pointer" title="展开点字切画面面板，点任意字前新增换画面点">
               <span>✂️ 加切点</span>
             </button>
             ${
               idx > 0
                 ? `<div class="grid grid-cols-2 gap-1">
-                    <button type="button" onclick="nudgeCutPoint(${idx}, 'earlier')" class="px-1 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/40 text-indigo-200 hover:text-white text-[10px] font-bold transition cursor-pointer" title="把本画面切入点往前挪（上一句话没说完就切入本画面）">
+                    <button type="button" onclick="nudgeCutPoint(${idx}, 'earlier')" class="px-1 py-1 rounded-lg bg-accent-soft hover:bg-action-hover border border-accent-line text-accent hover:text-ink-inverse text-[10px] font-bold transition cursor-pointer" title="把本画面切入点往前挪（上一句话没说完就切入本画面）">
                       ⏪提前换
                     </button>
-                    <button type="button" onclick="nudgeCutPoint(${idx}, 'later')" class="px-1 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600 border border-indigo-500/40 text-indigo-200 hover:text-white text-[10px] font-bold transition cursor-pointer" title="把本画面切入点往后挪">
+                    <button type="button" onclick="nudgeCutPoint(${idx}, 'later')" class="px-1 py-1 rounded-lg bg-accent-soft hover:bg-action-hover border border-accent-line text-accent hover:text-ink-inverse text-[10px] font-bold transition cursor-pointer" title="把本画面切入点往后挪">
                       ⏩推迟换
                     </button>
                   </div>`
@@ -688,7 +688,7 @@ window.observeLazySceneVideos = observeLazySceneVideos;
             }
             ${
               idx < (manifestData.scenes.length - 1)
-                ? `<button type="button" onclick="mergeShotWithNext(${idx})" class="w-full px-2 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600 border border-emerald-500/40 text-emerald-300 hover:text-white text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm cursor-pointer" title="删掉与下一镜头之间的切点，合并成一个画面">
+                ? `<button type="button" onclick="mergeShotWithNext(${idx})" class="w-full px-2 py-1.5 rounded-lg bg-ok-soft hover:bg-ok-hover border border-ok-line text-ok hover:text-ink-inverse text-xs font-bold transition flex items-center justify-center gap-1 shadow-sm cursor-pointer" title="删掉与下一镜头之间的切点，合并成一个画面">
                     <span>🔗 删切点</span>
                   </button>`
                 : ''
@@ -761,10 +761,10 @@ window.observeLazySceneVideos = observeLazySceneVideos;
       td.colSpan = 5;
       td.className = 'p-10 text-center space-y-3';
       td.innerHTML = `
-        <div class="text-sm font-bold text-amber-300">📭 暂无视觉分镜镜头</div>
-        <p class="text-xs text-gray-400 max-w-lg mx-auto leading-relaxed">${escapeHtml(msg || '当前工程尚未生成镜头清单，请先前往文案创作台完成文案并同步至制作台。')}</p>
+        <div class="text-sm font-bold text-warn">📭 暂无视觉分镜镜头</div>
+        <p class="text-xs text-ink-muted max-w-lg mx-auto leading-relaxed">${escapeHtml(msg || '当前工程尚未生成镜头清单，请先前往文案创作台完成文案并同步至制作台。')}</p>
         <div class="pt-1">
-          <button type="button" onclick="switchWorkspaceTab('writer')" class="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white text-xs font-bold shadow transition cursor-pointer">
+          <button type="button" onclick="switchWorkspaceTab('writer')" class="px-4 py-2 rounded-xl bg-action hover:bg-action-hover text-ink-inverse text-xs font-bold shadow transition cursor-pointer">
             ✍️ 前往文案创作台准备并流转分镜
           </button>
         </div>

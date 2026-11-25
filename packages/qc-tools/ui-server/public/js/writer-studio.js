@@ -2,6 +2,93 @@
     let currentWriterStep = 1;
     let currentChapterIndex = 0;
     let verifyingEvidenceProjectId = null;
+    const writerAiTimers = new Map();
+
+    function setWriterStepStatus(step, message, tone = 'info', elapsedSec = null) {
+      const el = document.getElementById('wStep' + step + 'AiStatus');
+      if (!el) return;
+      if (tone === 'clear' || !message) {
+        el.classList.add('hidden');
+        el.replaceChildren();
+        return;
+      }
+      const toneMap = {
+        loading: 'px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 shrink-0 bg-accent-soft border-line-strong text-ink',
+        success: 'px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 shrink-0 bg-ok-soft border-ok-line text-ok',
+        error: 'px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 shrink-0 bg-danger-soft border-danger-line text-danger',
+        info: 'px-3 py-2 rounded-xl border text-xs font-semibold flex items-center justify-between gap-2 shrink-0 bg-subtle border-line text-ink',
+      };
+      el.className = toneMap[tone] || toneMap.info;
+
+      const left = document.createElement('div');
+      left.className = 'flex items-center gap-2 min-w-0';
+      if (tone === 'loading') {
+        const spinner = document.createElement('span');
+        spinner.className = 'inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin shrink-0';
+        left.appendChild(spinner);
+      }
+      const msgSpan = document.createElement('span');
+      msgSpan.className = 'truncate';
+      msgSpan.textContent = message;
+      left.appendChild(msgSpan);
+
+      const right = document.createElement('span');
+      right.className = 'text-[11px] font-mono opacity-80 shrink-0';
+      right.textContent = elapsedSec !== null ? `已耗时 ${elapsedSec}s` : '';
+
+      el.replaceChildren(left, right);
+    }
+
+    function startWriterAiTask(step, btn, { loadingLabel, statusMessage, toastMessage, restoreHtml } = {}) {
+      if (writerAiTimers.has(step)) {
+        clearInterval(writerAiTimers.get(step));
+        writerAiTimers.delete(step);
+      }
+      const originalHtml = restoreHtml || (btn ? btn.innerHTML : '');
+      if (btn) {
+        btn.disabled = true;
+        btn.replaceChildren();
+        const wrap = document.createElement('span');
+        wrap.className = 'inline-flex items-center gap-1.5';
+        const spinner = document.createElement('span');
+        spinner.className = 'inline-block w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin shrink-0';
+        const textSpan = document.createElement('span');
+        textSpan.textContent = loadingLabel || '正在处理...';
+        wrap.append(spinner, textSpan);
+        btn.appendChild(wrap);
+      }
+
+      const startedAt = Date.now();
+      const msg = statusMessage || loadingLabel || '正在处理中...';
+      setWriterStepStatus(step, msg, 'loading', 0);
+      if (typeof showToast === 'function') showToast(toastMessage || msg);
+
+      const timer = setInterval(() => {
+        const sec = Math.floor((Date.now() - startedAt) / 1000);
+        setWriterStepStatus(step, msg, 'loading', sec);
+      }, 1000);
+      writerAiTimers.set(step, timer);
+
+      let finished = false;
+      return {
+        finish(ok, finalMessage) {
+          if (finished) return;
+          finished = true;
+          clearInterval(timer);
+          if (writerAiTimers.get(step) === timer) writerAiTimers.delete(step);
+          if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+          }
+          const elapsed = Math.max(1, Math.round((Date.now() - startedAt) / 1000));
+          if (finalMessage) {
+            setWriterStepStatus(step, finalMessage, ok ? 'success' : 'error', ok ? elapsed : null);
+          } else {
+            setWriterStepStatus(step, '', 'clear');
+          }
+        },
+      };
+    }
 
     async function loadWriterProjectData(projectId) {
       document.getElementById('writerProjectIdBadge').textContent = projectId;
@@ -30,6 +117,7 @@
       pendingHumanizeMeta = null;
       updateHumanizeVersionUI(null);
       if (typeof resetEditorialRevisionWorkbench === 'function') resetEditorialRevisionWorkbench();
+      for (let s = 1; s <= 5; s++) setWriterStepStatus(s, '', 'clear');
       currentChapterIndex = 0;
       refreshWriterPromptsButtonStatus(projectId);
 
@@ -260,12 +348,15 @@
         const btn = document.getElementById(`stepBtn${i}`);
         if (panel) panel.classList.toggle('hidden', i !== step);
         if (btn) {
+          const numBadge = btn.querySelector('span');
           if (i === step) {
             btn.setAttribute('aria-current', 'step');
-            btn.className = 'px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-purple-600/20 border-purple-500 text-white shadow cursor-pointer';
+            btn.className = 'px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-surface border-ink text-ink shadow-sm cursor-pointer';
+            if (numBadge) numBadge.className = 'w-5 h-5 rounded-full bg-action text-ink-inverse font-bold flex items-center justify-center text-[11px] shrink-0';
           } else {
             btn.removeAttribute('aria-current');
-            btn.className = 'px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-gray-900 border-gray-800 text-gray-400 hover:text-white cursor-pointer';
+            btn.className = 'px-2.5 py-1.5 rounded-xl border text-left transition flex items-center gap-2 bg-surface border-line text-ink-muted hover:text-ink cursor-pointer';
+            if (numBadge) numBadge.className = 'w-5 h-5 rounded-full bg-subtle text-ink-secondary font-bold flex items-center justify-center text-[11px] shrink-0';
           }
         }
       }
@@ -287,15 +378,23 @@
 
     // 渲染证据卡列表
     async function aiAutoResearchMaterials() {
+      const statusStep = currentWriterStep || 1;
       const title = document.getElementById('wInputTitle').value.trim();
       if (!title) {
-        alert('请先在上方输入视频题目（例如：为什么日本旅馆总有那么多小碟子？）');
+        const msg = '请先在上方输入视频题目（例如：为什么日本旅馆总有那么多小碟子？）';
+        setWriterStepStatus(statusStep, msg, 'error');
+        showToast('⚠️ ' + msg);
+        alert(msg);
         return;
       }
       const model = document.getElementById('wInputModel').value;
       const btn = document.getElementById('btnAutoResearchMaterials');
-      btn.disabled = true;
-      btn.innerHTML = '<span>⏳ 正在联网考证事实真相...</span>';
+      const task = startWriterAiTask(statusStep, btn, {
+        loadingLabel: '正在联网考证事实真相...',
+        statusMessage: '🌐 正在联网检索权威资料并整理事实线索，请稍候...',
+        toastMessage: '🌐 已启动联网调查事实真相，请稍候...',
+        restoreHtml: '<span>🌐 联网调查事实补充资料</span>',
+      });
       try {
         const res = await fetch('/api/writer/ai/research-materials?project=' + activeProjectId, {
           method: 'POST',
@@ -307,11 +406,12 @@
             baseUrl: visualConfig.baseUrl,
           }),
         });
-        const data = await res.json();
-        if (data.ok && data.materials) {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok && data.materials) {
           document.getElementById('wInputMaterials').value = data.materials;
           document.getElementById('wMaterialWordCount').textContent = '已自动考证补充 ' + data.materials.length + ' 字事实资料';
           setWriterPersistenceStatus('saved');
+          task.finish(true, '✅ 事实调查完毕，已补充 ' + data.materials.length + ' 字参考资料');
           showToast('✅ 事实调查完毕，已为您自动充实参考资料库！');
           showCompletionModal({
             icon: '🌐',
@@ -319,13 +419,18 @@
             message: '已完成联网事实考证，共补充 ' + data.materials.length + ' 字参考资料。',
           });
         } else {
-          alert('调查资料失败: ' + (data.error || '网关响应异常'));
+          const errMsg = '调查资料失败: ' + (data.error || `HTTP ${res.status || '网关响应异常'}`);
+          task.finish(false, errMsg);
+          showToast('❌ ' + errMsg);
+          alert(errMsg);
         }
       } catch (err) {
-        alert('网络考证异常: ' + err.message);
+        const errMsg = '网络考证异常: ' + err.message;
+        task.finish(false, errMsg);
+        showToast('❌ ' + errMsg);
+        alert(errMsg);
       } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<span>🌐 联网调查事实补充资料</span>';
+        task.finish(false);
       }
     }
 
@@ -337,15 +442,22 @@
       const btn = document.getElementById('btnAiBrief');
 
       if (!title) {
-        alert('请在左侧填入视频标题！');
+        const msg = '请在左侧填入视频标题！';
+        setWriterStepStatus(1, msg, 'error');
+        showToast('⚠️ ' + msg);
+        alert(msg);
         return;
       }
 
       const isAutoResearching = !materials && !writerData?.materials;
-      btn.disabled = true;
-      btn.innerHTML = isAutoResearching
-        ? '<span>🌐 正在自动调查事实真相并生成 Brief...</span>'
-        : '<span>⏳ AI 正在深度分析资料生成 Brief...</span>';
+      const task = startWriterAiTask(1, btn, {
+        loadingLabel: isAutoResearching ? '正在联网调查并生成 Brief...' : 'AI 正在分析资料生成 Brief...',
+        statusMessage: isAutoResearching
+          ? '🌐 资料库为空，正在自动联网调查事实并生成 Brief 立项...'
+          : '🤖 AI 正在深度分析资料并生成 Brief 立项，请稍候...',
+        toastMessage: isAutoResearching ? '🌐 正在自动调查事实真相并生成 Brief...' : '🤖 正在生成 Brief 立项...',
+        restoreHtml: '<span>🤖 AI 分析资料并生成 Brief</span>',
+      });
 
       try {
         const res = await fetch('/api/writer/ai/generate-brief?project=' + activeProjectId, {
@@ -360,8 +472,8 @@
             baseUrl: visualConfig.baseUrl,
           }),
         });
-        const data = await res.json();
-        if (data.ok && data.brief) {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok && data.brief) {
           if (!writerData) writerData = {};
           writerData.brief = data.brief;
           const resolvedTitle = (data.brief.title || title || '').trim();
@@ -380,8 +492,10 @@
           if (data.researchedMaterials) {
             document.getElementById('wInputMaterials').value = data.researchedMaterials;
             document.getElementById('wMaterialWordCount').textContent = '已自动考证补充 ' + data.researchedMaterials.length + ' 字事实资料';
+            task.finish(true, '✅ 已自动补充事实资料并生成 Brief 立项');
             showToast('🌐 已自动调查事实真相并补充资料库，Brief 生成完毕！');
           } else {
+            task.finish(true, '✅ Brief 立项已生成并保存');
             showToast('✅ Brief 立项已成功生成！');
           }
           showCompletionModal({
@@ -390,13 +504,18 @@
             message: data.researchedMaterials ? '已自动调查补充事实资料并生成 Brief 立项！' : 'Brief 立项已生成并保存！',
           });
         } else {
-          alert('生成 Brief 失败: ' + (data.error || '大模型返回格式异常'));
+          const errMsg = '生成 Brief 失败: ' + (data.error || `HTTP ${res.status || '大模型返回格式异常'}`);
+          task.finish(false, errMsg);
+          showToast('❌ ' + errMsg);
+          alert(errMsg);
         }
       } catch (err) {
-        alert('请求失败: ' + err.message);
+        const errMsg = '请求失败: ' + err.message;
+        task.finish(false, errMsg);
+        showToast('❌ ' + errMsg);
+        alert(errMsg);
       } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<span>🤖 AI 分析资料并生成 Brief</span>';
+        task.finish(false);
       }
     }
 
@@ -454,15 +573,22 @@
       const btn = document.getElementById('btnAiEvidence');
 
       if (!title) {
-        alert('请在左侧填入视频标题！');
+        const msg = '请先填入视频标题（可在左栏或「参数与资料」抽屉中填写）！';
+        setWriterStepStatus(2, msg, 'error');
+        showToast('⚠️ ' + msg);
+        alert(msg);
         return;
       }
 
       const isAutoResearching = !materials && !writerData?.materials;
-      btn.disabled = true;
-      btn.innerHTML = isAutoResearching
-        ? '<span>🌐 正在自动调查事实真相并提取证据卡...</span>'
-        : '<span>⏳ 正在提取原子化证据卡...</span>';
+      const task = startWriterAiTask(2, btn, {
+        loadingLabel: isAutoResearching ? '正在联网调查并提取证据卡...' : '正在提取原子化证据卡...',
+        statusMessage: isAutoResearching
+          ? '🌐 资料库为空，正在联网检索事实并抽取原子化证据卡...'
+          : '🤖 正在从资料中提取并核验证据卡，请稍候...',
+        toastMessage: isAutoResearching ? '🌐 已启动自动调查并提取证据卡...' : '🤖 正在提取证据卡，请稍候...',
+        restoreHtml: '<span>🤖 从资料中提取证据卡</span>',
+      });
 
       try {
         const res = await fetch('/api/writer/ai/extract-evidence?project=' + activeProjectId, {
@@ -477,8 +603,8 @@
             baseUrl: visualConfig.baseUrl,
           }),
         });
-        const data = await res.json();
-        if (data.ok && Array.isArray(data.evidenceCards)) {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok && Array.isArray(data.evidenceCards)) {
           if (!writerData) writerData = {};
           writerData.brief = brief;
           writerData.materials = data.researchedMaterials || materials || writerData.materials;
@@ -489,8 +615,10 @@
           if (data.researchedMaterials) {
             document.getElementById('wInputMaterials').value = data.researchedMaterials;
             document.getElementById('wMaterialWordCount').textContent = '已自动考证补充 ' + data.researchedMaterials.length + ' 字事实资料';
+            task.finish(true, '✅ 已自动补全资料并提取 ' + data.evidenceCards.length + ' 张证据卡');
             showToast('🌐 事实真相调查完毕，已成功抽取 ' + data.evidenceCards.length + ' 张证据卡！');
           } else {
+            task.finish(true, '✅ 已成功提取 ' + data.evidenceCards.length + ' 张独立证据卡');
             showToast('✅ 已成功提取 ' + data.evidenceCards.length + ' 张独立证据卡！');
           }
           showCompletionModal({
@@ -501,25 +629,36 @@
           });
           if (data.pendingEvidenceCount) void autoVerifyPendingEvidence(activeProjectId);
         } else {
-          alert('提取证据卡失败: ' + (data.error || '格式异常'));
+          const errMsg = '提取证据卡失败: ' + (data.error || `HTTP ${res.status || '格式异常'}`);
+          task.finish(false, errMsg);
+          showToast('❌ ' + errMsg);
+          alert(errMsg);
         }
       } catch (err) {
-        alert('请求失败: ' + err.message);
+        const errMsg = '请求失败: ' + err.message;
+        task.finish(false, errMsg);
+        showToast('❌ ' + errMsg);
+        alert(errMsg);
       } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<span>🤖 从资料中提取证据卡</span>';
+        task.finish(false);
       }
     }
 
     function approveEvidenceCardsGate() {
       const count = writerData?.evidenceCards?.length || 0;
       if (count === 0) {
-        alert('当前尚未提取或录入任何证据卡，无法开启大纲策划！');
+        const msg = '当前尚未提取或录入任何证据卡，无法开启大纲策划！';
+        setWriterStepStatus(2, msg, 'error');
+        showToast('⚠️ ' + msg);
+        alert(msg);
         return;
       }
       const approved = writerData.evidenceCards.filter((card) => card.claim_type !== 'unverified_fact').length;
       if (approved === 0) {
-        alert('当前证据卡均未通过自动核验，已列为人工复核候选；请先逐张复核，再进入大纲策划。');
+        const msg = '当前证据卡均未通过自动核验，已列为人工复核候选；请先逐张复核，再进入大纲策划。';
+        setWriterStepStatus(2, msg, 'error');
+        showToast('⚠️ ' + msg);
+        alert(msg);
         return;
       }
       const unresolved = writerData.evidenceCards.filter((card) => card.claim_type === 'unverified_fact').length;
@@ -532,9 +671,12 @@
     async function aiBuildOutline() {
       const model = document.getElementById('wInputModel').value;
       const btn = document.getElementById('btnAiOutline');
-
-      btn.disabled = true;
-      btn.innerHTML = '<span>⏳ 规划大纲</span>';
+      const task = startWriterAiTask(3, btn, {
+        loadingLabel: '正在规划大纲...',
+        statusMessage: '📑 正在依据核验证据卡规划 5~7 章因果大纲，请稍候...',
+        toastMessage: '📑 正在规划大纲，请稍候...',
+        restoreHtml: '<span>🤖 基于证据卡生成大纲</span>',
+      });
       try {
         const res = await fetch('/api/writer/ai/build-outline?project=' + activeProjectId, {
           method: 'POST',
@@ -548,8 +690,8 @@
             baseUrl: visualConfig.baseUrl,
           }),
         });
-        const data = await res.json();
-        if (data.ok && data.outline) {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok && data.outline) {
           if (!writerData) writerData = {};
           writerData.outline = data.outline;
           if (Array.isArray(data.evidenceCards)) {
@@ -561,6 +703,7 @@
           renderChapterTabs();
           renderCurrentChapterEditor();
           setWriterPersistenceStatus('saved');
+          task.finish(true, '✅ 已生成 ' + (data.outline?.chapters?.length || 0) + ' 章结构化大纲，请人工审核');
           showToast('✅ 结构化大纲生成完成，请人工审核！');
           showCompletionModal({
             icon: '🗂️',
@@ -569,19 +712,27 @@
             detail: '请人工审核各章子问题与过渡后再进入单章撰写。',
           });
         } else {
-          alert('生成大纲失败: ' + (data.error || '大模型异常'));
+          const errMsg = '生成大纲失败: ' + (data.error || `HTTP ${res.status || '大模型异常'}`);
+          task.finish(false, errMsg);
+          showToast('❌ ' + errMsg);
+          alert(errMsg);
         }
       } catch (err) {
-        alert('请求失败: ' + err.message);
+        const errMsg = '请求失败: ' + err.message;
+        task.finish(false, errMsg);
+        showToast('❌ ' + errMsg);
+        alert(errMsg);
       } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<span>🤖 基于证据卡生成大纲</span>';
+        task.finish(false);
       }
     }
 
     function approveOutlineGate() {
       if (!writerData?.outline || !writerData.outline.chapters?.length) {
-        alert('请先生成大纲后再进行人工审核！');
+        const msg = '请先生成大纲后再进行人工审核！';
+        setWriterStepStatus(3, msg, 'error');
+        showToast('⚠️ ' + msg);
+        alert(msg);
         return;
       }
       writerData.outline.approval_status = 'approved';
@@ -599,18 +750,26 @@
       const btn = document.getElementById('btnAiWriteChapter');
 
       if (!targetCh) {
-        alert('未找到当前章节的大纲规划！');
+        const msg = '未找到当前章节的大纲规划！请先在阶段 3 生成并确认大纲。';
+        setWriterStepStatus(4, msg, 'error');
+        showToast('⚠️ ' + msg);
+        alert(msg);
         return;
       }
 
-      btn.disabled = true;
-      btn.innerHTML = '<span>⏳ 正在撰写本章 (四段式结构)...</span>';
+      const chapterNo = targetCh.chapter_number || currentChapterIndex + 1;
+      const task = startWriterAiTask(4, btn, {
+        loadingLabel: `正在撰写第 ${chapterNo} 章...`,
+        statusMessage: `✍️ 正在基于四段式结构与绑定证据卡撰写第 ${chapterNo} 章，请稍候...`,
+        toastMessage: `✍️ 正在撰写第 ${chapterNo} 章，请稍候...`,
+        restoreHtml: '<span>🤖 AI 撰写当前章节</span>',
+      });
       try {
         const res = await fetch('/api/writer/ai/write-chapter?project=' + activeProjectId, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            chapterNumber: targetCh.chapter_number || currentChapterIndex + 1,
+            chapterNumber: chapterNo,
             outline,
             evidenceCards: writerData.evidenceCards || [],
             model,
@@ -618,8 +777,8 @@
             baseUrl: visualConfig.baseUrl,
           }),
         });
-        const data = await res.json();
-        if (data.ok && data.chapter) {
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data.ok && data.chapter) {
           if (!Array.isArray(writerData.chapters)) writerData.chapters = [];
           const existIdx = writerData.chapters.findIndex((c) => Number(c.chapter_number) === Number(data.chapter.chapter_number));
           if (existIdx >= 0) {
@@ -629,6 +788,7 @@
           }
           renderCurrentChapterEditor();
           setWriterPersistenceStatus('saved');
+          task.finish(true, `✅ 第 ${data.chapter.chapter_number} 章撰写完成并已保存（${data.chapter.word_count} 字）`);
           showToast(`✅ 第 ${data.chapter.chapter_number} 章文案撰写完成（${data.chapter.word_count} 字）！`);
           showCompletionModal({
             icon: '✍️',
@@ -636,13 +796,18 @@
             message: '第 ' + data.chapter.chapter_number + ' 章文案撰写完成并已保存（共 ' + data.chapter.word_count + ' 字）。',
           });
         } else {
-          alert('撰写章节失败: ' + (data.error || '大模型异常'));
+          const errMsg = '撰写章节失败: ' + (data.error || `HTTP ${res.status || '大模型异常'}`);
+          task.finish(false, errMsg);
+          showToast('❌ ' + errMsg);
+          alert(errMsg);
         }
       } catch (err) {
-        alert('请求失败: ' + err.message);
+        const errMsg = '请求失败: ' + err.message;
+        task.finish(false, errMsg);
+        showToast('❌ ' + errMsg);
+        alert(errMsg);
       } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<span>🤖 AI 撰写当前章节</span>';
+        task.finish(false);
       }
     }
 

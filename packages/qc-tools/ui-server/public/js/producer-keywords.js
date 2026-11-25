@@ -6,10 +6,10 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
       const kw = String(bestKw || '').trim();
       if (!kw) {
         return `
-          <div class="flex items-center justify-between gap-1 text-[9px] text-cyan-300 font-bold">
+          <div class="flex items-center justify-between gap-1 text-[9px] text-info font-bold">
             <span>🔎 Step 0 · 最佳搜索词</span>
             <button type="button" id="kwGenBtn_${idx}" onclick="extractSearchKeywordsForRow(${idx})"
-              class="px-2 py-0.5 rounded bg-cyan-900/70 hover:bg-cyan-700 text-cyan-100 border border-cyan-500/40 font-bold text-[9px] cursor-pointer transition shrink-0">
+              class="px-2 py-0.5 rounded bg-info-soft hover:bg-info-solid text-info hover:text-ink-inverse border border-info-line font-bold text-[9px] cursor-pointer transition shrink-0">
               ✨ AI 提炼
             </button>
           </div>
@@ -19,16 +19,16 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
       const encodedKw = encodeURIComponent(kw);
       return `
         <div class="flex items-center gap-1 text-[10px]">
-          <span class="text-[9px] text-cyan-300 font-bold shrink-0" title="Step 0 · AI 唯一最佳搜索词">🔎</span>
-          <div class="flex-1 min-w-0 flex items-center justify-between rounded-md border border-cyan-500/50 bg-cyan-950/40 overflow-hidden">
-            <span class="px-2 py-0.5 text-cyan-100 font-bold truncate" title="${safeKw}">${safeKw}</span>
+          <span class="text-[9px] text-info font-bold shrink-0" title="Step 0 · AI 唯一最佳搜索词">🔎</span>
+          <div class="flex-1 min-w-0 flex items-center justify-between rounded-md border border-info-line bg-info-soft overflow-hidden">
+            <span class="px-2 py-0.5 text-info font-bold truncate" title="${safeKw}">${safeKw}</span>
             <button type="button" onclick="copySearchKeyword(event, decodeURIComponent('${encodedKw}'), this)" title="复制最佳搜索词「${safeKw}」"
-              class="px-1.5 py-1 border-l border-cyan-500/40 text-cyan-200 hover:text-white hover:bg-cyan-500/30 cursor-pointer flex items-center justify-center shrink-0 transition">
+              class="px-1.5 py-1 border-l border-info-line text-info hover:text-ink hover:bg-info-soft cursor-pointer flex items-center justify-center shrink-0 transition">
               ${GITHUB_COPY_SVG}
             </button>
           </div>
           <button type="button" id="kwGenBtn_${idx}" onclick="extractSearchKeywordsForRow(${idx}, { forceChange: true })" title="换一个不同的画面搜索词"
-            class="px-1.5 py-0.5 rounded bg-gray-900 hover:bg-cyan-900/60 text-gray-300 hover:text-cyan-200 border border-gray-700 hover:border-cyan-500/40 font-bold text-[9px] cursor-pointer transition shrink-0">
+            class="px-1.5 py-0.5 rounded bg-surface hover:bg-info-soft text-ink-secondary hover:text-info border border-line hover:border-info-line font-bold text-[9px] cursor-pointer transition shrink-0">
             🔄 换一个
           </button>
         </div>
@@ -57,10 +57,10 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
         }
         if (btnEl) {
           btnEl.innerHTML = GITHUB_CHECK_SVG;
-          btnEl.classList.add('text-emerald-400');
+          btnEl.classList.add('text-ok');
           setTimeout(() => {
             btnEl.innerHTML = GITHUB_COPY_SVG;
-            btnEl.classList.remove('text-emerald-400');
+            btnEl.classList.remove('text-ok');
           }, 1500);
         }
         showToast('📋 已复制搜索词：' + text);

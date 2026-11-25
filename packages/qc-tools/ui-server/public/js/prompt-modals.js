@@ -73,20 +73,20 @@
       }
       if (btn) {
         if (hasCustom) {
-          btn.classList.add('border-emerald-400/60', 'bg-emerald-600/25', 'text-emerald-200');
-          btn.classList.remove('border-teal-500/40', 'bg-teal-600/20', 'text-teal-300');
+          btn.classList.add('border-ok-line', 'bg-ok-soft', 'text-ok');
+          btn.classList.remove('border-info-line', 'bg-info-soft', 'text-info');
         } else {
-          btn.classList.remove('border-emerald-400/60', 'bg-emerald-600/25', 'text-emerald-200');
-          btn.classList.add('border-teal-500/40', 'bg-teal-600/20', 'text-teal-300');
+          btn.classList.remove('border-ok-line', 'bg-ok-soft', 'text-ok');
+          btn.classList.add('border-info-line', 'bg-info-soft', 'text-info');
         }
       }
       if (modalBadge) {
         if (hasCustom) {
           modalBadge.textContent = '已应用当前工程预设 (' + revText + ')';
-          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-900/70 text-emerald-300 border border-emerald-500/50';
+          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-ok-soft text-ok border border-ok-line';
         } else {
           modalBadge.textContent = '出厂默认基线';
-          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700';
+          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-subtle text-ink-secondary border border-line';
         }
       }
     }
@@ -195,9 +195,9 @@
         const isActive = grp.step === writerPromptsModalState.activeStep;
         const isModified = grp.items.some((it) => isWriterPromptStageModified(it.key));
         const cls = isActive
-          ? 'px-3 py-1.5 rounded-lg text-xs font-bold bg-teal-600/30 text-teal-200 border border-teal-400 shadow whitespace-nowrap cursor-pointer flex items-center gap-1.5'
-          : 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 whitespace-nowrap cursor-pointer flex items-center gap-1.5';
-        const dotHtml = isModified ? '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block" title="本步骤下有已自定义修改的提示词"></span>' : '';
+          ? 'px-3 py-1.5 rounded-lg text-xs font-bold bg-info-soft text-info border border-info-line shadow whitespace-nowrap cursor-pointer flex items-center gap-1.5'
+          : 'px-3 py-1.5 rounded-lg text-xs font-semibold bg-surface text-ink-muted hover:text-ink border border-line whitespace-nowrap cursor-pointer flex items-center gap-1.5';
+        const dotHtml = isModified ? '<span class="w-1.5 h-1.5 rounded-full bg-warn-solid inline-block" title="本步骤下有已自定义修改的提示词"></span>' : '';
         return '<button type="button" onclick="switchWriterPromptStep(' + grp.step + ')" class="' + cls + '">' + escapeHtml(grp.label) + dotHtml + '</button>';
       }).join('');
 
@@ -210,13 +210,13 @@
       }
 
       subContainer.classList.remove('hidden');
-      subContainer.innerHTML = '<span class="text-[11px] text-gray-400 font-semibold mr-1">包含模块：</span>' + activeGroup.items.map((st) => {
+      subContainer.innerHTML = '<span class="text-[11px] text-ink-muted font-semibold mr-1">包含模块：</span>' + activeGroup.items.map((st) => {
         const isActive = st.key === writerPromptsModalState.activeKey;
         const isModified = isWriterPromptStageModified(st.key);
         const cls = isActive
-          ? 'px-2.5 py-1 rounded-lg text-[11px] font-bold bg-purple-600/35 text-purple-200 border border-purple-400 shadow cursor-pointer flex items-center gap-1.5'
-          : 'px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-gray-900 text-gray-400 hover:text-white border border-gray-800 cursor-pointer flex items-center gap-1.5';
-        const dotHtml = isModified ? '<span class="w-1.5 h-1.5 rounded-full bg-amber-400 inline-block"></span>' : '';
+          ? 'px-2.5 py-1 rounded-lg text-[11px] font-bold bg-accent-soft text-accent border border-accent-line shadow cursor-pointer flex items-center gap-1.5'
+          : 'px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-surface text-ink-muted hover:text-ink border border-line cursor-pointer flex items-center gap-1.5';
+        const dotHtml = isModified ? '<span class="w-1.5 h-1.5 rounded-full bg-warn-solid inline-block"></span>' : '';
         return '<button type="button" data-stage-key="' + escapeHtml(st.key) + '" onclick="switchWriterPromptTab(this.dataset.stageKey)" class="' + cls + '">' + escapeHtml(st.label) + dotHtml + '</button>';
       }).join('');
     }
@@ -261,11 +261,11 @@
       if (stageKey === 'revision_quick_chips') {
         const invalid = (writerPromptsModalState.customQuickChips || []).some((c) => !String(c?.label || '').trim() || !String(c?.prompt || '').trim());
         if (invalid || (writerPromptsModalState.customQuickChips || []).length === 0) {
-          statusEl.className = 'text-[11px] text-rose-400 shrink-0';
+          statusEl.className = 'text-[11px] text-danger shrink-0';
           statusEl.textContent = '⚠️ 请至少保留 1 条快捷指令，且名称与提示词内容均不能为空。';
           return;
         }
-        statusEl.className = 'text-[11px] text-gray-400 shrink-0';
+        statusEl.className = 'text-[11px] text-ink-muted shrink-0';
         statusEl.textContent = isWriterPromptStageModified(stageKey)
           ? '✏️ 快捷指令已修改（点击右下角「保存并应用到当前工程」后生效，仅影响当前工程）。'
           : '✅ 当前为系统出厂默认快捷指令。';
@@ -274,21 +274,21 @@
       const builtin = writerPromptsModalState.builtins[stageKey];
       if (!builtin) return;
       if (!text || !text.trim()) {
-        statusEl.className = 'text-[11px] text-rose-400 shrink-0';
+        statusEl.className = 'text-[11px] text-danger shrink-0';
         statusEl.textContent = '⚠️ 提示词不能为空。';
         return;
       }
       if (builtin.require_json && !/json/i.test(text)) {
-        statusEl.className = 'text-[11px] text-amber-400 shrink-0';
+        statusEl.className = 'text-[11px] text-warn shrink-0';
         statusEl.textContent = '⚠️ 本阶段需要后端解析 JSON，请确保提示词中保留 JSON 输出格式要求。';
         return;
       }
       if (builtin.require_audit_marker && !text.includes('<<<AUDIT>>>')) {
-        statusEl.className = 'text-[11px] text-amber-300 shrink-0';
+        statusEl.className = 'text-[11px] text-warn shrink-0';
         statusEl.textContent = '💡 提示：保留 <<<AUDIT>>> 尾部标记可自动生成润色审计对比报告。';
         return;
       }
-      statusEl.className = 'text-[11px] text-gray-400 shrink-0';
+      statusEl.className = 'text-[11px] text-ink-muted shrink-0';
       statusEl.textContent = isWriterPromptStageModified(stageKey)
         ? '✏️ 本阶段已修改（点击右下角「保存并应用到当前工程」后生效，仅影响当前工程）。'
         : '✅ 当前为系统出厂默认模板。';
@@ -299,20 +299,20 @@
       if (!listEl) return;
       const chips = writerPromptsModalState.customQuickChips || [];
       if (chips.length === 0) {
-        listEl.innerHTML = '<div class="text-center py-6 text-gray-500 text-xs">暂无快捷指令，点击上方「➕ 新增快捷指令」添加。</div>';
+        listEl.innerHTML = '<div class="text-center py-6 text-ink-muted text-xs">暂无快捷指令，点击上方「➕ 新增快捷指令」添加。</div>';
         return;
       }
       listEl.innerHTML = chips.map((c, idx) => `
-        <div class="p-2.5 rounded-xl bg-[#030712] border border-gray-800 space-y-2">
+        <div class="p-2.5 rounded-xl bg-subtle border border-line space-y-2">
           <div class="flex items-center justify-between gap-2">
             <input type="text" value="${escapeHtml(c.label)}" oninput="onWriterQuickChipChange(${idx}, 'label', this.value)" placeholder="按钮名称"
-              class="flex-1 bg-gray-900 text-amber-200 font-bold text-xs px-2.5 py-1.5 rounded-lg border border-gray-700 focus:outline-none focus:border-teal-400" />
-            <button type="button" onclick="deleteWriterQuickChipRow(${idx})" class="px-2 py-1 rounded-lg bg-rose-950/40 hover:bg-rose-900/60 border border-rose-500/30 text-rose-300 text-[11px] shrink-0 cursor-pointer">
+              class="flex-1 bg-input text-warn font-bold text-xs px-2.5 py-1.5 rounded-lg border border-line focus:outline-none focus:border-ink" />
+            <button type="button" onclick="deleteWriterQuickChipRow(${idx})" class="px-2 py-1 rounded-lg bg-danger-soft hover:bg-danger-soft border border-danger-line text-danger text-[11px] shrink-0 cursor-pointer">
               ✕ 删除
             </button>
           </div>
           <textarea rows="2" oninput="onWriterQuickChipChange(${idx}, 'prompt', this.value)" placeholder="点击按钮后填入审稿意见框的完整 Prompt 提示词..."
-            class="w-full bg-gray-900 text-gray-100 text-xs p-2 rounded-lg border border-gray-700 focus:outline-none focus:border-teal-400 leading-relaxed resize-y">${escapeHtml(c.prompt)}</textarea>
+            class="w-full bg-input text-ink text-xs p-2 rounded-lg border border-line focus:outline-none focus:border-ink leading-relaxed resize-y">${escapeHtml(c.prompt)}</textarea>
         </div>
       `).join('');
     }
@@ -509,15 +509,15 @@
       const revText = presetObj?.revision ? ('v' + presetObj.revision) : '自定义';
       if (btnStatus) {
         btnStatus.textContent = hasCustom ? ('已自定义 (' + revText + ')') : '出厂默认';
-        btnStatus.className = hasCustom ? 'text-amber-300 font-extrabold' : 'text-teal-200 font-extrabold';
+        btnStatus.className = hasCustom ? 'text-warn font-extrabold' : 'text-info font-extrabold';
       }
       if (modalBadge) {
         if (hasCustom) {
           modalBadge.textContent = '已自定义 (' + revText + ')';
-          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-warn-soft text-warn border border-warn-line';
         } else {
           modalBadge.textContent = '出厂默认基线';
-          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-gray-800 text-gray-300 border border-gray-700';
+          modalBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-subtle text-ink-secondary border border-line';
         }
       }
     }
@@ -585,9 +585,9 @@
         const modified = isProducerStageModified(st.key);
         return `
           <button type="button" onclick="switchProducerPromptStage('${st.key}')"
-            class="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${isActive ? 'bg-teal-600 text-white shadow' : 'bg-gray-900 text-gray-300 hover:bg-gray-800 border border-gray-800'}">
+            class="px-3 py-1.5 rounded-lg text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${isActive ? 'bg-ok-solid text-ink-inverse shadow' : 'bg-surface text-ink-secondary hover:bg-muted border border-line'}">
             <span>${st.shortLabel}</span>
-            ${modified ? '<span class="w-1.5 h-1.5 rounded-full bg-amber-300" title="已自定义"></span>' : ''}
+            ${modified ? '<span class="w-1.5 h-1.5 rounded-full bg-warn-solid" title="已自定义"></span>' : ''}
           </button>
         `;
       }).join('');
@@ -651,7 +651,7 @@
         });
         const data = await res.json();
         if (!res.ok || !data.ok) {
-          if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 保存失败：' + escapeHtml(data?.error || '未知错误') + '</span>';
+          if (statusEl) statusEl.innerHTML = '<span class="text-danger font-bold">❌ 保存失败：' + escapeHtml(data?.error || '未知错误') + '</span>';
           return;
         }
         producerPromptsModalState.preset = data.preset || null;
@@ -665,7 +665,7 @@
           message: '视觉分镜台提示词修改已保存（仅对当前工程生效）！',
         });
       } catch (err) {
-        if (statusEl) statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 保存异常：' + escapeHtml(err.message) + '</span>';
+        if (statusEl) statusEl.innerHTML = '<span class="text-danger font-bold">❌ 保存异常：' + escapeHtml(err.message) + '</span>';
       } finally {
         if (btn) {
           btn.disabled = false;

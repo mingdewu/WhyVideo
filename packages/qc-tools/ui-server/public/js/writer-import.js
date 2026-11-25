@@ -6,32 +6,32 @@ let step1SelectedScriptText = '';
       const container = document.getElementById('wStep1ScannedList');
       if (!container) return;
       container.innerHTML =
-        '<div class="text-center py-6 text-gray-400 text-xs flex items-center justify-center gap-2"><span class="animate-spin">🔄</span> 正在检索 exports/ 目录下的可用文案...</div>';
+        '<div class="text-center py-6 text-ink-muted text-xs flex items-center justify-center gap-2"><span class="animate-spin">🔄</span> 正在检索 exports/ 目录下的可用文案...</div>';
       try {
         const res = await fetch('/api/scan-local-scripts');
         const data = await res.json();
         step1ScannedScripts = data.scripts || [];
         if (step1ScannedScripts.length === 0) {
           container.innerHTML =
-            '<div class="text-center py-6 text-gray-500 text-xs">exports/ 目录下未发现 .txt / .md / .json 文案文件。</div>';
+            '<div class="text-center py-6 text-ink-muted text-xs">exports/ 目录下未发现 .txt / .md / .json 文案文件。</div>';
           return;
         }
 
         container.innerHTML = step1ScannedScripts
           .map(
             (s) => `
-          <div class="p-3 rounded-xl bg-gray-900 border border-gray-800 hover:border-violet-500/50 transition flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div class="p-3 rounded-xl bg-surface border border-line hover:border-ink transition flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div class="space-y-1 flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs font-bold text-white truncate max-w-md">${s.title}</span>
-                <span class="text-[10px] font-mono px-2 py-0.5 rounded ${s.isFullScript ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30 font-bold' : 'bg-gray-800 text-gray-400'}">
+                <span class="text-xs font-bold text-ink truncate max-w-md">${s.title}</span>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded ${s.isFullScript ? 'bg-accent-soft text-accent border border-accent-line font-bold' : 'bg-subtle text-ink-muted'}">
                   ${s.isFullScript ? '✨ 完整长片文案' : '📄 章节草稿'}
                 </span>
-                <span class="text-[10px] text-gray-400">${s.wordCount} 字 · ${s.sizeKb} KB · ${s.ext}</span>
+                <span class="text-[10px] text-ink-muted">${s.wordCount} 字 · ${s.sizeKb} KB · ${s.ext}</span>
               </div>
-              <div class="text-[11px] text-gray-400 line-clamp-1 font-mono">${s.preview || s.filename}</div>
+              <div class="text-[11px] text-ink-muted line-clamp-1 font-mono">${s.preview || s.filename}</div>
             </div>
-            <button type="button" onclick="selectStep1Script('${s.filename}')" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-violet-600 hover:bg-violet-500 text-white shrink-0 transition flex items-center gap-1 shadow cursor-pointer">
+            <button type="button" onclick="selectStep1Script('${s.filename}')" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-action hover:bg-action-hover text-ink-inverse shrink-0 transition flex items-center gap-1 shadow cursor-pointer">
               <span>📥 选择并切镜</span>
             </button>
           </div>
@@ -39,7 +39,7 @@ let step1SelectedScriptText = '';
           )
           .join('');
       } catch (err) {
-        container.innerHTML = '<div class="text-center py-4 text-rose-400 text-xs">扫描失败: ' + err.message + '</div>';
+        container.innerHTML = '<div class="text-center py-4 text-danger text-xs">扫描失败: ' + err.message + '</div>';
       }
     }
 
@@ -152,9 +152,9 @@ let step1SelectedScriptText = '';
       tabs.forEach((t) => {
         const btn = document.getElementById(btnMap[t]);
         if (t === tab) {
-          btn.className = 'px-3 py-1 rounded-lg bg-violet-600 text-white shadow transition cursor-pointer';
+          btn.className = 'px-3 py-1 rounded-lg bg-action text-ink-inverse shadow transition cursor-pointer';
         } else {
-          btn.className = 'px-3 py-1 rounded-lg text-gray-400 hover:text-white transition cursor-pointer';
+          btn.className = 'px-3 py-1 rounded-lg text-ink-muted hover:text-ink transition cursor-pointer';
         }
       });
     }
@@ -162,32 +162,32 @@ let step1SelectedScriptText = '';
     async function loadScannedScripts() {
       const container = document.getElementById('scannedScriptsList');
       container.innerHTML =
-        '<div class="text-center py-6 text-gray-400 text-xs flex items-center justify-center gap-2"><span class="animate-spin">🔄</span> 正在扫描 exports/ 目录下的可用文案...</div>';
+        '<div class="text-center py-6 text-ink-muted text-xs flex items-center justify-center gap-2"><span class="animate-spin">🔄</span> 正在扫描 exports/ 目录下的可用文案...</div>';
       try {
         const res = await fetch('/api/scan-local-scripts');
         const data = await res.json();
         scannedExportScripts = data.scripts || [];
         if (scannedExportScripts.length === 0) {
           container.innerHTML =
-            '<div class="text-center py-6 text-gray-500 text-xs">exports/ 目录下未发现 .txt / .md / .json 文案文件，请使用“剪贴板快速粘贴”或“文件拖拽”。</div>';
+            '<div class="text-center py-6 text-ink-muted text-xs">exports/ 目录下未发现 .txt / .md / .json 文案文件，请使用“剪贴板快速粘贴”或“文件拖拽”。</div>';
           return;
         }
 
         container.innerHTML = scannedExportScripts
           .map(
             (s) => `
-          <div class="p-3 rounded-xl bg-gray-900 border border-gray-800 hover:border-violet-500/50 transition flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div class="p-3 rounded-xl bg-surface border border-line hover:border-ink transition flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div class="space-y-1 flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
-                <span class="text-xs font-bold text-white truncate max-w-md">${s.title}</span>
-                <span class="text-[10px] font-mono px-2 py-0.5 rounded ${s.isFullScript ? 'bg-violet-500/20 text-violet-300 border border-violet-500/30 font-bold' : 'bg-gray-800 text-gray-400'}">
+                <span class="text-xs font-bold text-ink truncate max-w-md">${s.title}</span>
+                <span class="text-[10px] font-mono px-2 py-0.5 rounded ${s.isFullScript ? 'bg-accent-soft text-accent border border-accent-line font-bold' : 'bg-subtle text-ink-muted'}">
                   ${s.isFullScript ? '✨ 完整长片文案' : '📄 章节草稿'}
                 </span>
-                <span class="text-[10px] text-gray-400">${s.wordCount} 字 · ${s.sizeKb} KB · ${s.ext}</span>
+                <span class="text-[10px] text-ink-muted">${s.wordCount} 字 · ${s.sizeKb} KB · ${s.ext}</span>
               </div>
-              <div class="text-[11px] text-gray-400 line-clamp-1 font-mono">${s.preview || s.filename}</div>
+              <div class="text-[11px] text-ink-muted line-clamp-1 font-mono">${s.preview || s.filename}</div>
             </div>
-            <button type="button" onclick="selectScannedScript('${s.filename}')" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-violet-600/90 hover:bg-violet-600 text-white shrink-0 transition flex items-center gap-1 shadow cursor-pointer">
+            <button type="button" onclick="selectScannedScript('${s.filename}')" class="px-3.5 py-1.5 text-xs font-bold rounded-lg bg-accent-soft hover:bg-action-hover text-ink shrink-0 transition flex items-center gap-1 shadow cursor-pointer">
               <span>📥 载入并智能切镜</span>
             </button>
           </div>
@@ -195,14 +195,14 @@ let step1SelectedScriptText = '';
           )
           .join('');
       } catch (e) {
-        container.innerHTML = '<div class="text-center py-4 text-rose-400 text-xs">扫描失败: ' + e.message + '</div>';
+        container.innerHTML = '<div class="text-center py-4 text-danger text-xs">扫描失败: ' + e.message + '</div>';
       }
     }
 
     async function selectScannedScript(filename) {
       const script = scannedExportScripts.find((s) => s.filename === filename);
       if (!script) return;
-      document.getElementById('importStatusMessage').innerHTML = '<span class="text-amber-400">正在读取文案内容...</span>';
+      document.getElementById('importStatusMessage').innerHTML = '<span class="text-warn">正在读取文案内容...</span>';
       try {
         const res = await fetch('/api/get-export-script?filename=' + encodeURIComponent(filename));
         const data = await res.json();
@@ -211,7 +211,7 @@ let step1SelectedScriptText = '';
           document.getElementById('importProjectTitle').value = data.title || script.title;
           document.getElementById('importRawText').value = data.content;
           document.getElementById('importStatusMessage').innerHTML =
-            '<span class="text-emerald-400 font-bold">✅ 已成功载入 《' + (data.title || script.title) + '》</span>';
+            '<span class="text-ok font-bold">✅ 已成功载入 《' + (data.title || script.title) + '》</span>';
           triggerUpdatePreview();
         } else {
           alert('读取文案失败: ' + data.error);
@@ -239,7 +239,7 @@ let step1SelectedScriptText = '';
         document.getElementById('statDurationMin').textContent = '0.0';
         document.getElementById('statScenesCount').textContent = '0';
         document.getElementById('segmentPreviewList').innerHTML =
-          '<div class="text-gray-500 text-center py-3 text-[11px]">暂无预览数据，请选择文案或粘贴内容</div>';
+          '<div class="text-ink-muted text-center py-3 text-[11px]">暂无预览数据，请选择文案或粘贴内容</div>';
         return;
       }
 
@@ -269,13 +269,13 @@ let step1SelectedScriptText = '';
             previewEl.innerHTML = data.sampleScenes
               .map(
                 (sc) => `
-              <div class="p-2 rounded bg-gray-950 border border-gray-800 text-[11px] space-y-0.5">
-                <div class="flex items-center justify-between text-gray-400">
-                  <span class="text-amber-400 font-bold">${sc.scene_id} · [${sc.chapter_ref}]</span>
-                  <span class="text-[10px] text-gray-500">${(sc.start_ms / 1000).toFixed(1)}s ~ ${(sc.end_ms / 1000).toFixed(1)}s (${(sc.duration_ms / 1000).toFixed(1)}s)</span>
+              <div class="p-2 rounded bg-subtle border border-line text-[11px] space-y-0.5">
+                <div class="flex items-center justify-between text-ink-muted">
+                  <span class="text-warn font-bold">${sc.scene_id} · [${sc.chapter_ref}]</span>
+                  <span class="text-[10px] text-ink-muted">${(sc.start_ms / 1000).toFixed(1)}s ~ ${(sc.end_ms / 1000).toFixed(1)}s (${(sc.duration_ms / 1000).toFixed(1)}s)</span>
                 </div>
-                <div class="text-gray-200 line-clamp-1">${sc.narration_text}</div>
-                <div class="text-[10px] text-purple-400 font-semibold">🎯 提炼关键词: ${sc.content_keywords?.join('、')}</div>
+                <div class="text-ink line-clamp-1">${sc.narration_text}</div>
+                <div class="text-[10px] text-accent font-semibold">🎯 提炼关键词: ${sc.content_keywords?.join('、')}</div>
               </div>
             `
               )
@@ -289,17 +289,17 @@ let step1SelectedScriptText = '';
 
     function onImportDragOver(e) {
       e.preventDefault();
-      document.getElementById('importDropZone').classList.add('border-violet-500', 'bg-violet-950/20');
+      document.getElementById('importDropZone').classList.add('border-accent-line', 'bg-accent-soft');
     }
 
     function onImportDragLeave(e) {
       e.preventDefault();
-      document.getElementById('importDropZone').classList.remove('border-violet-500', 'bg-violet-950/20');
+      document.getElementById('importDropZone').classList.remove('border-accent-line', 'bg-accent-soft');
     }
 
     function onImportDrop(e) {
       e.preventDefault();
-      document.getElementById('importDropZone').classList.remove('border-violet-500', 'bg-violet-950/20');
+      document.getElementById('importDropZone').classList.remove('border-accent-line', 'bg-accent-soft');
       if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
         handleImportFile(e.dataTransfer.files[0]);
       }
@@ -342,7 +342,7 @@ let step1SelectedScriptText = '';
 
       btn.disabled = true;
       btn.innerHTML = '<span>⏳ 正在切镜并构建工程...</span>';
-      statusEl.innerHTML = '<span class="text-amber-400">正在生成镜头清单、时间轴与 Remotion 属性...</span>';
+      statusEl.innerHTML = '<span class="text-warn">正在生成镜头清单、时间轴与 Remotion 属性...</span>';
 
       try {
         const res = await fetch('/api/import-script-project', {
@@ -352,7 +352,7 @@ let step1SelectedScriptText = '';
         });
         const data = await res.json();
         if (data.ok) {
-          statusEl.innerHTML = '<span class="text-emerald-400 font-bold">🎉 工程构建完成！</span>';
+          statusEl.innerHTML = '<span class="text-ok font-bold">🎉 工程构建完成！</span>';
           showToast('🎉 工程《' + data.title + '》创建成功！共 ' + data.totalScenes + ' 个镜头');
           toggleImportScriptModal();
 
@@ -364,11 +364,11 @@ let step1SelectedScriptText = '';
           await loadProjects();
           await loadWorkflow();
         } else {
-          statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ ' + (data.error || '创建失败') + '</span>';
+          statusEl.innerHTML = '<span class="text-danger font-bold">❌ ' + (data.error || '创建失败') + '</span>';
           alert('创建失败: ' + (data.error || '未知错误'));
         }
       } catch (e) {
-        statusEl.innerHTML = '<span class="text-rose-400 font-bold">❌ 网络异常: ' + e.message + '</span>';
+        statusEl.innerHTML = '<span class="text-danger font-bold">❌ 网络异常: ' + e.message + '</span>';
         alert('导入异常: ' + e.message);
       } finally {
         btn.disabled = false;

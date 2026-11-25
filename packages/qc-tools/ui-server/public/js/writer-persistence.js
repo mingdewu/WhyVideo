@@ -24,16 +24,24 @@ let savedFinalScriptText = '';
       const projectId = activeProjectId;
       const before = document.getElementById('wFinalScriptFullText').value;
       const btn = document.getElementById('btnAiFinalize');
-      btn.disabled = true;
-      btn.innerHTML = '<span>⏳ 正在全文去重去伪结尾与统稿...</span>';
+      const task = startWriterAiTask(5, btn, {
+        loadingLabel: '正在全文统稿...',
+        statusMessage: '🏁 正在进行跨章去重、剔除伪结尾与全文统稿，请稍候...',
+        toastMessage: '🏁 正在全文统稿，请稍候...',
+        restoreHtml: '<span>🤖 全文统稿</span>',
+      });
       try {
         const res = await fetch('/api/writer/ai/finalize-script?project=' + encodeURIComponent(projectId), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ outline: writerData?.outline, chapters: writerData?.chapters || [], evidenceCards: writerData?.evidenceCards || [], model: document.getElementById('wInputModel').value, apiKey: visualConfig.apiKey, baseUrl: visualConfig.baseUrl }),
         });
-        const data = await res.json();
-        if (!res.ok || !data.ok || !data.finalScript) throw new Error(data.error || '异常');
-        if (activeProjectId !== projectId) { showToast('工程已切换，本次统稿结果未保存。'); return; }
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || !data.ok || !data.finalScript) throw new Error(data.error || `HTTP ${res.status || '异常'}`);
+        if (activeProjectId !== projectId) {
+          task.finish(false, '工程已切换，本次统稿结果未保存。');
+          showToast('工程已切换，本次统稿结果未保存。');
+          return;
+        }
         pendingFinalizedScript = { projectId, before, result: data.finalScript, fallback: data.usedFallback };
         const note = document.getElementById('wFinalizeReviewNote');
         note.textContent = data.usedFallback
@@ -42,6 +50,7 @@ let savedFinalScriptText = '';
         setStep5StageMode('finalize_diff');
         renderFinalizeDiffView();
         document.getElementById('wStep5MainStage')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        task.finish(true, data.usedFallback ? '✅ 章节合并稿已生成（待审阅替换）' : '✅ 统稿结果已生成，请审阅对比后确认替换');
         showToast('统稿结果已生成，请先审阅并确认。');
         showCompletionModal({
           icon: '🤖',
@@ -49,8 +58,14 @@ let savedFinalScriptText = '';
           message: data.usedFallback ? '章节合并稿已生成（模型未返回完整统稿，请复核）。' : '全文去重、去伪结尾与统稿结果已生成！',
           detail: '请先审阅左右对比差异，确认后点击「✅ 确认替换并保存」。',
         });
-      } catch (err) { alert('全文统稿失败: ' + err.message); }
-      finally { btn.disabled = false; btn.innerHTML = '<span>🤖 全文统稿</span>'; }
+      } catch (err) {
+        const errMsg = '全文统稿失败: ' + err.message;
+        task.finish(false, errMsg);
+        showToast('❌ ' + errMsg);
+        alert(errMsg);
+      } finally {
+        task.finish(false);
+      }
     }
 
     function renderFinalizeDiffView() {
@@ -104,14 +119,14 @@ let savedFinalScriptText = '';
       const badge = document.getElementById('writerPersistenceStatusBadge');
       if (!badge) return;
       if (mode === 'dirty') {
-        badge.className = 'px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+        badge.className = 'px-2.5 py-0.5 rounded-full font-bold bg-warn-soft text-warn border border-warn-line';
         badge.textContent = customText || '● 有未保存修改（点击保存写盘）';
       } else if (mode === 'saving') {
-        badge.className = 'px-2.5 py-0.5 rounded-full font-bold bg-sky-500/20 text-sky-300 border border-sky-500/40';
+        badge.className = 'px-2.5 py-0.5 rounded-full font-bold bg-info-soft text-info border border-info-line';
         badge.textContent = customText || '⏳ 正在写入本地...';
       } else {
         const nowStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-        badge.className = 'px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+        badge.className = 'px-2.5 py-0.5 rounded-full font-bold bg-ok-soft text-ok border border-ok-line';
         badge.textContent = customText || ('✅ 已保存至本地 ' + nowStr);
       }
     }
