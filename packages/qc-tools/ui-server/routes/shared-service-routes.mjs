@@ -1,7 +1,7 @@
 import { readBody } from '../lib/config.mjs';
 import { publicSharedServices, saveSharedServices } from '../lib/shared-services.mjs';
 
-const labels = { apiKey: '模型 API Key', tavilyApiKey: 'Tavily Key', meowloadApiKey: '素材服务 Key', elevenlabsApiKey: 'ElevenLabs Key', baseUrl: '模型服务地址', writerModel: '文案模型', textModel: '分镜模型', keywordModel: '关键词模型', videoModel: '视频模型', imageModel: '图片模型', bgmModel: '配乐模型' };
+const labels = { apiKey: '模型 API Key', tavilyApiKey: 'Tavily Key', meowloadApiKey: '素材服务 Key', elevenlabsApiKey: 'ElevenLabs Key', bailianApiKey: '百炼 API Key（北京）', bailianWorkspaceId: '百炼业务空间 ID（可选）', baseUrl: '模型服务地址', writerModel: '文案模型', textModel: '分镜模型', keywordModel: '关键词模型', videoModel: '视频模型', imageModel: '图片模型', bgmModel: '配乐模型' };
 export async function handleSharedServiceRoutes(req, res, pathname) {
   const respond = (status, body) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
   if (pathname === '/service-settings') {

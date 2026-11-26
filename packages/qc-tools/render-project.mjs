@@ -18,9 +18,9 @@ process.once('exit', () => {
   }
 });
 
-export const DEFAULT_RENDER_CONCURRENCY = 4;
+export const DEFAULT_RENDER_CONCURRENCY = 3;
 export const DEFAULT_CHUNK_FRAMES = 3600; // 30fps 下每段 2 分钟（3600 帧）
-export const DEFAULT_PARALLEL_CHUNKS = 2; // 8GB 内存下默认 2 路分段并行 × 每路 2 并发标签页
+export const DEFAULT_PARALLEL_CHUNKS = 1; // 8GB 内存下默认单路分段顺序渲染 × 3 并发，每段结束释放内存防止 OOM
 
 export function projectRenderPaths(projectId) {
   const paths = getProjectPaths(projectId);
@@ -187,6 +187,29 @@ function runChildCommand(command, args, { cwd = rootDir, onStart, onOutput, retr
   })();
 }
 
+export function formatClockTime(dateInput = new Date()) {
+  const d = dateInput instanceof Date ? dateInput : new Date(dateInput);
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
+export function extractLatestFrameCount(text, expectedTotalFrames) {
+  const total = Math.max(1, Math.floor(Number(expectedTotalFrames) || 0));
+  const str = String(text || '');
+  const re = new RegExp(`(\\d+)\\/${total}(?!\\d)`, 'g');
+  let match;
+  let latest = null;
+  while ((match = re.exec(str)) !== null) {
+    const val = Number(match[1]);
+    if (Number.isFinite(val) && val >= 0 && val <= total) {
+      latest = val;
+    }
+  }
+  return latest;
+}
+
 export async function renderProject(projectId, options = {}) {
   const paths = projectRenderPaths(projectId);
   const preview = Boolean(options.preview);
@@ -206,17 +229,100 @@ export async function renderProject(projectId, options = {}) {
   });
 
   const totalFrames = Number(initialCmd.props?.video_config?.duration_in_frames) || 0;
+  const fps = Number(initialCmd.props?.video_config?.fps) || 30;
   const chunkFrames = options.chunkFrames !== undefined ? Number(options.chunkFrames) : DEFAULT_CHUNK_FRAMES;
   const chunks = planRenderFrameChunks(totalFrames, chunkFrames);
 
+  const jobStartedAt = new Date().toISOString();
+  let renderPhaseStartedMs = null;
+  const chunkStates = chunks.map((c) => ({
+    index: c.index,
+    number: c.index + 1,
+    startFrame: c.startFrame,
+    endFrame: c.endFrame,
+    totalFrames: Math.max(1, c.endFrame - c.startFrame + 1),
+    renderedFrames: 0,
+    status: 'pending',
+    startedAt: null,
+    finishedAt: null,
+    durationSec: null,
+  }));
+
+  const emitProgress = (phase, phaseLabel, extra = {}) => {
+    if (!options.onProgress) return;
+    const completedChunks = chunkStates.filter((c) => c.status === 'completed').length;
+    const renderedFramesTotal = chunkStates.reduce(
+      (sum, c) => sum + (c.status === 'completed' ? c.totalFrames : c.renderedFrames),
+      0
+    );
+    const activeChunk = chunkStates.find((c) => c.status === 'rendering') || null;
+    let percent = 0;
+    if (phase === 'bundling') {
+      percent = 2;
+    } else if (phase === 'rendering') {
+      const frameRatio = totalFrames > 0 ? Math.min(1, renderedFramesTotal / totalFrames) : 0;
+      percent = Math.round((3 + frameRatio * 95) * 10) / 10;
+    } else if (phase === 'concatenating') {
+      percent = 99;
+    } else if (phase === 'completed') {
+      percent = 100;
+    }
+
+    let etaSeconds = null;
+    if (phase === 'rendering' && renderPhaseStartedMs && renderedFramesTotal >= 15 && totalFrames > renderedFramesTotal) {
+      const elapsedRenderSec = Math.max(1, (Date.now() - renderPhaseStartedMs) / 1000);
+      const fpsRate = renderedFramesTotal / elapsedRenderSec;
+      if (fpsRate > 0.05) {
+        etaSeconds = Math.max(1, Math.round((totalFrames - renderedFramesTotal) / fpsRate));
+      }
+    } else if (phase === 'concatenating') {
+      etaSeconds = 5;
+    } else if (phase === 'completed') {
+      etaSeconds = 0;
+    }
+
+    options.onProgress({
+      phase,
+      phaseLabel,
+      fps,
+      totalFrames,
+      renderedFrames: renderedFramesTotal,
+      totalChunks: chunkStates.length,
+      completedChunks,
+      currentChunkNumber: activeChunk ? activeChunk.number : null,
+      percent,
+      startedAt: jobStartedAt,
+      etaSeconds,
+      chunks: chunkStates.map((c) => ({ ...c })),
+      ...extra,
+    });
+  };
+
   if (chunks.length <= 1) {
     try {
+      const singleChunk = chunkStates[0];
+      singleChunk.status = 'rendering';
+      singleChunk.startedAt = new Date().toISOString();
+      renderPhaseStartedMs = Date.now();
+      emitProgress('rendering', `正在渲染全片（共 ${totalFrames} 帧）…`);
       await runChildCommand(initialCmd.command, initialCmd.args, {
         onStart: options.onStart,
-        onOutput: options.onOutput,
+        onOutput: (text) => {
+          options.onOutput?.(text);
+          const done = extractLatestFrameCount(text, singleChunk.totalFrames);
+          if (done !== null && done >= singleChunk.renderedFrames) {
+            singleChunk.renderedFrames = done;
+            emitProgress('rendering', `正在渲染全片（${done}/${singleChunk.totalFrames} 帧）…`);
+          }
+        },
         retryOutputPath: temporaryPath,
       });
+      singleChunk.renderedFrames = singleChunk.totalFrames;
+      singleChunk.status = 'completed';
+      singleChunk.finishedAt = new Date().toISOString();
+      singleChunk.durationSec = Math.max(1, Math.round((Date.now() - renderPhaseStartedMs) / 1000));
       fs.renameSync(temporaryPath, finalPath);
+      emitProgress('completed', '🎉 全片渲染已完成');
       return finalPath;
     } catch (error) {
       if (fs.existsSync(temporaryPath)) fs.unlinkSync(temporaryPath);
@@ -245,16 +351,18 @@ export async function renderProject(projectId, options = {}) {
 
   try {
     options.onOutput?.(
-      `\n🚀 [并行分段渲染] 全片共 ${totalFrames} 帧，已切分为 ${chunks.length} 段（${parallelChunks} 路并行 × 每路 ${perWorkerConcurrency} 核，JPEG + Apple 硬件加速）\n`
+      `\n🚀 [${formatClockTime()}] [并行分段渲染] 全片共 ${totalFrames} 帧，已切分为 ${chunks.length} 段（${parallelChunks} 路并行 × 每路 ${perWorkerConcurrency} 核，JPEG + Apple 硬件加速）\n`
     );
-    options.onOutput?.(`📦 [1/3] 正在预打包 Remotion 工程（所有并行分段共享同一 Bundle，避免重复编译）...\n`);
+    options.onOutput?.(`📦 [${formatClockTime()}] [1/3] 正在预打包 Remotion 工程（所有并行分段共享同一 Bundle，避免重复编译）...\n`);
+    emitProgress('bundling', `📦 [1/3] 正在预打包工程 Bundle（共切分 ${chunks.length} 段）…`);
     await runChildCommand(
       remotionBin,
       ['bundle', entryPoint, `--out-dir=${bundleDir}`, `--public-dir=${paths.publicDir}`],
       { onStart: registerChild, onOutput: options.onOutput, maxAttempts: 1 }
     );
 
-    options.onOutput?.(`🎬 [2/3] 开始并行渲染 ${chunks.length} 个视频分段...\n`);
+    options.onOutput?.(`🎬 [${formatClockTime()}] [2/3] 开始并行渲染 ${chunks.length} 个视频分段...\n`);
+    renderPhaseStartedMs = Date.now();
     const chunkFileNames = new Array(chunks.length);
     let nextChunkIdx = 0;
     let completedCount = 0;
@@ -262,12 +370,22 @@ export async function renderProject(projectId, options = {}) {
     const runWorker = async () => {
       while (nextChunkIdx < chunks.length) {
         const current = chunks[nextChunkIdx++];
+        const state = chunkStates[current.index];
         const chunkFileName = `chunk_${String(current.index).padStart(3, '0')}_${current.startFrame}-${current.endFrame}.mp4`;
         const chunkFilePath = path.join(chunkDir, chunkFileName);
         chunkFileNames[current.index] = chunkFileName;
 
+        const chunkStartMs = Date.now();
+        state.status = 'rendering';
+        state.startedAt = new Date(chunkStartMs).toISOString();
+        state.renderedFrames = 0;
+
         options.onOutput?.(
-          `▶ [分段 ${current.index + 1}/${chunks.length}] 开始渲染帧 ${current.startFrame}–${current.endFrame}...\n`
+          `▶ [${formatClockTime(chunkStartMs)}] [分段 ${current.index + 1}/${chunks.length}] 开始渲染帧 ${current.startFrame}–${current.endFrame}...\n`
+        );
+        emitProgress(
+          'rendering',
+          `🎬 [2/3] 正在渲染第 ${current.index + 1}/${chunks.length} 段（帧 ${current.startFrame}–${current.endFrame}）`
         );
         const { command, args } = makeRenderCommand(projectId, {
           ...options,
@@ -281,12 +399,31 @@ export async function renderProject(projectId, options = {}) {
         });
         await runChildCommand(command, args, {
           onStart: registerChild,
-          onOutput: options.onOutput,
+          onOutput: (text) => {
+            options.onOutput?.(text);
+            const done = extractLatestFrameCount(text, state.totalFrames);
+            if (done !== null && done >= state.renderedFrames) {
+              state.renderedFrames = done;
+              emitProgress(
+                'rendering',
+                `🎬 [2/3] 正在渲染第 ${current.index + 1}/${chunks.length} 段（${done}/${state.totalFrames} 帧）`
+              );
+            }
+          },
           retryOutputPath: chunkFilePath,
         });
+        const chunkEndMs = Date.now();
+        state.renderedFrames = state.totalFrames;
+        state.status = 'completed';
+        state.finishedAt = new Date(chunkEndMs).toISOString();
+        state.durationSec = Math.max(1, Math.round((chunkEndMs - chunkStartMs) / 1000));
         completedCount++;
         options.onOutput?.(
-          `✅ [分段 ${current.index + 1}/${chunks.length}] 渲染完成（已完成 ${completedCount}/${chunks.length} 段）\n`
+          `✅ [${formatClockTime(chunkEndMs)}] [分段 ${current.index + 1}/${chunks.length}] 渲染完成（耗时 ${state.durationSec}s，已完成 ${completedCount}/${chunks.length} 段）\n`
+        );
+        emitProgress(
+          'rendering',
+          `✅ 已完成第 ${current.index + 1}/${chunks.length} 段（共完成 ${completedCount}/${chunks.length} 段）`
         );
       }
     };
@@ -294,7 +431,8 @@ export async function renderProject(projectId, options = {}) {
     const workers = Array.from({ length: parallelChunks }, () => runWorker());
     await Promise.all(workers);
 
-    options.onOutput?.(`🔗 [3/3] 正在用 ffmpeg 无损拼接 ${chunks.length} 个分段...\n`);
+    options.onOutput?.(`🔗 [${formatClockTime()}] [3/3] 正在用 ffmpeg 无损拼接 ${chunks.length} 个分段...\n`);
+    emitProgress('concatenating', `🔗 [3/3] 正在用 ffmpeg 无损拼接 ${chunks.length} 个分段…`);
     const { listContent, args: ffArgs } = makeConcatFfmpegArgs(chunkFileNames, temporaryPath);
     fs.writeFileSync(path.join(chunkDir, 'concat_list.txt'), listContent, 'utf8');
     const ff = spawnSync('ffmpeg', ffArgs, { cwd: chunkDir, encoding: 'utf8' });
@@ -303,7 +441,8 @@ export async function renderProject(projectId, options = {}) {
     }
 
     fs.renameSync(temporaryPath, finalPath);
-    options.onOutput?.(`🎉 [并行分段渲染完成] 成片已输出至：${finalPath}\n`);
+    options.onOutput?.(`🎉 [${formatClockTime()}] [并行分段渲染完成] 成片已输出至：${finalPath}\n`);
+    emitProgress('completed', `🎉 全片 ${chunks.length} 段渲染与无损拼接全部完成`);
     return finalPath;
   } catch (error) {
     for (const child of chunkChildren) {

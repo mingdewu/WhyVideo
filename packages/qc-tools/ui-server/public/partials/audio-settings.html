@@ -1,6 +1,6 @@
   <!-- 配音配置抽屉/弹窗 -->
   <div id="audioModal" onclick="if(event.target===this) toggleAudioModal()" class="studio-modal fixed inset-0 bg-backdrop backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
-    <div class="card w-full max-w-xl p-6 rounded-2xl border border-danger-line shadow-2xl space-y-4">
+    <div class="card w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 rounded-2xl border border-danger-line shadow-2xl space-y-4">
       <div class="flex items-center justify-between pb-3 border-b border-line">
         <h3 class="text-lg font-bold text-ink flex items-center gap-2">
           🎙️ AI 配音引擎控制中心
@@ -11,7 +11,7 @@
       <div class="space-y-3">
         <div>
           <label class="block text-xs font-semibold text-ink-secondary mb-1">选择配音提供商：</label>
-          <div class="grid grid-cols-2 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label id="labelAudioProviderElevenlabs" class="flex items-center gap-2 p-2.5 rounded-xl border border-line bg-surface cursor-pointer text-xs font-bold text-ink-muted transition">
               <input type="radio" name="audioProvider" value="elevenlabs" onchange="updateAudioProviderUI()" />
               <span>ElevenLabs 云端配音</span>
@@ -20,7 +20,29 @@
               <input type="radio" name="audioProvider" value="voicebox" checked onchange="updateAudioProviderUI()" />
               <span>Voicebox 本地模型</span>
             </label>
+            <label id="labelAudioProviderBailian" class="flex items-center gap-2 p-2.5 rounded-xl border border-line bg-surface cursor-pointer text-xs font-bold text-ink-muted transition">
+              <input type="radio" name="audioProvider" value="bailian" onchange="updateAudioProviderUI()" />
+              <span>阿里云百炼</span>
+            </label>
           </div>
+        </div>
+
+        <div id="bailianFields" class="hidden space-y-3">
+          <div class="text-xs text-ink-secondary">华北2（北京） · 千问云端配音</div>
+          <label class="block text-xs font-semibold text-ink-secondary">百炼 API Key
+            <input type="password" id="bailianKeyInput" oninput="onBailianInputChange()" autocomplete="off" placeholder="输入北京地域的 API Key，自动记住在当前浏览器" class="mt-1 w-full px-3 py-2 text-xs rounded-xl bg-input border border-line text-ink" />
+          </label>
+          <div id="bailianConfigStatus" class="text-xs text-ink-muted" role="status"></div>
+          <label class="block text-xs font-semibold text-ink-secondary">业务空间 ID（可选）
+            <input id="bailianWorkspaceInput" oninput="onBailianInputChange()" placeholder="留空使用北京默认接入地址" class="mt-1 w-full px-3 py-2 text-xs rounded-xl bg-input border border-line text-ink" />
+          </label>
+          <label class="block text-xs font-semibold text-ink-secondary">语音模型
+            <select id="bailianModelSelect" class="mt-1 w-full px-3 py-2 text-xs rounded-xl bg-input border border-line text-ink"><option value="qwen-audio-3.1-tts-flash">Qwen Audio 3.1 TTS Flash</option></select>
+          </label>
+          <label class="block text-xs font-semibold text-ink-secondary">自定义音色
+            <select id="bailianVoiceSelect" class="mt-1 w-full px-3 py-2 text-xs rounded-xl bg-input border border-line text-ink"><option value="qwen-audio-3.1-tts-flash-bailian-840695ef93304c9db72783b9a4776e36">我的中文音色 · Voicebox_我的中文_他们</option></select>
+          </label>
+          <p class="text-xs text-ink-muted">使用创建音色的同一账号和北京地域 API Key。点击下方「试听测试配音」检查效果，合成按百炼用量计费。</p>
         </div>
 
         <div id="elevenlabsFields" class="hidden space-y-3">

@@ -69,7 +69,7 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
       }
     }
 
-    async function extractSearchKeywordsForRow(idx, { silent = false, forceChange = false } = {}) {
+    async function extractSearchKeywordsForRow(idx, { silent = false, forceChange = false, onError } = {}) {
       const scene = manifestData?.scenes?.[idx];
       if (!scene) return false;
       const btn = document.getElementById('kwGenBtn_' + idx);
@@ -95,6 +95,7 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
         });
         const data = await res.json();
         if (!data.ok) {
+          if (onError) onError(data.error || '未知错误');
           if (!silent) showToast('❌ 搜索词提炼失败：' + (data.error || '未知错误'));
           if (btn) {
             btn.disabled = false;
@@ -112,6 +113,7 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
         if (!silent) showToast('✅ 最佳搜索词：' + bestKw);
         return true;
       } catch (err) {
+        if (onError) onError(err.message);
         if (!silent) showToast('❌ 搜索词提炼请求出错：' + err.message);
         if (btn) {
           btn.disabled = false;
@@ -150,19 +152,19 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
       };
       updateBtn();
 
-      const concurrency = 3;
-      let cursor = 0;
-      const worker = async () => {
-        while (cursor < targetIndices.length && !_batchKeywordAbort) {
-          const idx = targetIndices[cursor++];
-          const ok = await extractSearchKeywordsForRow(idx, { silent: true });
-          done++;
-          if (ok) okCount++;
-          updateBtn();
-        }
-      };
-
-      await Promise.all(Array.from({ length: Math.min(concurrency, targetIndices.length) }, () => worker()));
+      // Each request persists the manifest and advances the project's revision.
+      // Wait for it before the next request so the project write lock is released.
+      const failures = [];
+      for (const idx of targetIndices) {
+        if (_batchKeywordAbort) break;
+        const ok = await extractSearchKeywordsForRow(idx, {
+          silent: true,
+          onError: (error) => failures.push(scenes[idx].scene_id + '：' + error),
+        });
+        done++;
+        if (ok) okCount++;
+        updateBtn();
+      }
 
       const wasAborted = _batchKeywordAbort;
       _batchKeywordRunning = false;
@@ -172,10 +174,10 @@ const GITHUB_COPY_SVG = '<svg width="11" height="11" viewBox="0 0 16 16" fill="c
       if (!wasAborted) {
         showCompletionModal({
           icon: '🔎',
-          title: '批量提炼镜头关键词已完成',
+          title: okCount === total ? '批量提炼镜头关键词已完成' : '批量提炼结束，部分镜头失败',
           message: '成功提炼 ' + okCount + '/' + total + ' 个镜头的最佳搜索词。',
           detail: okCount < total
-            ? ('有 ' + (total - okCount) + ' 个镜头失败，可在对应镜头行点击「✨ AI 提炼」重试。')
+            ? ('有 ' + (total - okCount) + ' 个镜头失败，可在对应镜头行点击「✨ AI 提炼」重试。' + (failures.length ? '\n失败原因：' + failures.slice(0, 3).join('；') : ''))
             : '全部镜头均已就绪，可直接复制搜索词检索素材。',
         });
       }

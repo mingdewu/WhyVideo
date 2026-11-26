@@ -2,15 +2,29 @@
     <div id="viewProducerContainer" class="space-y-3">
 
     <!-- 渲染进度 / 成片反馈条（平时隐藏，仅在渲染中、报错或已有成片时按需出现） -->
-    <div id="renderStatusBanner" class="hidden card px-3.5 py-2 rounded-xl border border-ok-line space-y-2">
+    <div id="renderStatusBanner" class="hidden card px-3.5 py-2.5 rounded-xl border border-ok-line space-y-2.5">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div class="flex flex-wrap items-center gap-2.5 min-w-0">
           <span id="renderJobStatus" class="text-xs font-semibold text-ok"></span>
           <a id="renderJobOutput" class="hidden text-xs font-bold text-ok hover:text-ok underline" target="_blank" rel="noopener">↗ 新窗口打开成片</a>
         </div>
-        <button type="button" id="toggleVideoPreviewBtn" onclick="toggleVideoPreviewDrawer()" class="hidden px-2.5 py-1 rounded-lg bg-ok-soft hover:bg-ok-soft text-ok border border-ok-line text-[11px] font-bold transition cursor-pointer">
-          ▶ 预览成片
-        </button>
+        <div class="flex flex-wrap items-center gap-2">
+          <span id="renderTimeStats" class="hidden text-[11px] font-semibold text-ink-secondary bg-subtle px-2.5 py-0.5 rounded-lg border border-line"></span>
+          <button type="button" id="toggleVideoPreviewBtn" onclick="toggleVideoPreviewDrawer()" class="hidden px-2.5 py-1 rounded-lg bg-ok-soft hover:bg-ok-soft text-ok border border-ok-line text-[11px] font-bold transition cursor-pointer">
+            ▶ 预览成片
+          </button>
+        </div>
+      </div>
+      <!-- 实时分段进度面板 -->
+      <div id="renderProgressPanel" class="hidden space-y-2 pt-1 border-t border-line">
+        <div class="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+          <span id="renderPhaseDetail" class="font-semibold text-ink-secondary">正在准备渲染…</span>
+          <span id="renderProgressPercent" class="font-black text-ok">0%</span>
+        </div>
+        <div class="w-full h-2 rounded-full bg-subtle border border-line overflow-hidden">
+          <div id="renderProgressBarFill" class="h-full bg-ok-solid transition-all duration-300" style="width: 0%"></div>
+        </div>
+        <div id="renderChunksTimeline" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1.5 pt-0.5"></div>
       </div>
       <div id="videoContainer" class="hidden pt-1"></div>
       <pre id="renderJobError" class="hidden w-full whitespace-pre-wrap text-xs text-danger bg-danger-soft border border-danger-line rounded-lg p-2"></pre>

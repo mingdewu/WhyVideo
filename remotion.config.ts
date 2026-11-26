@@ -19,7 +19,7 @@ if (selectedId && !/^[a-zA-Z0-9_-]+$/.test(selectedId)) {
 Config.setPublicDir(selectedId ? path.join(projectsRoot, selectedId, "public") : path.join(rootDir, "public"));
 Config.setVideoImageFormat("jpeg");
 Config.setJpegQuality(85);
-Config.setConcurrency(4);
+Config.setConcurrency(3);
 Config.setHardwareAcceleration("if-possible");
 Config.setChromiumOpenGlRenderer("angle");
 Config.setX264Preset("veryfast");

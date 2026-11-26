@@ -5,6 +5,7 @@ import { randomUUID } from 'node:crypto';
 import { rootDir, getPaths, voiceJobControllers } from './config.mjs';
 import { syncCaptions, recalculateTimelines, syncTableToManifest, recompileProject } from './project-store.mjs';
 import { renderProject } from '../../render-project.mjs';
+import { synthesizeWithBailian } from '../../synthesize-bailian.mjs';
 import { synthesizeWithVoicebox } from '../../synthesize-voicebox.mjs';
 import { buildElevenlabsTtsPayload } from '../../synthesize-elevenlabs.mjs';
 import { alignNarration, probeDurationMs, scenesText, timingPath } from '../../narration-timing.mjs';
@@ -30,6 +31,14 @@ export async function runProjectRenderJob(job) {
       fs.writeFileSync(curPaths.manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
     }
     syncCaptions(manifest, curPaths.captionsPath, job.projectId);
+    job.progress = {
+      phase: 'preparing',
+      phaseLabel: '⏳ 正在校验镜头时间轴与编译渲染参数…',
+      percent: 1,
+      startedAt: job.startedAt,
+      etaSeconds: null,
+      chunks: [],
+    };
     const genPropsArgs = [
       'packages/qc-tools/generate-render-props.mjs', '--project', job.projectId,
       job.burnCaptions ? '--burn-captions' : '--no-burn-captions',
@@ -46,6 +55,9 @@ export async function runProjectRenderJob(job) {
       preview: job.preview,
       concurrency: job.concurrency,
       onOutput: appendLog,
+      onProgress: (prog) => {
+        job.progress = prog;
+      },
     });
     job.status = 'completed';
     job.outputUrl = `/output/${job.projectId}/${path.basename(output)}`;
@@ -319,14 +331,22 @@ export async function runVoiceboxJob(job, text) {
 }
 
 /** ElevenLabs 全片旁白分段合成任务：分段拉取 MP3 -> ffmpeg 拼接转成 narration.wav -> 对齐时间轴 */
-export async function runElevenlabsFullJob(job, { fullText, voiceId, modelId, stability, similarityBoost, languageCode, apiKey }) {
+export async function runElevenlabsFullJob(job, options) {
+  return runCloudVoiceJob(job, options);
+}
+export async function runBailianJob(job, options) {
+  return runCloudVoiceJob(job, options);
+}
+async function runCloudVoiceJob(job, { fullText, voiceId, modelId, stability, similarityBoost, languageCode, apiKey, workspaceId }) {
+  const bailian = job.provider === 'bailian';
+  const label = bailian ? '阿里云百炼' : 'ElevenLabs';
   const curPaths = getPaths(job.projectId);
   const controller = new AbortController();
   voiceJobControllers.set(job.projectId, controller);
   let tmpDir = null;
   try {
     fs.mkdirSync(curPaths.audioDir, { recursive: true });
-    const chunks = splitScriptForTts(fullText, 1200);
+    const chunks = splitScriptForTts(fullText, bailian ? 500 : 1200);
     if (!chunks.length) throw new Error('当前工程分镜文案为空，无法生成全片旁白');
 
     const totalChars = chunks.reduce((sum, c) => sum + c.length, 0) || 1;
@@ -354,35 +374,40 @@ export async function runElevenlabsFullJob(job, { fullText, voiceId, modelId, st
         job.etaSec = Math.max(1, Math.round(((totalChars - completedChars) * msPerChar) / 1000) + 5);
       }
       const timeLabel = `已用时 ${formatDurationText(job.elapsedSec)}` + (job.etaSec != null ? ` · 预计剩余 ${formatDurationText(job.etaSec)}` : '');
-      job.progressText = `ElevenLabs 正在生成全片旁白（第 ${i + 1}/${chunks.length} 段 · ${job.percent}% · ${timeLabel}）…`;
+      job.progressText = `${label} 正在生成配音（第 ${i + 1}/${chunks.length} 段 · ${job.percent}% · ${timeLabel}）…`;
 
-      const ttsPayload = buildElevenlabsTtsPayload({
-        text: chunks[i],
-        modelId,
-        stability,
-        similarityBoost,
-        languageCode,
-      });
+      const segName = `seg_${String(i + 1).padStart(3, '0')}.${bailian ? 'wav' : 'mp3'}`;
+      if (bailian) {
+        await synthesizeWithBailian({text:chunks[i], voiceId, modelId, apiKey, workspaceId,
+          outputPath:path.join(tmpDir, segName), signal:controller.signal});
+      } else {
+        const ttsPayload = buildElevenlabsTtsPayload({
+          text: chunks[i],
+          modelId,
+          stability,
+          similarityBoost,
+          languageCode,
+        });
 
-      const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
-        method: 'POST',
-        headers: {
-          Accept: 'audio/mpeg',
-          'Content-Type': 'application/json',
-          'xi-api-key': apiKey,
-        },
-        body: JSON.stringify(ttsPayload),
-        signal: controller.signal,
-      });
+        const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}`, {
+          method: 'POST',
+          headers: {
+            Accept: 'audio/mpeg',
+            'Content-Type': 'application/json',
+            'xi-api-key': apiKey,
+          },
+          body: JSON.stringify(ttsPayload),
+          signal: controller.signal,
+        });
 
-      if (!response.ok) {
-        const errText = await response.text();
-        throw new Error(`ElevenLabs 第 ${i + 1}/${chunks.length} 段合成失败 (${response.status}): ${errText}`);
+        if (!response.ok) {
+          const errText = await response.text();
+          throw new Error(`ElevenLabs 第 ${i + 1}/${chunks.length} 段合成失败 (${response.status}): ${errText}`);
+        }
+
+        const buf = Buffer.from(await response.arrayBuffer());
+        fs.writeFileSync(path.join(tmpDir, segName), buf);
       }
-
-      const buf = Buffer.from(await response.arrayBuffer());
-      const segName = `seg_${String(i + 1).padStart(3, '0')}.mp3`;
-      fs.writeFileSync(path.join(tmpDir, segName), buf);
       segNames.push(segName);
       completedChars += chunks[i].length;
       job.completedChunks = i + 1;
@@ -391,7 +416,7 @@ export async function runElevenlabsFullJob(job, { fullText, voiceId, modelId, st
 
     job.percent = 94;
     job.progressText = '正在拼接音频并转为成片标准 WAV…';
-    const narrationPath = path.join(curPaths.audioDir, 'narration.wav');
+    const narrationPath = path.join(curPaths.audioDir, 'cloud_' + randomUUID() + '.wav');
     let ffmpegArgs;
     if (segNames.length === 1) {
       ffmpegArgs = ['-y', '-i', segNames[0], '-ar', '44100', '-ac', '1', '-c:a', 'pcm_s16le', narrationPath];
@@ -406,14 +431,15 @@ export async function runElevenlabsFullJob(job, { fullText, voiceId, modelId, st
       throw new Error(`ffmpeg 拼接转换旁白失败: ${(ff.stderr || '').slice(-400)}`);
     }
 
-    await finalizeProjectNarration(job, curPaths, narrationPath, fullText, controller.signal);
+    controller.signal.throwIfAborted();
+    if (job.useAsNarration) await finalizeProjectNarration(job, curPaths, narrationPath, fullText, controller.signal);
 
     job.elapsedSec = Math.round(Math.max(0, Date.now() - startedAtMs) / 1000);
     job.percent = 100;
     job.etaSec = 0;
     job.status = 'completed';
-    job.progressText = `ElevenLabs 全片旁白已生成并对齐时间轴（共 ${chunks.length} 段 · 用时 ${formatDurationText(job.elapsedSec)}）`;
-    job.audioUrl = `/public/${job.projectId}/audio/narration.wav?t=${Date.now()}`;
+    job.progressText = `${label} 配音已完成${job.useAsNarration ? '并对齐时间轴' : ''}（共 ${chunks.length} 段 · 用时 ${formatDurationText(job.elapsedSec)}）`;
+    job.audioUrl = `/public/${job.projectId}/audio/${path.basename(narrationPath)}?t=${Date.now()}`;
     const durMs = probeDurationMs(narrationPath);
     job.duration = durMs ? Number((durMs / 1000).toFixed(1)) : null;
   } catch (error) {

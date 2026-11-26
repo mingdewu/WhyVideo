@@ -1,3 +1,48 @@
+    function audioProviderLabel(provider) {
+      return {elevenlabs:'ElevenLabs 云端', voicebox:'Voicebox 本地', bailian:'阿里云百炼'}[provider] || 'Voicebox 本地';
+    }
+
+    function restoreBailianInputs() {
+      for (const [id, storageKey] of Object.entries({
+        bailianKeyInput: 'whyvideo_bailian_api_key',
+        bailianWorkspaceInput: 'whyvideo_bailian_workspace_id',
+      })) {
+        const input = document.getElementById(id);
+        const saved = localStorage.getItem(storageKey);
+        if (input && !input.value && saved !== null) input.value = saved;
+      }
+    }
+
+    function onBailianInputChange() {
+      for (const [id, storageKey] of Object.entries({
+        bailianKeyInput: 'whyvideo_bailian_api_key',
+        bailianWorkspaceInput: 'whyvideo_bailian_workspace_id',
+      })) {
+        const input = document.getElementById(id);
+        if (input) localStorage.setItem(storageKey, input.value.trim());
+      }
+    }
+
+    async function loadBailianConfig() {
+      restoreBailianInputs();
+      const workspace = document.getElementById('bailianWorkspaceInput');
+      const initialWorkspace = workspace.value;
+      try {
+        const response = await fetch('/api/bailian/config');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || '读取配置失败');
+        window._bailianKeyConfigured = data.apiKeyConfigured;
+        window._bailianCanManage = data.canManage;
+        const key = document.getElementById('bailianKeyInput');
+        key.disabled = !data.canManage;
+        key.placeholder = data.apiKeyConfigured ? '服务端已配置；也可在此输入并记住本机密钥' : '输入北京地域的 API Key，自动记住在当前浏览器';
+        if (document.activeElement !== workspace && workspace.value === initialWorkspace && localStorage.getItem('whyvideo_bailian_workspace_id') === null) workspace.value = data.workspaceId || '';
+        workspace.disabled = !data.canManage;
+        const remembered = Boolean(localStorage.getItem('whyvideo_bailian_api_key'));
+        document.getElementById('bailianConfigStatus').textContent = remembered ? '当前浏览器已记住密钥，重新打开后会自动恢复' : data.apiKeyConfigured ? '服务端密钥已配置，可直接配音，无需重复输入' : '尚未配置密钥，请由管理员保存配置';
+      } catch (err) { document.getElementById('bailianConfigStatus').textContent = err.message; }
+    }
+
     function restoreElevenlabsParams() {
       const modelEl = document.getElementById('elevenlabsModelSelect');
       const langEl = document.getElementById('elevenlabsLanguageSelect');
@@ -299,7 +344,7 @@
       const badge = document.getElementById('audioProviderHeaderBadge');
       if (!badge) return;
       const savedProvider = localStorage.getItem('whyvideo_audio_provider') || 'voicebox';
-      badge.textContent = savedProvider === 'elevenlabs' ? 'ElevenLabs云端' : 'Voicebox本地';
+      badge.textContent = audioProviderLabel(savedProvider);
     }
 
     function restoreSavedAudioConfig() {
@@ -307,6 +352,7 @@
       const radio = document.querySelector('input[name="audioProvider"][value="' + savedProvider + '"]');
       if (radio) radio.checked = true;
       restoreElevenlabsInputs();
+      restoreBailianInputs();
       updateAudioProviderHeaderBadge();
     }
 
@@ -331,23 +377,13 @@
 
     function updateAudioProviderUI() {
       const provider = document.querySelector('input[name="audioProvider"]:checked')?.value || 'voicebox';
-      const lblEl = document.getElementById('labelAudioProviderElevenlabs');
-      const lblVb = document.getElementById('labelAudioProviderVoicebox');
-      if (lblEl && lblVb) {
-        const activeClasses = ['border-danger-line', 'bg-danger-soft', 'text-danger'];
-        const inactiveClasses = ['border-line', 'bg-surface', 'text-ink-muted'];
-        if (provider === 'elevenlabs') {
-          lblEl.classList.add(...activeClasses);
-          lblEl.classList.remove(...inactiveClasses);
-          lblVb.classList.add(...inactiveClasses);
-          lblVb.classList.remove(...activeClasses);
-        } else {
-          lblVb.classList.add(...activeClasses);
-          lblVb.classList.remove(...inactiveClasses);
-          lblEl.classList.add(...inactiveClasses);
-          lblEl.classList.remove(...activeClasses);
-        }
+      for (const [name, suffix] of Object.entries({elevenlabs:'Elevenlabs', voicebox:'Voicebox', bailian:'Bailian'})) {
+        const label = document.getElementById('labelAudioProvider' + suffix);
+        for (const cls of ['border-danger-line', 'bg-danger-soft', 'text-danger']) label?.classList.toggle(cls, provider === name);
+        for (const cls of ['border-line', 'bg-surface', 'text-ink-muted']) label?.classList.toggle(cls, provider !== name);
       }
+      document.getElementById('bailianFields').classList.toggle('hidden', provider !== 'bailian');
+      if (provider === 'bailian') loadBailianConfig();
       document.getElementById('elevenlabsFields').classList.toggle('hidden', provider !== 'elevenlabs');
       document.getElementById('voiceboxFields').classList.toggle('hidden', provider !== 'voicebox');
       document.getElementById('voiceboxJobStatus').classList.remove('hidden');
@@ -482,7 +518,7 @@
           fullBtn.disabled = isRunning;
           fullBtn.classList.toggle('opacity-50', isRunning);
           if (isRunning) {
-            const pLabel = job.provider === 'elevenlabs' ? 'ElevenLabs' : 'Voicebox';
+            const pLabel = audioProviderLabel(job.provider);
             const shortSeg = totalChunks > 1 ? (' ' + Math.min(totalChunks, currentChunk) + '/' + totalChunks + '段 · ' + pct + '%') : (pct > 0 ? (' ' + pct + '%') : '');
             fullBtn.textContent = job.voiceboxStatus === 'aligning_timing'
               ? '⏳ 正在对齐旁白时间轴 (' + pct + '%)...'
@@ -535,6 +571,12 @@
 
     function collectVoiceParamsFromModal() {
       const provider = document.querySelector('input[name="audioProvider"]:checked')?.value || localStorage.getItem('whyvideo_audio_provider') || 'voicebox';
+      if (provider === 'bailian') {
+        return {projectId: activeProjectId, provider, apiKey: document.getElementById('bailianKeyInput')?.value.trim() || localStorage.getItem('whyvideo_bailian_api_key') || '',
+          workspaceId: document.getElementById('bailianWorkspaceInput')?.value.trim() ?? localStorage.getItem('whyvideo_bailian_workspace_id') ?? '',
+          voiceId: document.getElementById('bailianVoiceSelect').value, modelId: document.getElementById('bailianModelSelect').value,
+          text: document.getElementById('sampleAudioText')?.value || '', useAsNarration: false};
+      }
       const apiKey = (document.getElementById('elevenlabsKeyInput')?.value || '').trim() || localStorage.getItem('whyvideo_elevenlabs_api_key') || '';
       const voiceId = (document.getElementById('voiceIdSelect')?.value || '').trim() || localStorage.getItem('whyvideo_elevenlabs_voice_id') || '';
       const modelId = document.getElementById('elevenlabsModelSelect')?.value || localStorage.getItem('whyvideo_elevenlabs_model_id') || 'eleven_v4';
@@ -573,15 +615,25 @@
       };
     }
 
-    function confirmSaveAudioConfig() {
+    async function confirmSaveAudioConfig() {
       const provider = document.querySelector('input[name="audioProvider"]:checked')?.value || 'voicebox';
       const payload = collectVoiceParamsFromModal();
       if (!payload) return;
+      if (provider === 'bailian') onBailianInputChange();
+      if (provider === 'bailian' && window._bailianCanManage !== false) {
+        try {
+          const response = await fetch('/api/bailian/config', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({apiKey:payload.apiKey, workspaceId:payload.workspaceId})});
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || '百炼配置保存失败');
+          window._bailianKeyConfigured = data.apiKeyConfigured;
+          window._bailianCanManage = data.canManage;
+        } catch (err) { alert(err.message); return; }
+      }
       localStorage.setItem('whyvideo_audio_provider', provider);
       updateAudioProviderHeaderBadge();
       const modal = document.getElementById('audioModal');
       if (modal) modal.classList.add('hidden');
-      const label = provider === 'elevenlabs' ? 'ElevenLabs 云端配音' : 'Voicebox 本地配音';
+      const label = audioProviderLabel(provider);
       showToast('✅ 已确认保存配音设置（当前引擎：' + label + '），点击主界面「🎙️ 生成音频」即可生成');
     }
 
@@ -602,9 +654,9 @@
           body: JSON.stringify(payload),
         });
         const data = await res.json();
-        if (payload.provider === 'voicebox' && data.ok && data.job) {
+        if (data.ok && data.job) {
           await updateVoiceboxStatus();
-          showToast('已提交至本地 Voicebox，当前工程可在后台继续生成');
+          showToast('已提交至' + audioProviderLabel(payload.provider) + '，当前工程可在后台继续生成');
         } else if (data.ok && data.audioUrl) {
           const playerCont = document.getElementById('audioPlayerContainer');
           const player = document.getElementById('audioPreviewPlayer');
@@ -658,7 +710,7 @@
           window._voiceboxPrevStatus = window._voiceboxPrevStatus || {};
           window._voiceboxPrevStatus[activeProjectId] = 'queued';
           await updateVoiceboxStatus();
-          const pName = payload.provider === 'elevenlabs' ? 'ElevenLabs 云端' : 'Voicebox 本地';
+          const pName = audioProviderLabel(payload.provider);
           showToast('🎙️ 已开始使用【' + pName + '】在后台生成全片旁白（共 ' + scenes.length + ' 镜），完成后会自动对齐时间轴');
         } else {
           alert(data.error || '提交全片配音失败');

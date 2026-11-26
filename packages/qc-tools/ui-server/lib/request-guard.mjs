@@ -7,6 +7,7 @@ import { proxyStudio } from './remotion-studio-service.mjs';
 export const GLOBAL_ROUTES = new Set([
   '/api/projects',
   '/api/voicebox/profiles',
+  '/api/bailian/config',
   '/api/voice-input/status',
   '/api/transcribe-voice',
   '/api/elevenlabs/voices',
@@ -163,6 +164,11 @@ export function injectSharedServiceCredentials(req, url, pathname, body, shared,
   if (!['GET', 'HEAD'].includes(req.method) && !isSharedConfigSave) {
     if (pathname === '/api/test-tavily') {
       body.apiKey = hasExplicitTestKey ? rawBodyKey : (shared.tavilyApiKey || '');
+    } else if (pathname === '/api/bailian/config') {
+      // This endpoint performs its own admin check; do not replace its explicit key.
+    } else if (pathname === '/api/synthesize-voice' && body.provider === 'bailian') {
+      body.apiKey = hasExplicitElevenlabsKey ? rawBodyKey : (shared.bailianApiKey || '');
+      if (req.user.role !== 'superuser') body.workspaceId = shared.bailianWorkspaceId || '';
     } else if (ELEVENLABS_KEY_ROUTES.has(pathname)) {
       body.apiKey = hasExplicitElevenlabsKey ? rawBodyKey : (shared.elevenlabsApiKey || '');
     } else {

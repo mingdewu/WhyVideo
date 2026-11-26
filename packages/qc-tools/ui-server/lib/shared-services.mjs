@@ -3,15 +3,15 @@ import path from 'node:path';
 import { requestContext } from '../../request-context.mjs';
 import { ROOT_DIR, defaultProjectId, getProjectPaths } from '../../project-paths.mjs';
 
-const secrets = ['apiKey', 'tavilyApiKey', 'meowloadApiKey', 'elevenlabsApiKey'];
-const fields = [...secrets, 'baseUrl', 'writerModel', 'textModel', 'keywordModel', 'videoModel', 'imageModel', 'bgmModel'];
+const secrets = ['apiKey', 'tavilyApiKey', 'meowloadApiKey', 'elevenlabsApiKey', 'bailianApiKey'];
+const fields = [...secrets, 'baseUrl', 'writerModel', 'textModel', 'keywordModel', 'videoModel', 'imageModel', 'bgmModel', 'bailianWorkspaceId'];
 const configPath = () => path.join(process.env.WHYVIDEO_AUTH_DIR || path.join(ROOT_DIR, '.whyvideo-auth'), 'shared-services.json');
 export function readSharedServices() {
   let legacy = {};
   try { legacy = JSON.parse(fs.readFileSync(getProjectPaths(defaultProjectId()).promptConfigPath, 'utf8')); } catch {}
   let saved = {};
   try { saved = JSON.parse(fs.readFileSync(configPath(), 'utf8')); } catch {}
-  return { ...legacy, apiKey: process.env.OPENROUTER_API_KEY || legacy.apiKey || '', tavilyApiKey: process.env.TAVILY_API_KEY || legacy.tavilyApiKey || '', elevenlabsApiKey: process.env.ELEVENLABS_API_KEY || '', ...saved };
+  return { ...legacy, apiKey: process.env.OPENROUTER_API_KEY || legacy.apiKey || '', tavilyApiKey: process.env.TAVILY_API_KEY || legacy.tavilyApiKey || '', elevenlabsApiKey: process.env.ELEVENLABS_API_KEY || '', bailianApiKey: process.env.DASHSCOPE_API_KEY || '', bailianWorkspaceId: process.env.DASHSCOPE_WORKSPACE_ID || '', ...saved };
 }
 export function publicSharedServices(config = readSharedServices()) {
   const result = {};

@@ -120,7 +120,7 @@
         <p class="text-xs text-ink-muted">根据当前工程文案终稿生成或翻译；切换语言标签即可查看与编辑对应语言的标题、简介和标签。</p>
         <label class="block text-sm">视频标题<input id="publishTitle" maxlength="100" class="block w-full mt-1 p-2.5 bg-input border border-line rounded-lg focus:outline-none focus:border-ink" placeholder="输入 YouTube 视频标题"></label>
         <label class="block text-sm">视频简介<textarea id="publishDescription" rows="4" class="block w-full mt-1 p-2.5 bg-input border border-line rounded-lg focus:outline-none focus:border-ink" placeholder="介绍视频内容、章节和相关链接"></textarea></label>
-        <label class="block text-sm">视频标签<textarea id="publishTags" rows="2" class="block w-full mt-1 p-2.5 bg-input border border-line rounded-lg focus:outline-none focus:border-ink" placeholder="用逗号分隔，例如：日本旅行, 温泉, 文化"></textarea><span class="text-xs text-ink-muted">搜索标签，使用逗号分隔；上传时会合并多语言标签。</span></label>
+        <label class="block text-sm">视频标签<textarea id="publishTags" rows="2" class="block w-full mt-1 p-2.5 bg-input border border-line rounded-lg focus:outline-none focus:border-ink" placeholder="用逗号分隔，例如：日本旅行, 温泉, 文化"></textarea><span class="text-xs text-ink-muted">使用逗号分隔；上传时合并为搜索标签，并在各语言简介末尾添加对应的 #话题标签（最多 15 个，自动去重）。</span></label>
         <div class="flex flex-wrap items-center gap-2">
           <button type="button" onclick="savePublishDraft()" class="bg-ok-solid hover:bg-ok-hover text-ink-inverse px-4 py-2 rounded-lg font-bold">保存当前语言资料</button>
           <span id="publishCopyStatus" class="text-xs text-ink-muted">自动按语言保存在当前工程与浏览器</span>

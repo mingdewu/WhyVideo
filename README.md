@@ -197,3 +197,11 @@ npx tsc --noEmit
 ## 📦 实战案例工程
 - `projects/why_ryokan_small_dishes_001`：《为什么日本温泉旅馆的晚餐常常是一小碟一小碟？》（64.0 秒预览版，8 个镜头单元，包含 `data/` 全套结构化清单、`public/` 音视频资产与 `output/` 预览输出）。
 - `projects/why_ai_renamed_to_si_001`、`projects/why_preview`：多选题拓展与预览工程目录。
+
+## 阿里云百炼配音
+
+在「配音引擎配置」选择「阿里云百炼」，使用北京地域、与自定义音色相同账号的 API Key。管理员可在弹窗中保存密钥及可选业务空间 ID，或在服务端配置 `DASHSCOPE_API_KEY` / `DASHSCOPE_WORKSPACE_ID`。密钥保存在已被 Git 忽略的 `.whyvideo-auth/shared-services.json` 中，管理员输入的百炼密钥也会按输入自动记住在当前浏览器的 localStorage 中，刷新或重新打开配置后自动恢复；浏览器缓存按访问地址分别保存。
+
+当前内置「我的中文音色」，绑定 `qwen-audio-3.1-tts-flash`。保存提供商后，可先用「试听测试配音」生成短句，再在主界面点击「生成音频」制作全片旁白。长文本分段合成并拼接为 WAV，沿用字幕时间轴对齐流程，支持查看进度及取消。合成按百炼用量计费。
+
+接口参考：[百炼音色复刻与合成](https://help.aliyun.com/zh/model-studio/voice-cloning-user-guide)。

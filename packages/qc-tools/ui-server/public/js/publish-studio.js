@@ -60,6 +60,23 @@ function mergeMultilingualTags(drafts, maxLen = 500) {
   return merged;
 }
 
+function buildYoutubeDescription(description, tags) {
+  const original = String(description || '').trim();
+  const hashtagPattern = /[#＃]([\p{L}\p{M}\p{N}_]+)/gu;
+  const seen = new Set([...original.matchAll(hashtagPattern)].map((m) => m[1].toLowerCase()));
+  const additions = [];
+  const parts = Array.isArray(tags) ? tags : String(tags || '').split(/[,，\n]/);
+  for (const part of parts) {
+    const tag = String(part).normalize('NFKC').replace(/[^\p{L}\p{M}\p{N}_]/gu, '');
+    if (!tag || seen.has(tag.toLowerCase()) || seen.size >= 15) continue;
+    const candidate = original + (original ? '\n\n' : '') + [...additions, '#' + tag].join(' ');
+    if (new TextEncoder().encode(candidate).length > 5000) continue;
+    seen.add(tag.toLowerCase());
+    additions.push('#' + tag);
+  }
+  return additions.length ? original + (original ? '\n\n' : '') + additions.join(' ') : original;
+}
+
 function refreshYoutubeBundleSummary() {
   const summaryEl = document.getElementById('youtubeMultiLangSummary');
   if (!summaryEl) return;
@@ -89,7 +106,7 @@ function refreshYoutubeBundleSummary() {
   summaryEl.textContent =
     '本次上传将自动合并提交：主视频资料（' + (zhReady ? '中文 ✓' : '中文未填') +
     '）｜多语言标题/简介（English ' + (enReady ? '✓' : '未填') + ' · 日本語 ' + (jaReady ? '✓' : '未填') +
-    '）｜合并标签（' + mergedTagCount + ' 个）｜自动挂载字幕（' + (srtReady.length ? srtReady.join(' / ') : '暂无') +
+    '）｜合并搜索标签（' + mergedTagCount + ' 个）｜各语言简介自动附加 #话题标签｜自动挂载字幕（' + (srtReady.length ? srtReady.join(' / ') : '暂无') +
     '）。注：YouTube API 仅支持 1 张主封面，外语独立封面与配音音轨请在上传后前往 YouTube Studio 补充。';
 
   const summaryCaptionEl = document.getElementById('publishCaptionSummary');
@@ -924,7 +941,7 @@ async function uploadYoutubeVideo() {
   const zhDraft = publishLangDrafts.zh || {};
   const fallbackDraft = publishLangDrafts[publishActiveLang] || {};
   const title = (zhDraft.title || fallbackDraft.title || '').trim().slice(0, 100);
-  const description = (zhDraft.description || fallbackDraft.description || '').trim();
+  const description = buildYoutubeDescription(zhDraft.description || fallbackDraft.description, zhDraft.tags || fallbackDraft.tags);
   const tags = mergeMultilingualTags(publishLangDrafts, 500);
   const primarySourceLang = document.getElementById('youtubeSourceLanguage')?.value || 'zh-Hans';
   const primaryCaptionLang = document.getElementById('youtubeCaptionLanguage')?.value.trim() || 'zh-Hans';
@@ -936,7 +953,7 @@ async function uploadYoutubeVideo() {
     if (d && String(d.title || '').trim()) {
       localizations[code] = {
         title: String(d.title).trim().slice(0, 100),
-        description: String(d.description || '').trim(),
+        description: buildYoutubeDescription(d.description, d.tags),
       };
     }
   }

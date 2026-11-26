@@ -1,4 +1,6 @@
 import fs from 'fs';
+import { BAILIAN_MODEL, BAILIAN_VOICE, bailianBaseUrl, validateBailianVoice } from '../../synthesize-bailian.mjs';
+import { readSharedServices, saveSharedServices } from '../lib/shared-services.mjs';
 import path from 'path';
 import { randomUUID } from 'node:crypto';
 import { generateAiBgmPlan } from '../../bgm-ai.mjs';
@@ -13,8 +15,8 @@ import {
 } from '../lib/config.mjs';
 import { recompileProject } from '../lib/project-store.mjs';
 import { callOpenRouterText } from '../lib/llm-gateway.mjs';
-import { runProjectRenderJob, runVoiceboxJob, runElevenlabsFullJob } from '../lib/jobs-service.mjs';
-import { projectRenderPaths } from '../../render-project.mjs';
+import { runProjectRenderJob, runVoiceboxJob, runElevenlabsFullJob, runBailianJob } from '../lib/jobs-service.mjs';
+import { projectRenderPaths, DEFAULT_RENDER_CONCURRENCY } from '../../render-project.mjs';
 import { getSharedBgmDirectory } from '../../project-paths.mjs';
 import { getVoiceboxProfiles } from '../../synthesize-voicebox.mjs';
 import { buildElevenlabsTtsPayload } from '../../synthesize-elevenlabs.mjs';
@@ -175,7 +177,7 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
       projectId,
       preview: Boolean(body.preview),
       burnCaptions: Boolean(body.burnCaptions),
-      concurrency: Number(body.concurrency) || 4,
+      concurrency: Number(body.concurrency) || DEFAULT_RENDER_CONCURRENCY,
       status: 'preparing',
       startedAt: new Date().toISOString(),
       log: '',
@@ -184,6 +186,21 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
     void runProjectRenderJob(job);
     res.writeHead(202, { 'Content-Type': 'application/json; charset=utf-8' });
     return res.end(JSON.stringify({ ok: true, job }));
+  }
+
+  if (pathname === '/api/bailian/config') {
+    const respond = (code, data) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8', 'Cache-Control':'no-store'}); return res.end(JSON.stringify(data)); };
+    const canManage = !req.user || req.user.role === 'superuser';
+    if (req.method === 'POST') {
+      if (!canManage) return respond(403, {error:'百炼配置由超级用户管理'});
+      const body = await readBody(req);
+      try {
+        bailianBaseUrl(body.workspaceId || '');
+        saveSharedServices({bailianApiKey:body.apiKey || '', bailianWorkspaceId:body.workspaceId || ''});
+      } catch { return respond(400, {error:'百炼配置无效，请检查业务空间 ID'}); }
+    } else if (req.method !== 'GET') return respond(405, {});
+    const config = readSharedServices();
+    return respond(200, {apiKeyConfigured:Boolean(config.bailianApiKey), workspaceId:config.bailianWorkspaceId || '', canManage, modelId:BAILIAN_MODEL, voiceId:BAILIAN_VOICE});
   }
 
   if (req.method === 'GET' && pathname === '/api/voicebox/profiles') {
@@ -300,6 +317,28 @@ export async function handleAudioRenderRoutes(req, res, { pathname, queryProject
     const curPaths = getPaths(projectId);
     fs.mkdirSync(curPaths.audioDir, { recursive: true });
 
+    if (provider === 'bailian') {
+      const respond = (code, data) => { res.writeHead(code, {'Content-Type':'application/json; charset=utf-8'}); return res.end(JSON.stringify(data)); };
+      const config = readSharedServices();
+      const key = String(apiKey || config.bailianApiKey || '').trim();
+      const selectedModel = body.modelId || BAILIAN_MODEL, selectedVoice = body.voiceId || BAILIAN_VOICE;
+      const workspaceId = body.workspaceId || config.bailianWorkspaceId || '';
+      try { validateBailianVoice(selectedModel, selectedVoice); bailianBaseUrl(workspaceId); }
+      catch (err) { return respond(400, {ok:false, error:err.message}); }
+      if (!key) return respond(400, {ok:false, error:'请先在配音引擎配置中保存百炼 API Key，或配置 DASHSCOPE_API_KEY'});
+      const existing = voiceJobs.get(projectId);
+      if (existing && ['queued','generating'].includes(existing.status)) return respond(409, {ok:false, error:'这个工程已有配音任务在运行', job:existing});
+      if (useAsNarration && ['preparing','rendering'].includes(renderJobs.get(projectId)?.status)) return respond(409, {ok:false, error:'当前工程正在渲染，请完成后再替换旁白'});
+      if (useAsNarration && !fs.existsSync(curPaths.manifestPath)) return respond(400, {ok:false, error:'工程缺少镜头清单'});
+      const fullText = fullScript ? scenesText(JSON.parse(fs.readFileSync(curPaths.manifestPath,'utf8')).scenes || []) : String(text || '');
+      if (!fullText.trim()) return respond(400, {ok:false, error:'请输入配音文本'});
+      const job = {projectId, provider, fullScript, useAsNarration, status:'queued', progressText:'正在准备百炼配音…', startedAt:new Date().toISOString()};
+      voiceJobs.set(projectId, job);
+      void runBailianJob(job, {fullText, apiKey:key, workspaceId, modelId:selectedModel, voiceId:selectedVoice});
+      return respond(202, {ok:true, job});
+    }
+
+    if (!['elevenlabs', 'voicebox'].includes(provider)) { res.writeHead(400); return res.end(JSON.stringify({ok:false,error:'不支持的配音提供商'})); }
     if (fullScript) {
       if (!fs.existsSync(curPaths.manifestPath)) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
